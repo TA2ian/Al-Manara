@@ -9,7 +9,7 @@ rate_limiter = RateLimiter()
 
 
 class RateLimitMiddleware(BaseMiddleware):
-    """Rate limiting middleware."""
+    """Rate limiting middleware - skipped for admins."""
 
     async def __call__(self, handler, event, data):
         user_id = None
@@ -20,6 +20,11 @@ class RateLimitMiddleware(BaseMiddleware):
             user_id = event.from_user.id
 
         if user_id:
+            # Skip rate limiting for admins
+            from config import Config
+            if user_id in Config.ADMIN_IDS:
+                return await handler(event, data)
+
             allowed, wait = rate_limiter.check(user_id)
 
             if not allowed:

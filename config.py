@@ -31,7 +31,7 @@ class Config:
     ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 
     # Rate Limiting
-    RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 5))
+    RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 2))
     RATE_LIMIT_HOURLY = int(os.getenv("RATE_LIMIT_HOURLY", 100))
     RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", 500))
 
