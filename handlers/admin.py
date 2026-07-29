@@ -611,19 +611,21 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
         await state.clear()
         return
 
+    from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
 
     # Build completion message for customer
+    network_name = order['network'] or 'TRC20'
     completion_text = (
         f"✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
         f"📦 الطلب: #{order['order_number']}\n"
-        f"💰 المبلغ: {order['amount_usdt']} USDT إلى {order['network']}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT إلى {network_name}\n"
         f"🔗 TXID: <code>{txid}</code>\n\n"
         f"🔄 يمكنك التحقق من المعاملة على المستكشف:"
     )
 
     # Generate explorer link
-    if order['network'] == 'BEP20':
+    if network_name == 'BEP20':
         explorer_url = f"https://bscscan.com/tx/{txid}"
     else:
         explorer_url = f"https://tronscan.org/#/transaction/{txid}"
