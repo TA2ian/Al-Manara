@@ -60,7 +60,7 @@
   "feedback_sent": "✅ Your message has been sent!\n\nThank you, we will review your suggestion soon.",
   "feedback_too_long": "⚠️ Message too long!\nMaximum: 200 characters\nCurrent length: {length}\n\nPlease rewrite your message shorter.",
   "help_text": "📖 <b>How to Use</b>\n\n1️⃣ Click \"💰 New\" to create an order\n2️⃣ Select network (BEP20 or TRC20)\n3️⃣ Enter amount in USDT\n4️⃣ Enter your wallet address\n5️⃣ Select payment currency (USD or SYP)\n6️⃣ Review and submit the order\n7️⃣ Wait for admin approval\n8️⃣ Pay via Sham Cash and send receipt\n9️⃣ Receive USDT in your wallet!\n\n💡 Have a question? Contact support.",
-  "support_contact": "🆘 <b>Support</b>\n\nContact us:\n📱 @support_username\n📧 support@example.com\n\n⏰ Working Hours: 9:00 - 21:00",
+  "support_contact": "🆘 <b>Support</b>\n\nContact us:\n👤 @Ma7moud_Y\n📧 almanaraexchange@gmail.com\n\n⏰ Working Hours: 9:00 - 21:00",
   "maintenance_mode": "⚠️ Service is temporarily unavailable for maintenance.\n\nPlease try again later.",
   "blocked_message": "🚫 Your account has been blocked.\n\nFor inquiries, contact support.",
   "rate_limit_exceeded": "⏳ Please wait {seconds} seconds before trying again.",
