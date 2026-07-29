@@ -539,7 +539,7 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name FROM orders o "
+            "SELECT o.*, u.telegram_id, u.full_name, u.shamcash_qr_photo_id FROM orders o "
             "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -551,16 +551,34 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
     await state.update_data(admin_txid_order_id=order_id, admin_txid='', admin_screenshot_id='')
     await callback.message.answer(
         f"🚀 <b>إرسال USDT</b>\n\n"
-        f"👤 العميل: {order['full_name'] or 'N/A'}\n"
+        f"━━━ 👤 العميل ━━━\n"
+        f"👤 الاسم: {order['full_name'] or 'N/A'}\n"
+        f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
         f"📦 الطلب: #{order['order_number']}\n"
         f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-        f"🌐 الشبكة: {order['network']}\n"
-        f"📍 عنوان الاستلام:\n"
+        f"🌐 الشبكة: {order['network']}\n\n"
+        f"━━━ 📍 عنوان الاستلام ━━━\n"
         f"<code>{order['wallet_address']}</code>\n\n"
         f"🔗 أرسل TXID (رقم المعاملة على السلسلة):\n"
         f"أو أرسل صورة التحويل مع TXID في التعليق",
         parse_mode='HTML'
     )
+
+    # Send QR code if customer uploaded one during verification
+    qr_photo_id = order.get('shamcash_qr_photo_id')
+    if qr_photo_id:
+        from aiogram import Bot
+        bot = Bot(token=Config.BOT_TOKEN)
+        try:
+            await bot.send_photo(
+                callback.from_user.id,
+                qr_photo_id,
+                caption=f"📸 <b>QR code لمحفظة العميل</b>\n👤 {order['full_name'] or 'N/A'}\nيمكنك مسحه ضوئياً للحصول على العنوان بدون خطأ",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to send QR photo: {e}")
+
     await state.set_state(AdminStates.waiting_typing_txid)
     await callback.answer()
 
