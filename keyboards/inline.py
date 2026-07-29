@@ -258,27 +258,61 @@ def settings_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def quick_actions_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
+def language_select_keyboard() -> InlineKeyboardMarkup:
+    """Language selection keyboard at start."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")
+        ]
+    ])
+
+
+def saved_addresses_keyboard(addresses: list, lang: str = 'ar', select_mode: bool = False) -> InlineKeyboardMarkup:
+    """Display saved addresses. If select_mode, allow choosing one for order."""
+    buttons = []
+    for addr in addresses:
+        label = addr.get('label', '') or ''
+        short_addr = addr['address'][:10] + "..."
+        display = f"{label} - {short_addr}" if label else short_addr
+        prefix = "select_addr_" if select_mode else "view_addr_"
+        buttons.append([
+            InlineKeyboardButton(text=f"📍 {display} [{addr['network']}]", callback_data=f"{prefix}{addr['id']}")
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="❌ " + ("إلغاء" if lang == 'ar' else "Cancel"), callback_data="cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) -> InlineKeyboardMarkup:
     """Quick actions for returning users."""
     if lang == 'ar':
-        return InlineKeyboardMarkup(inline_keyboard=[
+        buttons = [
             [
                 InlineKeyboardButton(text="🔄 إعادة الطلب السابق", callback_data="quick_reorder"),
-                InlineKeyboardButton(text="📋 نسخ عنواني", callback_data="quick_wallet")
+                InlineKeyboardButton(text="📍 عناويني المحفوظة", callback_data="quick_saved_addresses")
             ],
             [
                 InlineKeyboardButton(text="💱 السعر الحالي", callback_data="quick_rate"),
                 InlineKeyboardButton(text="📞 التواصل", callback_data="quick_contact")
+            ],
+            [
+                InlineKeyboardButton(text="🌐 تغيير اللغة", callback_data="quick_change_lang")
             ]
-        ])
+        ]
     else:
-        return InlineKeyboardMarkup(inline_keyboard=[
+        buttons = [
             [
                 InlineKeyboardButton(text="🔄 Reorder", callback_data="quick_reorder"),
-                InlineKeyboardButton(text="📋 Copy Wallet", callback_data="quick_wallet")
+                InlineKeyboardButton(text="📍 Saved Addresses", callback_data="quick_saved_addresses")
             ],
             [
                 InlineKeyboardButton(text="💱 Current Rate", callback_data="quick_rate"),
                 InlineKeyboardButton(text="📞 Contact", callback_data="quick_contact")
+            ],
+            [
+                InlineKeyboardButton(text="🌐 Change Language", callback_data="quick_change_lang")
             ]
-        ])
+        ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

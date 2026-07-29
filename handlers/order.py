@@ -12,7 +12,8 @@ from keyboards.inline import (
     order_confirmation_keyboard,
     cancel_keyboard,
     main_menu_inline,
-    order_admin_keyboard
+    order_admin_keyboard,
+    saved_addresses_keyboard
 )
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
@@ -180,10 +181,20 @@ async def enter_wallet(message: Message, state: FSMContext):
 
     await message.answer(
         locale_service.get('wallet_valid', lang),
-        reply_markup=currency_selection_keyboard(lang)
     )
 
-    await state.set_state(OrderStates.waiting_currency)
+    # Ask to save address
+    save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    save_btn = "💾 حفظ العنوان" if lang == 'ar' else "💾 Save Address"
+    skip_btn = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    save_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=save_btn, callback_data="save_address_yes"),
+         InlineKeyboardButton(text=skip_btn, callback_data="save_address_skip")]
+    ])
+    await message.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
+
+    await state.set_state(OrderStates.waiting_save_address)
 
 
 @router.callback_query(OrderStates.waiting_currency, F.data.startswith("currency_"))
@@ -312,4 +323,55 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
     )
 
     await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(OrderStates.waiting_save_address, F.data == "save_address_yes")
+async def save_address_yes(callback: CallbackQuery, state: FSMContext):
+    """Save wallet address and proceed to currency selection."""
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", callback.from_user.id
+        )
+        if user:
+            await conn.execute(
+                "INSERT INTO saved_addresses (user_id, address, network) VALUES ($1, $2, $3)",
+                user['id'], wallet, network
+            )
+
+    await callback.message.edit_text(
+        locale_service.get('address_saved', lang),
+    )
+
+    # Proceed to currency selection
+    await callback.message.answer(
+        locale_service.get('select_currency', lang),
+        reply_markup=currency_selection_keyboard(lang)
+    )
+
+    await state.set_state(OrderStates.waiting_currency)
+    await callback.answer()
+
+
+@router.callback_query(OrderStates.waiting_save_address, F.data == "save_address_skip")
+async def save_address_skip(callback: CallbackQuery, state: FSMContext):
+    """Skip saving address and proceed to currency selection."""
+    lang = await _get_user_lang(callback.from_user.id)
+
+    await callback.message.edit_text(
+        locale_service.get('wallet_valid', lang),
+    )
+
+    await callback.message.answer(
+        locale_service.get('select_currency', lang),
+        reply_markup=currency_selection_keyboard(lang)
+    )
+
+    await state.set_state(OrderStates.waiting_currency)
     await callback.answer()

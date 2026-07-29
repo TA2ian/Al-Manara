@@ -93,5 +93,14 @@
   "quick_reorder": "🔄 Reorder Previous",
   "quick_wallet": "📋 Copy My Wallet",
   "quick_contact": "📞 Quick Contact",
-  "no_orders": "📭 No orders yet."
+  "no_orders": "📭 No orders yet.",
+  "select_language": "🌐 <b>Select Your Language</b>\n\nChoose the language you prefer to use the bot in:",
+  "saved_addresses_title": "📍 <b>My Saved Addresses</b>",
+  "no_saved_addresses": "📭 No saved addresses yet.\n\nWhen creating a new order, you can save the wallet address for later use.",
+  "save_address_prompt": "💾 <b>Would you like to save this address?</b>\n\n📍 <code>{address}</code>\n🌐 {network}\n\nYou can use it later from the quick menu.",
+  "address_saved": "✅ Address saved successfully!\nYou can use it from the saved addresses menu.",
+  "change_language": "🌐 <b>Change Language</b>\n\nChoose your preferred language:",
+  "language_changed": "✅ Language changed successfully!",
+  "address_details": "📍 <b>Saved Address</b>\n\n🌐 Network: {network}\n📍 Address:\n<code>{address}</code>\n📅 Saved: {date}\n🏷️ Label: {label}",
+  "save_address_label_prompt": "🏷️ <b>Enter a name for this address</b>\n\nExample: My Main Wallet\nOr send \"Skip\" to save without a label."
 }

@@ -111,6 +111,17 @@ async def init_db():
             )
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS saved_addresses (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                address TEXT NOT NULL,
+                network TEXT NOT NULL,
+                label TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
         # Insert default exchange rate if empty
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:

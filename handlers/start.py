@@ -5,7 +5,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from states import TermsStates
-from keyboards.inline import terms_keyboard, main_menu_inline
+from keyboards.inline import terms_keyboard, main_menu_inline, language_select_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
 from database import get_pool
@@ -56,36 +56,62 @@ async def cmd_start(message: Message, state: FSMContext):
 
     # If user exists and accepted terms
     if user and user['terms_accepted']:
+        lang = user['language'] or 'ar'
         await message.answer(
-            WELCOME_TEXT_AR.format(name=message.from_user.first_name),
-            reply_markup=main_menu_inline('ar'),
+            locale_service.get('welcome', lang, name=message.from_user.first_name),
+            reply_markup=main_menu_inline(lang),
             parse_mode='HTML'
         )
         await message.answer(
             "👇",
-            reply_markup=compact_reply_keyboard('ar')
+            reply_markup=compact_reply_keyboard(lang)
         )
         return
 
-    # Show terms
-    lang = message.from_user.language_code or 'ar'
-    if lang not in ['ar', 'en']:
-        lang = 'ar'
-
-    terms_text = TERMS_TEXT_AR.format(
-        min_order=Config.MIN_ORDER,
-        max_order=Config.MAX_ORDER,
-        timeout=Config.PAYMENT_TIMEOUT
+    # Show language selection first
+    await message.answer(
+        locale_service.get('select_language', 'ar'),
+        reply_markup=language_select_keyboard()
     )
 
-    await message.answer(
-        terms_text,
+    await state.set_state(TermsStates.waiting_acceptance)
+
+
+@router.callback_query(TermsStates.waiting_acceptance, F.data.in_(["lang_ar", "lang_en"]))
+async def select_start_language(callback: CallbackQuery, state: FSMContext):
+    """Handle language selection at start."""
+    lang = callback.data.replace("lang_", "")
+
+    terms_text = (
+        TERMS_TEXT_AR if lang == 'ar' else
+        "📋 <b>Terms of Service & Disclaimer</b>\n\n"
+        "Welcome to USDT Bot!\n\n"
+        "▪️ This bot is an intermediary between you and the service provider.\n"
+        "▪️ All transactions are final and irreversible.\n"
+        "▪️ Verify your wallet address before sending.\n"
+        "▪️ We are not responsible for lost funds due to incorrect address or network.\n"
+        "▪️ Exchange rates may change without prior notice.\n"
+        "▪️ Minimum order: {min_order} USDT.\n"
+        "▪️ Maximum order: {max_order} USDT.\n"
+        "▪️ Processing time: 15 minutes - 24 hours.\n"
+        "▪️ Payment via Sham Cash only.\n"
+        "▪️ Payment receipt must be sent within {timeout} minutes.\n"
+        "▪️ Fees: According to current settings.\n\n"
+        "<b>By clicking \"Agree\", you acknowledge that you have read and understood these terms.</b>"
+    )
+
+    await callback.message.edit_text(
+        terms_text.format(
+            min_order=Config.MIN_ORDER,
+            max_order=Config.MAX_ORDER,
+            timeout=Config.PAYMENT_TIMEOUT
+        ),
         reply_markup=terms_keyboard(lang),
         parse_mode='HTML'
     )
 
-    await state.set_state(TermsStates.waiting_acceptance)
     await state.update_data(language=lang)
+    await callback.answer()
 
 
 @router.callback_query(TermsStates.waiting_acceptance, F.data == "accept_terms")
@@ -110,7 +136,7 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
 
     await callback.message.answer(
-        WELCOME_TEXT_AR.format(name=callback.from_user.first_name),
+        locale_service.get('welcome', lang, name=callback.from_user.first_name),
         reply_markup=main_menu_inline(lang),
         parse_mode='HTML'
     )

@@ -5,7 +5,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
-from keyboards.inline import main_menu_inline, settings_keyboard, cancel_keyboard, back_keyboard
+from keyboards.inline import main_menu_inline, settings_keyboard, cancel_keyboard, back_keyboard, saved_addresses_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
 from database import get_pool
@@ -312,7 +312,129 @@ async def settings_button(message: Message):
     # Regular user - show quick actions
     from keyboards.inline import quick_actions_keyboard
     await message.answer(
-        "⚙️ <b>إجراءات سريعة</b>",
+        "⚙️ <b>" + ("إجراءات سريعة" if lang == 'ar' else "Quick Actions") + "</b>",
         reply_markup=quick_actions_keyboard(lang),
         parse_mode='HTML'
     )
+
+
+# ───── Language Change ─────
+
+@router.callback_query(F.data == "quick_change_lang")
+async def change_language_prompt(callback: CallbackQuery):
+    """Show language selection for changing language."""
+    await callback.message.edit_text(
+        locale_service.get('change_language', 'ar'),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🇸🇦 العربية", callback_data="set_lang_ar"),
+                InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang_en")
+            ]
+        ]),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("set_lang_"))
+async def set_language(callback: CallbackQuery):
+    """Update user language preference and refresh UI."""
+    new_lang = callback.data.replace("set_lang_", "")
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET language = $1 WHERE telegram_id = $2",
+            new_lang, callback.from_user.id
+        )
+
+    await callback.message.edit_text(
+        locale_service.get('language_changed', new_lang),
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        locale_service.get('main_menu', new_lang),
+        reply_markup=main_menu_inline(new_lang)
+    )
+    await callback.answer()
+
+
+# ───── Saved Addresses ─────
+
+@router.callback_query(F.data == "quick_saved_addresses")
+async def show_saved_addresses(callback: CallbackQuery):
+    """Show user's saved addresses."""
+    pool = await get_pool()
+    lang = 'ar'
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id = $1", callback.from_user.id
+        )
+        if user:
+            lang = user['language']
+            addresses = await conn.fetch(
+                "SELECT id, address, network, label, created_at FROM saved_addresses "
+                "WHERE user_id = $1 ORDER BY created_at DESC",
+                user['id']
+            )
+
+    if not addresses:
+        await callback.message.edit_text(
+            locale_service.get('no_saved_addresses', lang),
+            parse_mode='HTML'
+        )
+        await callback.message.answer(
+            locale_service.get('main_menu', lang),
+            reply_markup=main_menu_inline(lang)
+        )
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        locale_service.get('saved_addresses_title', lang),
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        "📍 " + ("اختر عنواناً:" if lang == 'ar' else "Select an address:"),
+        reply_markup=saved_addresses_keyboard(addresses, lang),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_addr_"))
+async def view_saved_address(callback: CallbackQuery):
+    """Show details of a saved address."""
+    addr_id = int(callback.data.replace("view_addr_", ""))
+    pool = await get_pool()
+    lang = 'ar'
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id = $1", callback.from_user.id
+        )
+        if user:
+            lang = user['language']
+            addr = await conn.fetchrow(
+                "SELECT address, network, label, created_at FROM saved_addresses "
+                "WHERE id = $1 AND user_id = $2",
+                addr_id, user['id']
+            )
+
+    if not addr:
+        await callback.answer("❌ " + ("العنوان غير موجود" if lang == 'ar' else "Address not found"), show_alert=True)
+        return
+
+    label = addr['label'] or ('بدون تصنيف' if lang == 'ar' else 'No label')
+    date = addr['created_at'].strftime('%Y-%m-%d %H:%M')
+
+    await callback.message.edit_text(
+        locale_service.get('address_details', lang, network=addr['network'], address=addr['address'], date=date, label=label),
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        locale_service.get('main_menu', lang),
+        reply_markup=main_menu_inline(lang)
+    )
+    await callback.answer()
