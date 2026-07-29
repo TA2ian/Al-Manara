@@ -143,6 +143,14 @@ def back_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     ])
 
 
+def receipt_upload_keyboard(order_id: int, lang: str = 'ar') -> InlineKeyboardMarkup:
+    """Upload receipt keyboard for user."""
+    text = "📎 رفع إيصال الدفع" if lang == 'ar' else "📎 Upload Receipt"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data=f"upload_receipt_{order_id}")]
+    ])
+
+
 def skip_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     """Skip QR upload keyboard."""
     text = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"

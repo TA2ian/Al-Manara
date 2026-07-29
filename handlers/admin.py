@@ -1,7 +1,9 @@
 """Admin handlers."""
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from states import AdminStates
 
 from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, admin_verify_keyboard
 from services.locale_service import locale_service
@@ -102,16 +104,28 @@ async def approve_order(callback: CallbackQuery):
             "SELECT telegram_id FROM users WHERE id = $1", order['user_id']
         )
 
-    # Notify user
+    # Notify user with receipt upload button
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     from services.notification_service import NotificationService
+    from keyboards.inline import receipt_upload_keyboard
 
     notification = NotificationService(bot, Config.ADMIN_IDS)
     await notification.notify_order_approved(
         user['telegram_id'],
         dict(order)
     )
+
+    # Send receipt upload button to user
+    try:
+        from services.locale_service import locale_service
+        await bot.send_message(
+            user['telegram_id'],
+            "📎 بعد إتمام الدفع، اضغط على الزر أدناه لرفع الإيصال:",
+            reply_markup=receipt_upload_keyboard(order['id'])
+        )
+    except Exception as e:
+        logger.error(f"Failed to send receipt upload button: {e}")
 
     await callback.answer("✅ تمت الموافقة!")
     await callback.message.edit_text(f"✅ تمت الموافقة على طلب #{order['order_number']}")
@@ -231,3 +245,214 @@ async def verify_reject_user(callback: CallbackQuery):
         parse_mode='HTML'
     )
     await callback.answer("❌ تم الرفض!")
+
+
+@router.callback_query(F.data.startswith("admin_confirm_payment_"))
+async def confirm_payment(callback: CallbackQuery):
+    """Confirm payment received."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    order_id = int(callback.data.replace("admin_confirm_payment_", ""))
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'payment_confirmed' WHERE id = $1",
+            order_id
+        )
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+    if not order:
+        await callback.answer("الطلب غير موجود", show_alert=True)
+        return
+
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+    from keyboards.inline import order_admin_keyboard
+
+    # Notify user
+    try:
+        await bot.send_message(
+            order['telegram_id'],
+            f"✅ <b>تم تأكيد الدفع!</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n🚀 جاري إرسال USDT إلى محفظتك...",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+
+    # Notify admin with send-USDT button
+    admin_text = (
+        f"🚀 <b>تم تأكيد الدفع</b>\n\n"
+        f"📦 الطلب: #{order['order_number']}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+        f"🌐 الشبكة: {order['network']}\n"
+        f"📍 عنوان المحفظة: <code>{order['wallet_address']}</code>\n\n"
+        f"اضغط على 'إرسال USDT' بعد التنفيذ:"
+    )
+    for admin_id in Config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                admin_text,
+                reply_markup=order_admin_keyboard(order_id, 'payment_confirmed'),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id}: {e}")
+
+    await callback.answer("✅ تم تأكيد الدفع!")
+    await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
+
+
+@router.callback_query(F.data.startswith("admin_reject_receipt_"))
+async def reject_receipt(callback: CallbackQuery):
+    """Reject payment receipt."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    order_id = int(callback.data.replace("admin_reject_receipt_", ""))
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'waiting_payment' WHERE id = $1",
+            order_id
+        )
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+    if not order:
+        await callback.answer("الطلب غير موجود", show_alert=True)
+        return
+
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+    from keyboards.inline import receipt_upload_keyboard
+
+    try:
+        await bot.send_message(
+            order['telegram_id'],
+            "❌ <b>الإيصال غير صحيح</b>\n\nيرجى إرسال إيصال صحيح (صورة واضحة للتحويل):",
+            reply_markup=receipt_upload_keyboard(order_id)
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+
+    await callback.answer("❌ تم رفض الإيصال!")
+    await callback.message.edit_text(f"❌ تم رفض إيصال الطلب #{order['order_number']}")
+
+
+@router.callback_query(F.data.startswith("admin_send_usdt_"))
+async def send_usdt(callback: CallbackQuery, state: FSMContext):
+    """Mark order as completed and request TXID."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    order_id = int(callback.data.replace("admin_send_usdt_", ""))
+
+    await state.update_data(admin_txid_order_id=order_id)
+    await callback.message.answer("🔗 أرسل TXID (رقم المعاملة على السلسلة):")
+    await state.set_state(AdminStates.waiting_typing_txid)
+
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_typing_txid)
+async def enter_txid(message: Message, state: FSMContext):
+    """Handle TXID input and complete order."""
+    txid = message.text.strip()
+    data = await state.get_data()
+    order_id = data.get('admin_txid_order_id')
+
+    if not order_id or len(txid) < 5:
+        await message.answer("❌ TXID غير صالح. أرسل TXID صحيح:")
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'completed', txid = $1, completed_at = NOW() WHERE id = $2",
+            txid, order_id
+        )
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+    if not order:
+        await message.answer("❌ الطلب غير موجود.")
+        await state.clear()
+        return
+
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+
+    try:
+        await bot.send_message(
+            order['telegram_id'],
+            f"✅ <b>تم إرسال USDT بنجاح!</b>\n\n"
+            f"📦 الطلب: #{order['order_number']}\n"
+            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+            f"🔗 TXID: <code>{txid}</code>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+
+    await message.answer(f"✅ تم إكمال الطلب #{order['order_number']}!")
+
+    # Send receipt upload prompt after completion
+    from keyboards.inline import order_admin_keyboard
+    try:
+        from keyboards.reply import compact_reply_keyboard
+        await bot.send_message(
+            order['telegram_id'],
+            "⭐ يرجى تقييم تجربتك بالضغط على أحد النجوم:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="⭐", callback_data=f"rate_1_{order_id}"),
+                    InlineKeyboardButton(text="⭐⭐", callback_data=f"rate_2_{order_id}"),
+                    InlineKeyboardButton(text="⭐⭐⭐", callback_data=f"rate_3_{order_id}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data=f"rate_4_{order_id}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{order_id}")
+                ]
+            ])
+        )
+    except Exception as e:
+        logger.error(f"Failed to send rating prompt: {e}")
+
+    await state.clear()
+
+
+@router.callback_query(F.data.startswith("rate_"))
+async def handle_rating(callback: CallbackQuery):
+    """Handle customer rating."""
+    parts = callback.data.split("_")
+    if len(parts) != 3:
+        await callback.answer()
+        return
+
+    rating = int(parts[1])
+    order_id = int(parts[2])
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET customer_rating = $1 WHERE id = $2",
+            rating, order_id
+        )
+
+    await callback.message.edit_text(
+        f"🙏 شكراً لتقييمك ({'⭐' * rating})!",
+        parse_mode='HTML'
+    )
+    await callback.answer("✅ تم حفظ التقييم!")

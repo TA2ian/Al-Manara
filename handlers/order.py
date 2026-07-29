@@ -5,13 +5,14 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from states import OrderStates
+from states import OrderStates, ReceiptStates
 from keyboards.inline import (
     network_selection_keyboard,
     currency_selection_keyboard,
     order_confirmation_keyboard,
     cancel_keyboard,
-    main_menu_inline
+    main_menu_inline,
+    order_admin_keyboard
 )
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
@@ -20,7 +21,7 @@ from services.exchange_service import ExchangeService
 from services.notification_service import NotificationService
 from config import Config
 from database import get_pool
-from keyboards.inline import start_verification_keyboard
+from keyboards.inline import start_verification_keyboard, receipt_upload_keyboard
 
 router = Router()
 
@@ -214,12 +215,13 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
 
         order_number = generate_order_number()
 
-        await conn.execute("""
+        row = await conn.fetchrow("""
             INSERT INTO orders (
                 order_number, user_id, network, amount_usdt, exchange_rate,
                 payment_currency, base_amount, fee_percent, fee_amount,
                 total_amount, wallet_address, status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+            RETURNING id
         """,
             order_number, user['id'], data['network'], data['amount_usdt'],
             calculation['exchange_rate'], data['payment_currency'],
@@ -227,18 +229,29 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
             calculation['fee_amount'], calculation['total_amount'],
             data['wallet_address']
         )
+        order_id = row['id']
 
-    # Notify admins
+    # Notify admins with action buttons
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
-    notification = NotificationService(bot, Config.ADMIN_IDS)
-    await notification.notify_new_order({
-        'order_number': order_number,
-        'username': callback.from_user.username,
-        'amount_usdt': data['amount_usdt'],
-        'network': data['network'],
-        'payment_currency': data['payment_currency']
-    })
+    admin_text = (
+        f"📦 <b>طلب جديد!</b>\n\n"
+        f"📋 الرقم: #{order_number}\n"
+        f"👤 العميل: @{callback.from_user.username or 'N/A'}\n"
+        f"💰 المبلغ: {data['amount_usdt']} USDT\n"
+        f"🌐 الشبكة: {data['network']}\n"
+        f"💱 العملة: {data['payment_currency']}\n"
+    )
+    for admin_id in Config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                admin_text,
+                reply_markup=order_admin_keyboard(order_id, 'pending'),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to notify admin {admin_id}: {e}")
 
     await callback.message.edit_text(
         locale_service.get('order_created', lang, order_number=order_number),
@@ -252,3 +265,68 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("upload_receipt_"))
+async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
+    """Start receipt upload process."""
+    order_id = int(callback.data.replace("upload_receipt_", ""))
+    await state.update_data(receipt_order_id=order_id)
+    await callback.message.answer("📎 أرسل صورة الإيصال (مثل صورة التحويل من شام كاش):")
+    await state.set_state(ReceiptStates.waiting_receipt)
+    await callback.answer()
+
+
+@router.message(ReceiptStates.waiting_receipt, F.photo)
+async def handle_receipt_upload(message: Message, state: FSMContext):
+    """Handle receipt photo upload."""
+    data = await state.get_data()
+    order_id = data.get('receipt_order_id')
+
+    if not order_id:
+        await message.answer("❌ حدث خطأ. يرجى المحاولة مرة أخرى.")
+        await state.clear()
+        return
+
+    photo_id = message.photo[-1].file_id
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = receipt_upload_count + 1, status = 'receipt_received' WHERE id = $2",
+            photo_id, order_id
+        )
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id AS user_telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+    if not order:
+        await message.answer("❌ الطلب غير موجود.")
+        await state.clear()
+        return
+
+    await message.answer("✅ تم استلام إيصالك! جاري مراجعة الإدارة...")
+
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+    from keyboards.inline import order_admin_keyboard
+    admin_text = (
+        f"📎 <b>تم رفع إيصال دفع</b>\n\n"
+        f"📦 الطلب: #{order['order_number']}\n"
+        f"👤 المستخدم: @{message.chat.username or 'N/A'}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+    )
+    for admin_id in Config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                admin_text,
+                reply_markup=order_admin_keyboard(order_id, 'receipt_received'),
+                parse_mode='HTML'
+            )
+            await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الطلب #{order['order_number']}")
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to notify admin {admin_id}: {e}")
+
+    await state.clear()
