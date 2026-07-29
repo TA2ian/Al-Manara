@@ -16,7 +16,9 @@ class Config:
     DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/crypto_bot")
 
     # Webhook
-    WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")
+    # On Replit, fall back to the public dev domain if WEBHOOK_HOST is not set
+    _replit_domain = os.getenv("REPLIT_DEV_DOMAIN", "")
+    WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", f"https://{_replit_domain}" if _replit_domain else "")
     WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
     WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
 
