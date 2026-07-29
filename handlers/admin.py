@@ -435,7 +435,7 @@ async def confirm_payment(callback: CallbackQuery):
             order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.username "
+            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.shamcash_qr_photo_id "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -473,15 +473,29 @@ async def confirm_payment(callback: CallbackQuery):
         f"📍 عنوان المحفظة: <code>{order['wallet_address']}</code>\n\n"
         f"اضغط على 'إرسال USDT' بعد التنفيذ:"
     )
-    await asyncio.gather(*[
-        bot.send_message(
-            admin_id,
-            admin_text,
-            reply_markup=order_admin_keyboard(order_id, 'payment_confirmed'),
-            parse_mode='HTML'
+
+    # Also send wallet QR code if customer uploaded one
+    qr_id = order.get('shamcash_qr_photo_id')
+    tasks = []
+    for admin_id in Config.ADMIN_IDS:
+        tasks.append(
+            bot.send_message(
+                admin_id,
+                admin_text,
+                reply_markup=order_admin_keyboard(order_id, 'payment_confirmed'),
+                parse_mode='HTML'
+            )
         )
-        for admin_id in Config.ADMIN_IDS
-    ], return_exceptions=True)
+        if qr_id:
+            tasks.append(
+                bot.send_photo(
+                    admin_id,
+                    qr_id,
+                    caption=f"📸 <b>QR code لمحفظة العميل</b> — {order['full_name'] or 'N/A'}\nيمكن مسحه ضوئياً لإرسال USDT بدون خطأ",
+                    parse_mode='HTML'
+                )
+            )
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
@@ -571,7 +585,7 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.shamcash_qr_photo_id FROM orders o "
+            "SELECT o.*, u.telegram_id, u.full_name FROM orders o "
             "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -595,21 +609,6 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
         f"أو أرسل صورة التحويل مع TXID في التعليق",
         parse_mode='HTML'
     )
-
-    # Send QR code if customer uploaded one during verification
-    qr_photo_id = order.get('shamcash_qr_photo_id')
-    if qr_photo_id:
-        from aiogram import Bot
-        bot = Bot(token=Config.BOT_TOKEN)
-        try:
-            await bot.send_photo(
-                callback.from_user.id,
-                qr_photo_id,
-                caption=f"📸 <b>QR code لمحفظة العميل</b>\n👤 {order['full_name'] or 'N/A'}\nيمكنك مسحه ضوئياً للحصول على العنوان بدون خطأ",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Failed to send QR photo: {e}")
 
     await state.set_state(AdminStates.waiting_typing_txid)
     await callback.answer()
