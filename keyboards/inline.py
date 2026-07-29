@@ -217,6 +217,10 @@ def order_admin_keyboard(order_id: int, status: str) -> InlineKeyboardMarkup:
         ])
     elif status == 'waiting_payment':
         buttons.append([
+            InlineKeyboardButton(text="💳 في انتظار الدفع", callback_data=f"admin_noop_{order_id}")
+        ])
+    elif status == 'receipt_received':
+        buttons.append([
             InlineKeyboardButton(text="✅ تأكيد الدفع", callback_data=f"admin_confirm_payment_{order_id}"),
             InlineKeyboardButton(text="❌ رفض الإيصال", callback_data=f"admin_reject_receipt_{order_id}")
         ])

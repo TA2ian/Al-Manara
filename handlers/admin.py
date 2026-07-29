@@ -227,6 +227,12 @@ async def approve_order(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("admin_noop_"))
+async def admin_noop(callback: CallbackQuery):
+    """Placeholder for informational buttons."""
+    await callback.answer("⏳ الطلب في انتظار الدفع من العميل...", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("admin_reject_"))
 async def reject_order(callback: CallbackQuery):
     """Reject a pending order."""
@@ -516,10 +522,31 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
 
     order_id = int(callback.data.replace("admin_send_usdt_", ""))
 
+    # Fetch order details to show wallet address
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id, u.full_name FROM orders o "
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+    if not order:
+        await callback.answer("الطلب غير موجود", show_alert=True)
+        return
+
     await state.update_data(admin_txid_order_id=order_id, admin_txid='', admin_screenshot_id='')
     await callback.message.answer(
-        "🔗 أرسل TXID (رقم المعاملة على السلسلة):\n"
-        "أو أرسل صورة التحويل وسأخذ TXID من التعليق"
+        f"🚀 <b>إرسال USDT</b>\n\n"
+        f"👤 العميل: {order['full_name'] or 'N/A'}\n"
+        f"📦 الطلب: #{order['order_number']}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+        f"🌐 الشبكة: {order['network']}\n"
+        f"📍 عنوان الاستلام:\n"
+        f"<code>{order['wallet_address']}</code>\n\n"
+        f"🔗 أرسل TXID (رقم المعاملة على السلسلة):\n"
+        f"أو أرسل صورة التحويل مع TXID في التعليق",
+        parse_mode='HTML'
     )
     await state.set_state(AdminStates.waiting_typing_txid)
     await callback.answer()
