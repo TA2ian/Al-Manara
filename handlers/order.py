@@ -108,6 +108,28 @@ async def enter_amount(message: Message, state: FSMContext):
             )
             return
 
+        # Check daily limit
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
+            )
+            if user:
+                today_total = await conn.fetchval(
+                    "SELECT COALESCE(SUM(amount_usdt), 0) FROM orders "
+                    "WHERE user_id = $1 AND created_at >= CURRENT_DATE",
+                    user['id']
+                )
+                if today_total + amount > Config.DAILY_LIMIT:
+                    await message.answer(
+                        f"❌ تجاوز الحد اليومي!\n"
+                        f"الحد اليومي: {Config.DAILY_LIMIT} USDT\n"
+                        f"المستخدم اليوم: {today_total:.1f} USDT\n"
+                        f"المبلغ المطلوب: {amount} USDT\n"
+                        f"المتبقي: {Config.DAILY_LIMIT - today_total:.1f} USDT"
+                    )
+                    return
+
         await state.update_data(amount_usdt=amount)
 
         data = await state.get_data()

@@ -114,15 +114,15 @@ def order_confirmation_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
         ])
 
 
-def rating_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
-    """Customer rating keyboard."""
+def rating_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    """Customer rating keyboard with order id."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="⭐", callback_data="rate_1"),
-            InlineKeyboardButton(text="⭐⭐", callback_data="rate_2"),
-            InlineKeyboardButton(text="⭐⭐⭐", callback_data="rate_3"),
-            InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data="rate_4"),
-            InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data="rate_5")
+            InlineKeyboardButton(text="⭐", callback_data=f"rate_1_{order_id}"),
+            InlineKeyboardButton(text="⭐⭐", callback_data=f"rate_2_{order_id}"),
+            InlineKeyboardButton(text="⭐⭐⭐", callback_data=f"rate_3_{order_id}"),
+            InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data=f"rate_4_{order_id}"),
+            InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{order_id}")
         ]
     ])
 

@@ -113,29 +113,6 @@ async def back_to_wallet(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "skip_qr")
-async def skip_qr(callback: CallbackQuery, state: FSMContext):
-    """Skip QR upload during order."""
-    lang = 'ar'
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            user = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", callback.from_user.id)
-            if user:
-                lang = user['language']
-    except Exception:
-        pass
-    await callback.message.edit_text(locale_service.get('select_currency', lang))
-    from keyboards.inline import currency_selection_keyboard
-    await callback.message.answer(
-        locale_service.get('select_currency', lang),
-        reply_markup=currency_selection_keyboard(lang)
-    )
-    # Set state to waiting_currency
-    await state.set_state('OrderStates:waiting_currency')
-    await callback.answer()
-
-
 # ───── Main Menu Handlers ─────
 
 @router.callback_query(F.data == "menu_rate")

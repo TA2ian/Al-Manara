@@ -227,6 +227,60 @@ async def approve_order(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("admin_reject_"))
+async def reject_order(callback: CallbackQuery):
+    """Reject a pending order."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    order_id = int(callback.data.replace("admin_reject_", ""))
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id AS user_tg, u.full_name FROM orders o "
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+
+        if not order:
+            await callback.answer("الطلب غير موجود", show_alert=True)
+            return
+
+        await conn.execute(
+            "UPDATE orders SET status = 'rejected' WHERE id = $1",
+            order_id
+        )
+
+    # Notify user their order was rejected
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+    try:
+        await bot.send_message(
+            order['user_tg'],
+            f"❌ <b>تم رفض طلبك</b>\n\n"
+            f"📦 الطلب: #{order['order_number']}\n"
+            f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
+            f"يمكنك إنشاء طلب جديد من القائمة.",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+
+    await callback.answer("❌ تم رفض الطلب!")
+    await callback.message.edit_text(
+        f"❌ تم رفض الطلب #{order['order_number']}",
+        parse_mode='HTML'
+    )
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.answer(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
+
+
 @router.callback_query(F.data == "admin_dashboard")
 async def admin_dashboard(callback: CallbackQuery):
     """Show admin dashboard."""
@@ -598,18 +652,11 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
 
     # Send rating prompt
     try:
+        from keyboards.inline import rating_keyboard
         await bot.send_message(
             order['telegram_id'],
             "⭐ يرجى تقييم تجربتك بالضغط على أحد النجوم:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="⭐", callback_data=f"rate_1_{order_id}"),
-                    InlineKeyboardButton(text="⭐⭐", callback_data=f"rate_2_{order_id}"),
-                    InlineKeyboardButton(text="⭐⭐⭐", callback_data=f"rate_3_{order_id}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data=f"rate_4_{order_id}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{order_id}")
-                ]
-            ])
+            reply_markup=rating_keyboard(order_id)
         )
     except Exception as e:
         logger.error(f"Failed to send rating prompt: {e}")

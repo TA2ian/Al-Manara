@@ -19,7 +19,6 @@ class OrderStates(StatesGroup):
     waiting_network = State()
     waiting_amount = State()
     waiting_wallet = State()
-    waiting_qr_optional = State()
     waiting_currency = State()
     waiting_confirmation = State()
 
@@ -37,7 +36,6 @@ class FeedbackStates(StatesGroup):
 class AdminStates(StatesGroup):
     """Admin action states."""
     waiting_rate = State()
-    waiting_block_reason = State()
     waiting_admin_note = State()
     waiting_typing_txid = State()
     waiting_transfer_screenshot = State()
