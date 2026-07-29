@@ -150,7 +150,9 @@ async def approve_order(callback: CallbackQuery):
 
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT * FROM orders WHERE id = $1", order_id
+            "SELECT o.*, u.full_name, u.username FROM orders o "
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
         )
 
         if not order:
@@ -166,7 +168,7 @@ async def approve_order(callback: CallbackQuery):
             deadline, order_id
         )
 
-        # Get user
+        # Get user telegram_id
         user = await conn.fetchrow(
             "SELECT telegram_id FROM users WHERE id = $1", order['user_id']
         )
@@ -197,7 +199,12 @@ async def approve_order(callback: CallbackQuery):
     # Update admin notification: send NEW message with waiting_payment keyboard
     # so the admin can follow up when the customer pays
     admin_update_text = (
-        f"💳 <b>الطلب قيد الانتظار للدفع</b>\n\n"
+        f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
+        f"━━━ 👤 العميل ━━━\n"
+        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"🆔 المعرف: <code>{order['user_id']}</code>\n"
+        f"📱 المستخدم: @{user.get('username') or 'N/A'}\n\n"
+        f"━━━ 📦 تفاصيل الطلب ━━━\n"
         f"📦 #{order['order_number']}\n"
         f"💰 {order['amount_usdt']} USDT\n"
         f"🌐 {order['network']}\n"
@@ -205,16 +212,16 @@ async def approve_order(callback: CallbackQuery):
         f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
         f"بانتظار إرسال العميل للإيصال..."
     )
-    for admin_id in Config.ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                admin_update_text,
-                reply_markup=order_admin_keyboard(order_id, 'waiting_payment'),
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify admin {admin_id}: {e}")
+    import asyncio
+    await asyncio.gather(*[
+        bot.send_message(
+            admin_id,
+            admin_update_text,
+            reply_markup=order_admin_keyboard(order_id, 'waiting_payment'),
+            parse_mode='HTML'
+        )
+        for admin_id in Config.ADMIN_IDS
+    ], return_exceptions=True)
 
     await callback.answer("✅ تمت الموافقة!")
     await callback.message.edit_text(f"✅ تمت الموافقة على طلب #{order['order_number']}")
@@ -419,7 +426,8 @@ async def confirm_payment(callback: CallbackQuery):
             order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id, u.full_name, u.username "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
 
@@ -430,6 +438,7 @@ async def confirm_payment(callback: CallbackQuery):
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     from keyboards.inline import order_admin_keyboard
+    import asyncio
 
     # Notify user
     try:
@@ -441,25 +450,29 @@ async def confirm_payment(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
 
-    # Notify admin with send-USDT button
+    # Notify admin with send-USDT button + customer info
     admin_text = (
         f"🚀 <b>تم تأكيد الدفع</b>\n\n"
+        f"━━━ 👤 العميل ━━━\n"
+        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
+        f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
+        f"━━━ 💳 تفاصيل الطلب ━━━\n"
         f"📦 الطلب: #{order['order_number']}\n"
         f"💰 المبلغ: {order['amount_usdt']} USDT\n"
         f"🌐 الشبكة: {order['network']}\n"
         f"📍 عنوان المحفظة: <code>{order['wallet_address']}</code>\n\n"
         f"اضغط على 'إرسال USDT' بعد التنفيذ:"
     )
-    for admin_id in Config.ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                admin_text,
-                reply_markup=order_admin_keyboard(order_id, 'payment_confirmed'),
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify admin {admin_id}: {e}")
+    await asyncio.gather(*[
+        bot.send_message(
+            admin_id,
+            admin_text,
+            reply_markup=order_admin_keyboard(order_id, 'payment_confirmed'),
+            parse_mode='HTML'
+        )
+        for admin_id in Config.ADMIN_IDS
+    ], return_exceptions=True)
 
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
@@ -629,7 +642,8 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
             txid, order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id, u.full_name, u.username "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
 
@@ -640,6 +654,7 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
 
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
+    import asyncio
 
     # Build completion message for customer
     network_name = order['network'] or 'TRC20'
@@ -661,7 +676,6 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
 
     try:
         if screenshot_id:
-            # Send photo first with caption
             await bot.send_photo(
                 order['telegram_id'],
                 screenshot_id,
@@ -677,7 +691,25 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
     except Exception as e:
         logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
 
-    await msg.answer(f"✅ تم إكمال الطلب #{order['order_number']} وإرسال التأكيد للعميل مع TXID!")
+    # Notify admin with customer info
+    admin_done = (
+        f"✅ <b>تم إكمال الطلب</b>\n\n"
+        f"━━━ 👤 العميل ━━━\n"
+        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
+        f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
+        f"━━━ 📦 تفاصيل الإتمام ━━━\n"
+        f"📦 الطلب: #{order['order_number']}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+        f"🌐 الشبكة: {network_name}\n"
+        f"🔗 TXID: <code>{txid}</code>"
+    )
+    await asyncio.gather(*[
+        bot.send_message(admin_id, admin_done, parse_mode='HTML')
+        for admin_id in Config.ADMIN_IDS
+    ], return_exceptions=True)
+
+    await msg.answer(f"✅ تم إكمال الطلب #{order['order_number']} بنجاح!")
 
     # Send rating prompt
     try:
