@@ -537,3 +537,573 @@ async def handle_rating(callback: CallbackQuery):
         parse_mode='HTML'
     )
     await callback.answer("✅ تم حفظ التقييم!")
+
+
+# ───── Admin Update Rate ─────
+
+@router.callback_query(F.data == "admin_update_rate")
+async def admin_update_rate_start(callback: CallbackQuery, state: FSMContext):
+    """Start exchange rate update flow."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rate_row = await conn.fetchrow("SELECT rate, updated_at FROM exchange_rates ORDER BY id DESC LIMIT 1")
+
+    current = f"{rate_row['rate']:,.0f}" if rate_row else "N/A"
+    await callback.message.edit_text(
+        f"💱 <b>سعر الصرف الحالي:</b> 1 USDT = {current} SYP\n\n"
+        f"أرسل السعر الجديد (1 USDT = ? SYP):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_rate)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_rate)
+async def admin_update_rate_save(message: Message, state: FSMContext):
+    """Save new exchange rate."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+
+    try:
+        new_rate = float(message.text.strip().replace(',', ''))
+        if new_rate <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ سعر غير صالح. أرسل رقماً صحيحاً (مثال: 15000):")
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
+            new_rate, message.from_user.id
+        )
+
+    await message.answer(f"✅ تم تحديث سعر الصرف: 1 USDT = {new_rate:,.0f} SYP")
+    await state.clear()
+
+
+# ───── Admin Settings Menu ─────
+
+@router.callback_query(F.data == "admin_settings")
+async def admin_settings_menu(callback: CallbackQuery):
+    """Show admin settings menu."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    from keyboards.inline import settings_keyboard
+    await callback.message.edit_text(
+        "⚙️ <b>الإعدادات</b>\nاختر الإعداد الذي تريد تعديله:",
+        reply_markup=settings_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "setting_rate")
+async def setting_rate(callback: CallbackQuery, state: FSMContext):
+    """Change rate from settings menu."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rate_row = await conn.fetchrow("SELECT rate FROM exchange_rates ORDER BY id DESC LIMIT 1")
+    current = f"{rate_row['rate']:,.0f}" if rate_row else "N/A"
+    await callback.message.edit_text(
+        f"💱 <b>سعر الصرف الحالي:</b> 1 USDT = {current} SYP\n\n"
+        f"أرسل السعر الجديد:",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_rate)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "setting_fees")
+async def setting_fees(callback: CallbackQuery, state: FSMContext):
+    """Change fee settings."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"⚙️ <b>الرسوم الحالية</b>\n\n"
+        f"📊 نسبة (%) : {Config.SERVICE_FEE_PERCENT}%\n"
+        f"💵 ثابت : {Config.SERVICE_FEE_FIXED} {Config.SHAMCASH_SYP_ACCOUNT and 'SYP' or 'USD'}\n\n"
+        f"أرسل النسبة المئوية للرسوم (مثال: 0.5):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_fee_percent)
+    await callback.answer()
+
+
+# ───── Admin Note ─────
+
+@router.callback_query(F.data.startswith("admin_note_"))
+async def admin_note_start(callback: CallbackQuery, state: FSMContext):
+    """Add admin note to order."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    order_id = int(callback.data.replace("admin_note_", ""))
+    await state.update_data(admin_note_order_id=order_id, admin_note_mode=True)
+    await callback.message.answer("📝 أرسل الملاحظة للإضافة للطلب:")
+    await state.set_state(AdminStates.waiting_note_text)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_note_text)
+async def admin_save_note(message: Message, state: FSMContext):
+    """Save admin note to order."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    data = await state.get_data()
+    order_id = data.get('admin_note_order_id')
+    note = message.text.strip()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET admin_notes = CONCAT(COALESCE(admin_notes, ''), $1, '\n') WHERE id = $2",
+            f"[{message.from_user.id}] {note}", order_id
+        )
+    await message.answer(f"✅ تم إضافة الملاحظة للطلب #{order_id}")
+    await state.clear()
+
+
+@router.message(AdminStates.waiting_fee_percent)
+async def admin_set_fee_percent(message: Message, state: FSMContext):
+    """Set fee percent."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    try:
+        pct = float(message.text.strip())
+        if pct < 0 or pct > 100:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ نسبة غير صالحة (0-100). أرسل رقماً صحيحاً:")
+        return
+    # Save to Config is runtime only; store in DB or .env via admin note
+    await message.answer(f"✅ تم تعيين نسبة الرسوم: {pct}%\n"
+                         f"⚠️ ملاحظة: هذا التغيير مؤقت. غيّر SERVICE_FEE_PERCENT في المتغيرات البيئية للتبيت.")
+    # We'll update Config at runtime (instance variable)
+    Config.SERVICE_FEE_PERCENT = pct
+    await state.clear()
+
+
+@router.message(AdminStates.waiting_fee_fixed)
+async def admin_set_fee_fixed(message: Message, state: FSMContext):
+    """Set fixed fee."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    try:
+        fixed = float(message.text.strip())
+        if fixed < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ قيمة غير صالحة. أرسل رقماً صحيحاً:")
+        return
+    Config.SERVICE_FEE_FIXED = fixed
+    await message.answer(f"✅ تم تعيين الرسوم الثابتة: {fixed}\n"
+                         f"⚠️ هذا التغيير مؤقت.")
+    await state.clear()
+
+
+@router.callback_query(F.data == "setting_shamcash_usd")
+async def setting_shamcash_usd(callback: CallbackQuery, state: FSMContext):
+    """Set Sham Cash USD account."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"📱 <b>حساب شام كاش USD الحالي:</b>\n<code>{Config.SHAMCASH_USD_ACCOUNT}</code>\n\n"
+        f"أرسل رقم حساب USD الجديد:",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_shamcash_usd)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_shamcash_usd)
+async def admin_set_shamcash_usd(message: Message, state: FSMContext):
+    """Save new Sham Cash USD account."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    account = message.text.strip()
+    Config.SHAMCASH_USD_ACCOUNT = account
+    await message.answer(f"✅ تم تحديث حساب شام كاش USD:\n<code>{account}</code>", parse_mode='HTML')
+    await state.clear()
+
+
+@router.callback_query(F.data == "setting_shamcash_syp")
+async def setting_shamcash_syp(callback: CallbackQuery, state: FSMContext):
+    """Set Sham Cash SYP account."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"📱 <b>حساب شام كاش SYP الحالي:</b>\n<code>{Config.SHAMCASH_SYP_ACCOUNT}</code>\n\n"
+        f"أرسل رقم حساب SYP الجديد:",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_shamcash_syp)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_shamcash_syp)
+async def admin_set_shamcash_syp(message: Message, state: FSMContext):
+    """Save new Sham Cash SYP account."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    account = message.text.strip()
+    Config.SHAMCASH_SYP_ACCOUNT = account
+    await message.answer(f"✅ تم تحديث حساب شام كاش SYP:\n<code>{account}</code>", parse_mode='HTML')
+    await state.clear()
+
+
+@router.callback_query(F.data == "setting_timeout")
+async def setting_timeout(callback: CallbackQuery, state: FSMContext):
+    """Change payment timeout."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"⏱ <b>مهلة الدفع الحالية:</b> {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
+        f"أرسل المهلة الجديدة بالدقائق:",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_timeout)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_timeout)
+async def admin_set_timeout(message: Message, state: FSMContext):
+    """Save new payment timeout."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    try:
+        timeout = int(message.text.strip())
+        if timeout < 1 or timeout > 1440:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ قيمة غير صالحة (1-1440 دقيقة). أرسل رقماً صحيحاً:")
+        return
+    Config.PAYMENT_TIMEOUT = timeout
+    await message.answer(f"✅ تم تحديث مهلة الدفع: {timeout} دقيقة\n⚠️ هذا التغيير مؤقت.")
+    await state.clear()
+
+
+@router.callback_query(F.data == "setting_limits")
+async def setting_limits(callback: CallbackQuery, state: FSMContext):
+    """Change order limits."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"📊 <b>الحدود الحالية</b>\n\n"
+        f"🔽 الحد الأدنى: {Config.MIN_ORDER} USDT\n"
+        f"🔼 الحد الأقصى: {Config.MAX_ORDER} USDT\n\n"
+        f"أرسل الحد الأدنى الجديد (USDT):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_min_order)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_min_order)
+async def admin_set_min_order(message: Message, state: FSMContext):
+    """Set min order limit."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    try:
+        val = float(message.text.strip())
+        if val < 1:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ قيمة غير صالحة. أرسل رقماً صحيحاً (1+):")
+        return
+    Config.MIN_ORDER = val
+    await message.answer(f"✅ تم تعيين الحد الأدنى: {val} USDT\nأرسل الحد الأقصى الجديد (USDT):")
+    await state.set_state(AdminStates.waiting_max_order)
+    await message.answer(f"أرسل الحد الأقصى الجديد (USDT):")
+
+
+@router.message(AdminStates.waiting_max_order)
+async def admin_set_max_order(message: Message, state: FSMContext):
+    """Set max order limit."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    try:
+        val = float(message.text.strip())
+        if val < Config.MIN_ORDER:
+            raise ValueError
+    except ValueError:
+        await message.answer(f"❌ قيمة غير صالحة. أرسل رقماً أكبر من الحد الأدنى ({Config.MIN_ORDER}):")
+        return
+    Config.MAX_ORDER = val
+    await message.answer(f"✅ تم تعيين الحد الأقصى: {val} USDT\n⚠️ هذا التغيير مؤقت.")
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_menu")
+async def admin_menu_back(callback: CallbackQuery):
+    """Go back to admin panel."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.edit_text(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+# ───── Admin Backups ─────
+
+@router.callback_query(F.data == "admin_backups")
+async def admin_backups(callback: CallbackQuery):
+    """Show backup info."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval("SELECT COUNT(*) FROM orders")
+        user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        rate_count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
+        feedback_count = await conn.fetchval("SELECT COUNT(*) FROM feedback_messages")
+    await callback.message.edit_text(
+        f"📋 <b>النسخ الاحتياطية</b>\n\n"
+        f"📊 إحصائيات قاعدة البيانات:\n"
+        f"👤 المستخدمون: {user_count}\n"
+        f"📦 الطلبات: {order_count}\n"
+        f"💱 أسعار الصرف: {rate_count}\n"
+        f"✉️ الرسائل: {feedback_count}\n\n"
+        f"🔹 يتم الاحتفاظ بالنسخ الاحتياطية لمدة {Config.BACKUP_RETENTION_DAYS} يوماً\n"
+        f"🔹 تصدير يدوي غير متوفر حالياً - تواصل مع المطور.",
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+# ───── Admin Broadcast ─────
+
+@router.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
+    """Start broadcast message flow."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📨 <b>إرسال إشعار جماعي</b>\n\n"
+        "⚠️ سيتم إرسال الرسالة إلى جميع المستخدمين المسجلين.\n"
+        "أرسل نص الرسالة (يدعم HTML):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_broadcast)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_broadcast)
+async def admin_broadcast_send(message: Message, state: FSMContext):
+    """Send broadcast to all users."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    text = message.text or message.caption or ""
+    if not text.strip():
+        await message.answer("❌ الرسالة فارغة. أرسل نص الرسالة:")
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        users = await conn.fetch("SELECT telegram_id FROM users")
+    bot = Bot(token=Config.BOT_TOKEN)
+    sent = 0
+    failed = 0
+    for u in users:
+        try:
+            await bot.send_message(u['telegram_id'], text, parse_mode='HTML')
+            sent += 1
+        except Exception:
+            failed += 1
+    await message.answer(
+        f"📨 <b>نتيجة الإرسال الجماعي</b>\n\n"
+        f"✅ تم الإرسال: {sent}\n"
+        f"❌ فشل: {failed}\n"
+        f"📊 المجموع: {len(users)}",
+        parse_mode='HTML'
+    )
+    await state.clear()
+
+
+# ───── Admin Search ─────
+
+@router.callback_query(F.data == "admin_search_user")
+async def admin_search_user(callback: CallbackQuery, state: FSMContext):
+    """Search for a user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "🔍 <b>بحث عن عميل</b>\n\n"
+        "أرسل معرف المستخدم (ID) أو اسم المستخدم (@username):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_search)
+    await state.update_data(admin_search_type='user')
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_search)
+async def admin_search_handler(message: Message, state: FSMContext):
+    """Handle search queries for users or orders."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    data = await state.get_data()
+    search_type = data.get('admin_search_type', 'user')
+    query = message.text.strip()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if search_type == 'user':
+            # Try by telegram_id first
+            if query.isdigit():
+                rows = await conn.fetch("SELECT * FROM users WHERE telegram_id = $1", int(query))
+            else:
+                clean = query.replace('@', '')
+                rows = await conn.fetch("SELECT * FROM users WHERE username ILIKE $1", f"%{clean}%")
+            if not rows:
+                await message.answer("❌ لم يتم العثور على مستخدم.")
+            for u in rows:
+                text = (
+                    f"👤 <b>معلومات العميل</b>\n\n"
+                    f"🆔 المعرف: <code>{u['telegram_id']}</code>\n"
+                    f"📛 الاسم: {u['full_name'] or 'N/A'}\n"
+                    f"📱 اليوزر: @{u['username'] or 'N/A'}\n"
+                    f"🔰 التوثيق: {'✅' if u['is_verified'] else '❌'} ({u['verification_status']})\n"
+                    f"🏦 شام كاش: {u['shamcash_account'] or 'N/A'}\n"
+                    f"💬 اللغة: {u['language']}\n"
+                    f"🚫 محظور: {'✅' if u['is_blocked'] else '❌'}\n"
+                    f"📅 التسجيل: {u['created_at'].strftime('%Y-%m-%d')}"
+                )
+                await message.answer(text, parse_mode='HTML')
+        elif search_type == 'order':
+            row = await conn.fetchrow("SELECT o.*, u.full_name, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.order_number ILIKE $1", f"%{query}%")
+            if not row:
+                await message.answer("❌ لم يتم العثور على طلب.")
+            else:
+                text = (
+                    f"📦 <b>الطلب #{row['order_number']}</b>\n\n"
+                    f"👤 العميل: {row['full_name'] or 'N/A'} (<code>{row['telegram_id']}</code>)\n"
+                    f"💰 {row['amount_usdt']} USDT → {row['network']}\n"
+                    f"📍 المحفظة: <code>{row['wallet_address'][:20]}...</code>\n"
+                    f"📊 الحالة: {row['status']}\n"
+                    f"💱 السعر: 1 USDT = {row['exchange_rate']:,.0f} {row['payment_currency']}\n"
+                    f"💵 الإجمالي: {row['total_amount']:.2f} {row['payment_currency']}\n"
+                    f"📅 الإنشاء: {row['created_at'].strftime('%Y-%m-%d %H:%M')}"
+                )
+                await message.answer(text, parse_mode='HTML')
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_search_order")
+async def admin_search_order_start(callback: CallbackQuery, state: FSMContext):
+    """Search for an order."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "🔍 <b>بحث عن طلب</b>\n\n"
+        "أرسل رقم الطلب (مثال: ORD-...):",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_admin_note)
+    await state.update_data(admin_search_type='order')
+    await callback.answer()
+
+
+# ───── Admin Analytics ─────
+
+@router.callback_query(F.data == "admin_analytics")
+async def admin_analytics(callback: CallbackQuery):
+    """Show analytics."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
+        completed_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'completed'")
+        total_usdt = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE status = 'completed'")
+        today_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE")
+        pending_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')")
+        avg_rating = await conn.fetchval("SELECT COALESCE(ROUND(AVG(customer_rating), 1), 0) FROM orders WHERE customer_rating IS NOT NULL")
+        user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        verified_count = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_verified = TRUE")
+
+    await callback.message.edit_text(
+        f"📈 <b>التحليلات</b>\n\n"
+        f"━━━ المستخدمون ━━━\n"
+        f"👤 المجموع: {user_count}\n"
+        f"✅ موثق: {verified_count}\n\n"
+        f"━━━ الطلبات ━━━\n"
+        f"📦 المجموع: {total_orders}\n"
+        f"✅ مكتمل: {completed_orders}\n"
+        f"⏳ معلق: {pending_count}\n"
+        f"📅 اليوم: {today_orders}\n\n"
+        f"━━━ الإيرادات ━━━\n"
+        f"💰 إجمالي USDT المسلم: {total_usdt:.2f}\n\n"
+        f"━━━ التقييمات ━━━\n"
+        f"⭐ متوسط التقييم: {avg_rating}/5",
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+# ───── Admin Logs ─────
+
+@router.callback_query(F.data == "admin_logs")
+async def admin_logs(callback: CallbackQuery):
+    """Show recent logs."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    try:
+        with open('logs/bot.log', 'r', encoding='utf-8') as f:
+            lines = f.readlines()[-30:]
+            log_text = ''.join(lines)
+        if len(log_text) > 3500:
+            log_text = log_text[-3500:]
+        await callback.message.edit_text(
+            f"📝 <b>آخر السجلات</b>\n\n<pre>{log_text}</pre>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        await callback.message.edit_text(f"❌ فشل قراءة السجلات: {e}")
+
+
+# ───── Admin Note (already handled above with waiting_note_text) ─────

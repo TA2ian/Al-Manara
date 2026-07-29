@@ -64,11 +64,24 @@ async def start_order(message: Message, state: FSMContext):
     await state.set_state(OrderStates.waiting_network)
 
 
+async def _get_user_lang(telegram_id: int) -> str:
+    """Fetch user language from DB."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", telegram_id)
+            if user:
+                return user['language']
+    except Exception:
+        pass
+    return 'ar'
+
+
 @router.callback_query(OrderStates.waiting_network, F.data.startswith("network_"))
 async def select_network(callback: CallbackQuery, state: FSMContext):
     """Handle network selection."""
     network = callback.data.replace("network_", "")
-    lang = 'ar'  # Get from user
+    lang = await _get_user_lang(callback.from_user.id)
 
     await state.update_data(network=network)
 
@@ -84,7 +97,7 @@ async def select_network(callback: CallbackQuery, state: FSMContext):
 @router.message(OrderStates.waiting_amount)
 async def enter_amount(message: Message, state: FSMContext):
     """Handle amount input."""
-    lang = 'ar'  # Get from user
+    lang = await _get_user_lang(message.from_user.id)
 
     try:
         amount = float(message.text.strip())
@@ -118,7 +131,7 @@ async def enter_amount(message: Message, state: FSMContext):
 @router.message(OrderStates.waiting_wallet)
 async def enter_wallet(message: Message, state: FSMContext):
     """Handle wallet input."""
-    lang = 'ar'  # Get from user
+    lang = await _get_user_lang(message.from_user.id)
     wallet = message.text.strip()
 
     data = await state.get_data()
@@ -154,7 +167,7 @@ async def enter_wallet(message: Message, state: FSMContext):
 async def select_currency(callback: CallbackQuery, state: FSMContext):
     """Handle currency selection."""
     currency = callback.data.replace("currency_", "")
-    lang = 'ar'  # Get from user
+    lang = await _get_user_lang(callback.from_user.id)
 
     await state.update_data(payment_currency=currency)
 
@@ -200,7 +213,7 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(OrderStates.waiting_confirmation, F.data == "confirm_order")
 async def confirm_order(callback: CallbackQuery, state: FSMContext):
     """Confirm and create order."""
-    lang = 'ar'  # Get from user
+    lang = await _get_user_lang(callback.from_user.id)
 
     data = await state.get_data()
     calculation = data['calculation']
