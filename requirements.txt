@@ -1,0 +1,10 @@
+aiogram==3.4.1
+aiohttp==3.9.1
+asyncpg==0.29.0
+APScheduler==3.10.4
+Pillow==10.2.0
+qrcode==7.4.2
+python-dotenv==1.0.0
+cryptography==42.0.0
+pyzbar==0.1.9
+zxing-cpp==2.2.0

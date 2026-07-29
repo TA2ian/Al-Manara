@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: crypto-topup-bot
+    runtime: docker
+    plan: free
+    dockerCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-bot-db
+          property: connectionString
+
+databases:
+  - name: crypto-bot-db
+    databaseName: crypto_bot
+    user: crypto_bot_user
+    plan: free
