@@ -75,7 +75,7 @@ async def enter_shamcash(message: Message, state: FSMContext):
     """Handle Sham Cash account input."""
     account = message.text.strip()
 
-    if not account.startswith("09") or len(account) < 10 or not account.isdigit():
+    if len(account) < 5:
         pool = await get_pool()
         async with pool.acquire() as conn:
             user = await conn.fetchrow(
