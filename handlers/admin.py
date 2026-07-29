@@ -133,6 +133,15 @@ async def admin_active_orders(callback: CallbackQuery):
             reply_markup=order_admin_keyboard(order['id'], order['status']),
             parse_mode='HTML'
         )
+        # If order has a receipt and status is receipt_received, show the receipt image
+        if order['status'] == 'receipt_received' and order.get('receipt_photo_id'):
+            try:
+                await callback.message.answer_photo(
+                    order['receipt_photo_id'],
+                    caption=f"📸 إيصال الدفع للطلب #{order['order_number']}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send receipt photo for order {order['id']}: {e}")
 
     await callback.answer()
 
@@ -240,7 +249,7 @@ async def admin_noop(callback: CallbackQuery):
     await callback.answer("⏳ الطلب في انتظار الدفع من العميل...", show_alert=True)
 
 
-@router.callback_query(F.data.startswith("admin_reject_"))
+@router.callback_query(F.data.startswith("admin_reject_"), ~F.data.startswith("admin_reject_receipt_"))
 async def reject_order(callback: CallbackQuery):
     """Reject a pending order."""
     if not is_admin(callback.from_user.id):
@@ -501,7 +510,7 @@ async def reject_receipt(callback: CallbackQuery):
             order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id, u.full_name FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
 
@@ -512,12 +521,35 @@ async def reject_receipt(callback: CallbackQuery):
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     from keyboards.inline import receipt_upload_keyboard
+    from datetime import datetime
+
+    # Calculate remaining time before auto-cancel
+    remaining = ""
+    if order['payment_deadline']:
+        delta = order['payment_deadline'] - datetime.now()
+        remaining_seconds = int(delta.total_seconds())
+        if remaining_seconds > 0:
+            minutes = remaining_seconds // 60
+            seconds = remaining_seconds % 60
+            if minutes > 0:
+                remaining = f"⏱ الوقت المتبقي: <b>{minutes} دقيقة و{seconds} ثانية</b>"
+            else:
+                remaining = f"⏱ الوقت المتبقي: <b>{seconds} ثانية</b>"
 
     try:
         await bot.send_message(
             order['telegram_id'],
-            "❌ <b>الإيصال غير صحيح</b>\n\nيرجى إرسال إيصال صحيح (صورة واضحة للتحويل):",
-            reply_markup=receipt_upload_keyboard(order_id)
+            f"⚠️ <b>الإيصال المرفوض</b>\n\n"
+            f"عذراً {order['full_name'] or 'عميلنا العزيز'}، الإيصال الذي أرسلته غير مطابق أو غير واضح.\n\n"
+            f"📌 نرجو منك إرسال إيصال جديد وصحيح مع ضرورة ظهور:\n"
+            f"• المبلغ المحوّل بوضوح\n"
+            f"• اسم المستفيد (SHAMCASH)\n"
+            f"• التاريخ\n\n"
+            f"📎 اضغط على الزر أدناه لإعادة رفع الإيصال:\n"
+            f"{remaining}\n\n"
+            f"⚠️ تنبيه: في حال انتهت المهلة سيتم إلغاء الطلب تلقائياً.",
+            reply_markup=receipt_upload_keyboard(order_id),
+            parse_mode='HTML'
         )
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
