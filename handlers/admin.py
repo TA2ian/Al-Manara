@@ -352,31 +352,92 @@ async def reject_receipt(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_send_usdt_"))
 async def send_usdt(callback: CallbackQuery, state: FSMContext):
-    """Mark order as completed and request TXID."""
+    """Request TXID from admin to complete order."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
     order_id = int(callback.data.replace("admin_send_usdt_", ""))
 
-    await state.update_data(admin_txid_order_id=order_id)
-    await callback.message.answer("🔗 أرسل TXID (رقم المعاملة على السلسلة):")
+    await state.update_data(admin_txid_order_id=order_id, admin_txid='', admin_screenshot_id='')
+    await callback.message.answer(
+        "🔗 أرسل TXID (رقم المعاملة على السلسلة):\n"
+        "أو أرسل صورة التحويل وسأخذ TXID من التعليق"
+    )
     await state.set_state(AdminStates.waiting_typing_txid)
-
     await callback.answer()
 
 
 @router.message(AdminStates.waiting_typing_txid)
 async def enter_txid(message: Message, state: FSMContext):
-    """Handle TXID input and complete order."""
-    txid = message.text.strip()
+    """Handle TXID input — supports text TXID or photo with TXID in caption."""
     data = await state.get_data()
     order_id = data.get('admin_txid_order_id')
 
-    if not order_id or len(txid) < 5:
-        await message.answer("❌ TXID غير صالح. أرسل TXID صحيح:")
+    if not order_id:
+        await message.answer("❌ حدث خطأ. يرجى البدء من جديد.")
+        await state.clear()
         return
 
+    txid = ''
+    screenshot_id = ''
+
+    if message.photo:
+        # Admin sent a photo — get TXID from caption
+        screenshot_id = message.photo[-1].file_id
+        txid = (message.caption or '').strip()
+        if not txid:
+            await message.answer(
+                "❌ الصورة بدون TXID.\n"
+                "أرسل الصورة مع كتابة TXID في التعليق،\n"
+                "أو أرسل TXID كنص فقط:"
+            )
+            return
+    else:
+        txid = message.text.strip()
+
+    if len(txid) < 5:
+        await message.answer("❌ TXID غير صالح (يجب أن يكون 5 أحرف على الأقل). أرسل TXID صحيح:")
+        return
+
+    # Save data and ask for optional screenshot if not already provided
+    await state.update_data(admin_txid=txid, admin_screenshot_id=screenshot_id)
+
+    if not screenshot_id:
+        await message.answer(
+            "✅ تم استلام TXID!\n"
+            "📸 يمكنك الآن إرسال صورة التحويل كدليل للعميل (اختياري):\n"
+            "أو أرسل 'تخطي' لإكمال الطلب بدون صورة."
+        )
+        await state.set_state(AdminStates.waiting_transfer_screenshot)
+    else:
+        await complete_order(message, state, txid, screenshot_id, order_id)
+
+
+@router.message(AdminStates.waiting_transfer_screenshot, F.photo)
+async def enter_screenshot(message: Message, state: FSMContext):
+    """Handle optional transfer screenshot from admin."""
+    data = await state.get_data()
+    order_id = data.get('admin_txid_order_id')
+    txid = data.get('admin_txid', '')
+    screenshot_id = message.photo[-1].file_id
+
+    await complete_order(message, state, txid, screenshot_id, order_id)
+
+
+@router.message(AdminStates.waiting_transfer_screenshot, F.text)
+async def skip_screenshot(message: Message, state: FSMContext):
+    """Skip transfer screenshot and complete order."""
+    text = message.text.strip()
+    if text in ['تخطي', 'skip', 'تخط']:
+        data = await state.get_data()
+        await complete_order(message, state, data.get('admin_txid', ''), '', data.get('admin_txid_order_id', 0))
+    else:
+        await message.answer("أرسل صورة التحويل أو اكتب 'تخطي' للإكمال بدون صورة.")
+
+
+async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_id: str, order_id: int):
+    """Finalize order: update DB, notify customer, send rating prompt."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -389,31 +450,51 @@ async def enter_txid(message: Message, state: FSMContext):
         )
 
     if not order:
-        await message.answer("❌ الطلب غير موجود.")
+        await msg.answer("❌ الطلب غير موجود.")
         await state.clear()
         return
 
-    from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
 
+    # Build completion message for customer
+    completion_text = (
+        f"✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
+        f"📦 الطلب: #{order['order_number']}\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT إلى {order['network']}\n"
+        f"🔗 TXID: <code>{txid}</code>\n\n"
+        f"🔄 يمكنك التحقق من المعاملة على المستكشف:"
+    )
+
+    # Generate explorer link
+    if order['network'] == 'BEP20':
+        explorer_url = f"https://bscscan.com/tx/{txid}"
+    else:
+        explorer_url = f"https://tronscan.org/#/transaction/{txid}"
+
+    completion_text += f"\n<a href='{explorer_url}'>🔍 عرض على المستكشف</a>"
+
     try:
-        await bot.send_message(
-            order['telegram_id'],
-            f"✅ <b>تم إرسال USDT بنجاح!</b>\n\n"
-            f"📦 الطلب: #{order['order_number']}\n"
-            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-            f"🔗 TXID: <code>{txid}</code>",
-            parse_mode='HTML'
-        )
+        if screenshot_id:
+            # Send photo first with caption
+            await bot.send_photo(
+                order['telegram_id'],
+                screenshot_id,
+                caption=completion_text,
+                parse_mode='HTML'
+            )
+        else:
+            await bot.send_message(
+                order['telegram_id'],
+                completion_text,
+                parse_mode='HTML'
+            )
     except Exception as e:
-        logger.error(f"Failed to notify user: {e}")
+        logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
 
-    await message.answer(f"✅ تم إكمال الطلب #{order['order_number']}!")
+    await msg.answer(f"✅ تم إكمال الطلب #{order['order_number']} وإرسال التأكيد للعميل مع TXID!")
 
-    # Send receipt upload prompt after completion
-    from keyboards.inline import order_admin_keyboard
+    # Send rating prompt
     try:
-        from keyboards.reply import compact_reply_keyboard
         await bot.send_message(
             order['telegram_id'],
             "⭐ يرجى تقييم تجربتك بالضغط على أحد النجوم:",

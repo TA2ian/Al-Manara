@@ -1,15 +1,20 @@
 """My orders handlers."""
+import io
+import logging
+
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from states import ReceiptStates
-from keyboards.inline import main_menu_inline, receipt_upload_keyboard
+from keyboards.inline import main_menu_inline, receipt_upload_keyboard, order_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
+from services.receipt_verifier import ReceiptVerifier
 from database import get_pool
 from config import Config
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -55,7 +60,6 @@ async def show_my_orders(message: Message):
             f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
         )
 
-        # Show action button for orders waiting payment
         if order['status'] == 'waiting_payment':
             await message.answer(
                 text,
@@ -101,7 +105,7 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ReceiptStates.waiting_receipt, F.photo)
 async def handle_receipt_upload(message: Message, state: FSMContext):
-    """Handle receipt photo upload."""
+    """Handle receipt photo upload with AI verification."""
     data = await state.get_data()
     order_id = data.get('receipt_order_id')
 
@@ -110,15 +114,11 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    photo_id = message.photo[-1].file_id
+    photo = message.photo[-1]
+    photo_id = photo.file_id
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = receipt_upload_count + 1, status = 'receipt_received' WHERE id = $2",
-            photo_id, order_id
-        )
-
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id AS user_telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
@@ -129,29 +129,79 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    await message.answer("✅ تم استلام إيصالك! جاري مراجعة الإدارة...")
-
-    # Notify admins
+    # Download the image for OCR analysis
     bot = Bot(token=Config.BOT_TOKEN)
-    from keyboards.inline import order_admin_keyboard
+    try:
+        file_info = await bot.get_file(photo_id)
+        image_file = await bot.download_file(file_info.file_path)
+        image_bytes = image_file.read()
+    except Exception as e:
+        logger.error(f"Failed to download receipt image: {e}")
+        image_bytes = None
 
+    verification_result = None
+    if image_bytes:
+        # Run OCR verification
+        expected_total = float(order['total_amount'])
+        verification_result = await ReceiptVerifier.analyze_receipt(
+            image_bytes, expected_total
+        )
+        logger.info(f"Receipt verification result: {verification_result}")
+
+    # Determine status and message based on verification
+    auto_verified = False
+    verification_note = ""
+
+    if verification_result:
+        if verification_result['confidence'] == 'high':
+            auto_verified = True
+            verification_note = f"\n✅ <b>تحقق آلي:</b> {verification_result['message']}"
+        elif verification_result['confidence'] == 'medium':
+            verification_note = f"\n⚠️ <b>تحقق آلي:</b> {verification_result['message']}"
+        elif verification_result['confidence'] == 'low':
+            verification_note = f"\n⚠️ <b>تحقق آلي:</b> {verification_result['message']}"
+        elif verification_result['confidence'] == 'none':
+            verification_note = (
+                "\n❌ <b>تحقق آلي:</b> لم يتم التعرف على أي نص في الصورة. "
+                "قد لا تكون صورة إيصال صالحة."
+            )
+        else:
+            verification_note = "\n⚠️ <b>تحقق آلي:</b> فشل تحليل الصورة - يرجى المراجعة اليدوية"
+
+    new_status = 'receipt_received'
+    await pool.execute(
+        "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = receipt_upload_count + 1, status = $2 WHERE id = $3",
+        photo_id, new_status, order_id
+    )
+
+    user_msg = "✅ تم استلام إيصالك! جاري مراجعة الإدارة..."
+    if auto_verified:
+        user_msg += "\n✅ تم التحقق من الإيصال آلياً."
+    elif verification_result and verification_result['confidence'] == 'none':
+        user_msg += "\n⚠️ لم يتم التعرف على الإيصال. سيتم مراجعته من قبل الإدارة."
+
+    await message.answer(user_msg)
+
+    # Notify admins with verification info
     admin_text = (
         f"📎 <b>تم رفع إيصال دفع</b>\n\n"
         f"📦 الطلب: #{order['order_number']}\n"
         f"👤 المستخدم: @{message.chat.username or 'N/A'}\n"
         f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+        f"💵 الإجمالي المطلوب: {order['total_amount']:.2f} {order['payment_currency']}"
+        f"{verification_note}"
     )
+
     for admin_id in Config.ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
                 admin_text,
-                reply_markup=order_admin_keyboard(order_id, 'receipt_received'),
+                reply_markup=order_admin_keyboard(order_id, new_status),
                 parse_mode='HTML'
             )
             await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الطلب #{order['order_number']}")
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Failed to notify admin {admin_id}: {e}")
+            logger.error(f"Failed to notify admin {admin_id}: {e}")
 
     await state.clear()

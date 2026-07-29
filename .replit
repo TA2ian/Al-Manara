@@ -1,6 +1,7 @@
 modules = ["postgresql-16", "python-3.11"]
 [nix]
 channel = "stable-25_05"
+packages = ["cargo", "libiconv", "libxcrypt", "openssl", "pkg-config", "postgresql", "rustc", "tesseract", "zbar"]
 
 [userenv]
 

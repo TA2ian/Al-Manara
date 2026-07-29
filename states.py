@@ -40,6 +40,7 @@ class AdminStates(StatesGroup):
     waiting_block_reason = State()
     waiting_admin_note = State()
     waiting_typing_txid = State()
+    waiting_transfer_screenshot = State()
     waiting_broadcast = State()
     waiting_shamcash_usd = State()
     waiting_shamcash_syp = State()

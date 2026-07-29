@@ -8,3 +8,4 @@ python-dotenv==1.0.0
 cryptography==42.0.0
 pyzbar==0.1.9
 zxing-cpp==2.2.0
+pytesseract
