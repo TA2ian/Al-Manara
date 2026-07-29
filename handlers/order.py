@@ -231,16 +231,28 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
         )
         order_id = row['id']
 
-    # Notify admins with action buttons
+    # Notify admins with full customer info and delivery address
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
+
+    # Get customer full name from DB
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow(
+            "SELECT full_name FROM users WHERE id = $1", user['id']
+        )
+    customer_name = user_row['full_name'] if user_row else 'N/A'
+
     admin_text = (
         f"📦 <b>طلب جديد!</b>\n\n"
         f"📋 الرقم: #{order_number}\n"
-        f"👤 العميل: @{callback.from_user.username or 'N/A'}\n"
+        f"👤 الاسم: {customer_name}\n"
+        f"🆔 المعرف: <code>{callback.from_user.id}</code>\n"
+        f"👤 المستخدم: @{callback.from_user.username or 'N/A'}\n"
         f"💰 المبلغ: {data['amount_usdt']} USDT\n"
         f"🌐 الشبكة: {data['network']}\n"
         f"💱 العملة: {data['payment_currency']}\n"
+        f"💵 الإجمالي (شامل الرسوم): {calculation['total_amount']:.2f} {data['payment_currency']}\n"
+        f"📍 <b>عنوان التسليم:</b> <code>{data['wallet_address']}</code>\n"
     )
     for admin_id in Config.ADMIN_IDS:
         try:

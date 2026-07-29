@@ -120,7 +120,8 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id AS user_telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id AS user_telegram_id, u.full_name, u.shamcash_account "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
 
@@ -182,14 +183,35 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
 
     await message.answer(user_msg)
 
-    # Notify admins with verification info
+    # Notify admins with verification info + full customer details + order review
+    created_at_str = order['created_at'].strftime('%Y-%m-%d %H:%M')
     admin_text = (
-        f"📎 <b>تم رفع إيصال دفع</b>\n\n"
-        f"📦 الطلب: #{order['order_number']}\n"
-        f"👤 المستخدم: @{message.chat.username or 'N/A'}\n"
-        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-        f"💵 الإجمالي المطلوب: {order['total_amount']:.2f} {order['payment_currency']}"
-        f"{verification_note}"
+        f"📎 <b>إيصال دفع - مراجعة كاملة</b>\n\n"
+        f"━━━ 💳 معلومات الدفع ━━━\n"
+        f"📦 الطلب: <b>#{order['order_number']}</b>\n"
+        f"💰 المبلغ: {order['amount_usdt']} USDT -> {order['network']}\n"
+        f"💱 سعر الصرف: 1 USDT = {order['exchange_rate']:,.0f} {order['payment_currency']}\n"
+        f"💵 الإجمالي المطلوب: {order['total_amount']:.2f} {order['payment_currency']}\n\n"
+        f"━━━ 👤 معلومات العميل ━━━\n"
+        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"🆔 المعرف: <code>{order['user_telegram_id']}</code>\n"
+        f"📱 المستخدم: @{message.chat.username or 'N/A'}\n"
+        f"🏦 شام كاش: {order['shamcash_account'] or 'N/A'}\n\n"
+        f"━━━ 📍 عنوان الـUSDT ━━━\n"
+        f"🌐 الشبكة: {order['network']}\n"
+        f"📍 المحفظة: <code>{order['wallet_address']}</code>\n\n"
+        f"━━━ 🤖 التحقق الآلي ━━━"
+        f"{verification_note}" + (
+            ""
+            if not verification_result or not verification_result.get('extracted_amounts')
+            else f"\n📊 المبالغ المستخرجة: {', '.join(f'{a:.2f}' for a in verification_result['extracted_amounts'][:5])}"
+        )
+        + f"\n\n━━━ 📋 ملخص الطلب ━━━\n"
+        f"📅 تاريخ الإنشاء: {created_at_str}\n"
+        f"📊 الحالة: قيد المراجعة\n"
+        f"💰 USDT: {order['amount_usdt']}\n"
+        f"💱 الأساسي: {order['base_amount']:.2f} {order['payment_currency']}\n"
+        f"📈 رسوم ({order['fee_percent']}%): {order['fee_amount']:.2f} {order['payment_currency']}"
     )
 
     for admin_id in Config.ADMIN_IDS:
@@ -200,7 +222,8 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
                 reply_markup=order_admin_keyboard(order_id, new_status),
                 parse_mode='HTML'
             )
-            await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الطلب #{order['order_number']}")
+            if photo_id:
+                await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الدفع للطلب #{order['order_number']}")
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}")
 
