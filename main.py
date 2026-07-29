@@ -2,14 +2,14 @@
 import asyncio
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from config import Config
-from database import init_db, close_db
+from database import init_db, close_db, get_pool
 from bot import create_dispatcher
 from keep_alive import keep_alive
 
@@ -22,6 +22,42 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+async def check_expired_orders(bot: Bot):
+    """Background task: auto-cancel orders past payment deadline."""
+    while True:
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    expired = await conn.fetch(
+                        "SELECT o.*, u.telegram_id FROM orders o "
+                        "JOIN users u ON o.user_id = u.id "
+                        "WHERE o.status = 'waiting_payment' "
+                        "AND o.payment_deadline < NOW()"
+                    )
+                    for order in expired:
+                        await conn.execute(
+                            "UPDATE orders SET status = 'expired' WHERE id = $1",
+                            order['id']
+                        )
+                        try:
+                            await bot.send_message(
+                                order['telegram_id'],
+                                f"⏰ <b>انتهت مهلة الدفع</b>\n\n"
+                                f"📦 الطلب: #{order['order_number']}\n"
+                                f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
+                                f"انتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد.",
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
+                    if expired:
+                        logger.info(f"Auto-cancelled {len(expired)} expired orders")
+        except Exception as e:
+            logger.error(f"Expired order check failed: {e}")
+        await asyncio.sleep(60)
 
 
 async def on_startup(bot: Bot):
@@ -39,6 +75,10 @@ async def on_startup(bot: Bot):
             drop_pending_updates=True
         )
         logger.info(f"Webhook set: {Config.WEBHOOK_URL}")
+
+    # Start background task for auto-cancelling expired orders
+    asyncio.create_task(check_expired_orders(bot))
+    logger.info("Background expiry checker started")
 
 
 async def on_shutdown(bot: Bot):

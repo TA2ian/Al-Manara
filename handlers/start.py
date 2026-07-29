@@ -97,13 +97,14 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
     pool = await get_pool()
 
     async with pool.acquire() as conn:
+        username = callback.from_user.username or ''
         await conn.execute("""
             INSERT INTO users (telegram_id, username, language, terms_accepted, terms_accepted_at)
             VALUES ($1, $2, $3, TRUE, NOW())
             ON CONFLICT (telegram_id) DO UPDATE SET
                 terms_accepted = TRUE,
                 terms_accepted_at = NOW()
-        """, callback.from_user.id, callback.from_user.username, lang)
+        """, callback.from_user.id, username, lang)
 
     # Send welcome message
     await callback.message.delete()
