@@ -281,7 +281,7 @@ async def quick_wallet(callback: CallbackQuery):
 
 # ───── ⚙️ Settings Button (Reply Keyboard) ─────
 
-@router.message(F.text == "⚙️")
+@router.message(F.text.func(lambda t: '⚙' in t))
 async def settings_button(message: Message):
     """Handle the ⚙️ settings button from reply keyboard."""
     pool = await get_pool()
@@ -289,7 +289,7 @@ async def settings_button(message: Message):
 
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            "SELECT language, is_admin FROM users WHERE telegram_id = $1", message.from_user.id
+            "SELECT language FROM users WHERE telegram_id = $1", message.from_user.id
         )
         if user:
             lang = user['language']

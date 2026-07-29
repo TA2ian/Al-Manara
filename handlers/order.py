@@ -100,7 +100,8 @@ async def enter_amount(message: Message, state: FSMContext):
     lang = await _get_user_lang(message.from_user.id)
 
     try:
-        amount = float(message.text.strip())
+        # Strip commas and whitespace before parsing
+        amount = float(message.text.strip().replace(',', ''))
 
         if amount < Config.MIN_ORDER or amount > Config.MAX_ORDER:
             await message.answer(

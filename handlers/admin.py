@@ -123,10 +123,14 @@ async def admin_active_orders(callback: CallbackQuery):
 
         text = (
             f"{icon} <b>#{order['order_number']}</b>\n"
-            f"👤 {order['full_name'] or 'N/A'} (<code>{order['user_tg']}</code>)\n"
-            f"💰 {order['amount_usdt']} USDT → {order['network']}\n"
-            f"📊 {status_names.get(order['status'], order['status'])}\n"
-            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
+            f"━━━ 👤 العميل ━━━\n"
+            f"👤 الاسم: {order['full_name'] or 'N/A'}\n"
+            f"🆔 المعرف: <code>{order['user_tg']}</code>\n"
+            f"━━━ 💳 الطلب ━━━\n"
+            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+            f"🌐 الشبكة: {order['network']}\n"
+            f"📊 الحالة: {status_names.get(order['status'], order['status'])}\n"
+            f"📅 التاريخ: {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
         )
         await callback.message.answer(
             text,
