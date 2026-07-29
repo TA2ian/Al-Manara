@@ -143,6 +143,32 @@ def back_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     ])
 
 
+def skip_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
+    """Skip QR upload keyboard."""
+    text = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data="skip_qr")]
+    ])
+
+
+def start_verification_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
+    """Start verification process keyboard."""
+    text = "🔒 بدء التوثيق" if lang == 'ar' else "🔒 Start Verification"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data="start_verification")]
+    ])
+
+
+def admin_verify_keyboard(user_telegram_id: int, full_name: str, shamcash_account: str) -> InlineKeyboardMarkup:
+    """Admin verification action keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ توثيق", callback_data=f"verify_approve_{user_telegram_id}"),
+            InlineKeyboardButton(text="❌ رفض", callback_data=f"verify_reject_{user_telegram_id}")
+        ]
+    ])
+
+
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
     """Admin menu keyboard."""
     return InlineKeyboardMarkup(inline_keyboard=[

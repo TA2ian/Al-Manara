@@ -3,8 +3,9 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
 
-from keyboards.inline import admin_menu_keyboard, order_admin_keyboard
+from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, admin_verify_keyboard
 from services.locale_service import locale_service
+from services.notification_service import NotificationService
 from database import get_pool
 from config import Config
 
@@ -154,3 +155,79 @@ async def admin_dashboard(callback: CallbackQuery):
 
     await callback.message.edit_text(text, parse_mode='HTML', reply_markup=admin_menu_keyboard())
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("verify_approve_"))
+async def verify_approve_user(callback: CallbackQuery):
+    """Approve user verification."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    telegram_id = int(callback.data.replace("verify_approve_", ""))
+
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_verified = TRUE, verification_status = 'approved' WHERE telegram_id = $1",
+            telegram_id
+        )
+
+    # Notify user
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+
+    try:
+        from keyboards.inline import main_menu_inline
+        await bot.send_message(
+            telegram_id,
+            "🎉 <b>تم توثيق حسابك!</b>\n\nيمكنك الآن إنشاء طلبات الشحن.",
+            parse_mode='HTML',
+            reply_markup=main_menu_inline('ar')
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user {telegram_id}: {e}")
+
+    await callback.message.edit_text(
+        f"✅ تم توثيق المستخدم <code>{telegram_id}</code> بنجاح!",
+        parse_mode='HTML'
+    )
+    await callback.answer("✅ تم التوثيق!")
+
+
+@router.callback_query(F.data.startswith("verify_reject_"))
+async def verify_reject_user(callback: CallbackQuery):
+    """Reject user verification."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    telegram_id = int(callback.data.replace("verify_reject_", ""))
+
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET verification_status = 'rejected' WHERE telegram_id = $1",
+            telegram_id
+        )
+
+    # Notify user
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+
+    try:
+        await bot.send_message(
+            telegram_id,
+            "❌ <b>عذراً، لم يتم توثيق حسابك.</b>\n\nيرجى التواصل مع الدعم للمساعدة.",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user {telegram_id}: {e}")
+
+    await callback.message.edit_text(
+        f"❌ تم رفض توثيق المستخدم <code>{telegram_id}</code>.",
+        parse_mode='HTML'
+    )
+    await callback.answer("❌ تم الرفض!")

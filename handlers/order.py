@@ -20,6 +20,7 @@ from services.exchange_service import ExchangeService
 from services.notification_service import NotificationService
 from config import Config
 from database import get_pool
+from keyboards.inline import start_verification_keyboard
 
 router = Router()
 
@@ -45,7 +46,11 @@ async def start_order(message: Message, state: FSMContext):
         return
 
     if not user['is_verified']:
-        await message.answer("🔒 يرجى إكمال التوثيق أولاً.")
+        await message.answer(
+            "🔒 <b>يرجى إكمال التوثيق أولاً</b>\n\nلإنشاء طلب، يجب توثيق حسابك أولاً عبر إرسال اسمك ورقم شام كاش.",
+            parse_mode='HTML',
+            reply_markup=start_verification_keyboard(user['language'])
+        )
         return
 
     lang = user['language']

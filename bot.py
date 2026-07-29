@@ -11,7 +11,7 @@ def create_bot() -> Bot:
 
 def create_dispatcher() -> Dispatcher:
     """Create dispatcher with all handlers."""
-    from handlers import start, order, profile, my_orders, feedback, admin
+    from handlers import start, order, profile, my_orders, feedback, admin, verification
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
 
@@ -30,5 +30,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin.router)
+    dp.include_router(verification.router)
 
     return dp
