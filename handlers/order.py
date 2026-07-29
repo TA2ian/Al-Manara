@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from states import OrderStates, ReceiptStates
+from states import OrderStates
 from keyboards.inline import (
     network_selection_keyboard,
     currency_selection_keyboard,
@@ -21,7 +21,7 @@ from services.exchange_service import ExchangeService
 from services.notification_service import NotificationService
 from config import Config
 from database import get_pool
-from keyboards.inline import start_verification_keyboard, receipt_upload_keyboard
+from keyboards.inline import start_verification_keyboard
 
 router = Router()
 
@@ -265,68 +265,3 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("upload_receipt_"))
-async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
-    """Start receipt upload process."""
-    order_id = int(callback.data.replace("upload_receipt_", ""))
-    await state.update_data(receipt_order_id=order_id)
-    await callback.message.answer("📎 أرسل صورة الإيصال (مثل صورة التحويل من شام كاش):")
-    await state.set_state(ReceiptStates.waiting_receipt)
-    await callback.answer()
-
-
-@router.message(ReceiptStates.waiting_receipt, F.photo)
-async def handle_receipt_upload(message: Message, state: FSMContext):
-    """Handle receipt photo upload."""
-    data = await state.get_data()
-    order_id = data.get('receipt_order_id')
-
-    if not order_id:
-        await message.answer("❌ حدث خطأ. يرجى المحاولة مرة أخرى.")
-        await state.clear()
-        return
-
-    photo_id = message.photo[-1].file_id
-
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = receipt_upload_count + 1, status = 'receipt_received' WHERE id = $2",
-            photo_id, order_id
-        )
-        order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id AS user_telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id
-        )
-
-    if not order:
-        await message.answer("❌ الطلب غير موجود.")
-        await state.clear()
-        return
-
-    await message.answer("✅ تم استلام إيصالك! جاري مراجعة الإدارة...")
-
-    from aiogram import Bot
-    bot = Bot(token=Config.BOT_TOKEN)
-    from keyboards.inline import order_admin_keyboard
-    admin_text = (
-        f"📎 <b>تم رفع إيصال دفع</b>\n\n"
-        f"📦 الطلب: #{order['order_number']}\n"
-        f"👤 المستخدم: @{message.chat.username or 'N/A'}\n"
-        f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-    )
-    for admin_id in Config.ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                admin_text,
-                reply_markup=order_admin_keyboard(order_id, 'receipt_received'),
-                parse_mode='HTML'
-            )
-            await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الطلب #{order['order_number']}")
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Failed to notify admin {admin_id}: {e}")
-
-    await state.clear()
