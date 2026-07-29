@@ -35,7 +35,7 @@ async def admin_panel(message: Message):
 
 @router.callback_query(F.data == "admin_pending_orders")
 async def pending_orders(callback: CallbackQuery):
-    """Show pending orders."""
+    """Show pending orders (new, not yet approved)."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -44,23 +44,90 @@ async def pending_orders(callback: CallbackQuery):
 
     async with pool.acquire() as conn:
         orders = await conn.fetch(
-            "SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC"
+            "SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
+            "JOIN users u ON o.user_id = u.id "
+            "WHERE o.status = 'pending' ORDER BY o.created_at DESC"
         )
 
     if not orders:
-        await callback.message.edit_text("لا توجد طلبات معلقة")
+        await callback.message.edit_text("✅ لا توجد طلبات معلقة للموافقة")
+        await callback.answer()
         return
 
-    for order in orders:
-        text = f"""
-📦 طلب #{order['order_number']}
+    await callback.message.edit_text(
+        f"📦 <b>الطلبات المعلقة ({len(orders)})</b>",
+        parse_mode='HTML'
+    )
 
-👤 المستخدم: {order['user_id']}
-💰 المبلغ: {order['amount_usdt']} USDT
-🌐 الشبكة: {order['network']}
-💱 العملة: {order['payment_currency']}
-📅 التاريخ: {order['created_at'].strftime('%Y-%m-%d %H:%M')}
-"""
+    for order in orders:
+        text = (
+            f"📦 <b>#{order['order_number']}</b>\n"
+            f"👤 {order['full_name'] or 'N/A'} (<code>{order['user_tg']}</code>)\n"
+            f"💰 {order['amount_usdt']} USDT | 🌐 {order['network']}\n"
+            f"💱 {order['payment_currency']} | 💵 {order['total_amount']:.2f}\n"
+            f"📍 <code>{order['wallet_address'][:15]}...</code>\n"
+            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
+        )
+        await callback.message.answer(
+            text,
+            reply_markup=order_admin_keyboard(order['id'], order['status']),
+            parse_mode='HTML'
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_active_orders")
+async def admin_active_orders(callback: CallbackQuery):
+    """Show ALL active orders that need admin action."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        orders = await conn.fetch(
+            "SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
+            "JOIN users u ON o.user_id = u.id "
+            "WHERE o.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed') "
+            "ORDER BY o.created_at DESC"
+        )
+
+    if not orders:
+        await callback.message.edit_text("✅ لا توجد طلبات نشطة حالياً")
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        f"📋 <b>جميع الطلبات النشطة ({len(orders)})</b>\n"
+        f"⏳ في انتظار الموافقة • 💳 في انتظار الدفع\n"
+        f"📎 في انتظار مراجعة الإيصال • 🚀 في انتظار الإرسال",
+        parse_mode='HTML'
+    )
+
+    for order in orders:
+        status_icons = {
+            'pending': '⏳',
+            'waiting_payment': '💳',
+            'receipt_received': '📎',
+            'payment_confirmed': '🚀'
+        }
+        icon = status_icons.get(order['status'], '❓')
+        status_names = {
+            'pending': 'قيد الانتظار',
+            'waiting_payment': 'بانتظار الدفع',
+            'receipt_received': 'تم استلام الإيصال',
+            'payment_confirmed': 'تم تأكيد الدفع'
+        }
+
+        text = (
+            f"{icon} <b>#{order['order_number']}</b>\n"
+            f"👤 {order['full_name'] or 'N/A'} (<code>{order['user_tg']}</code>)\n"
+            f"💰 {order['amount_usdt']} USDT → {order['network']}\n"
+            f"📊 {status_names.get(order['status'], order['status'])}\n"
+            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
+        )
         await callback.message.answer(
             text,
             reply_markup=order_admin_keyboard(order['id'], order['status']),
@@ -127,8 +194,37 @@ async def approve_order(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Failed to send receipt upload button: {e}")
 
+    # Update admin notification: send NEW message with waiting_payment keyboard
+    # so the admin can follow up when the customer pays
+    admin_update_text = (
+        f"💳 <b>الطلب قيد الانتظار للدفع</b>\n\n"
+        f"📦 #{order['order_number']}\n"
+        f"💰 {order['amount_usdt']} USDT\n"
+        f"🌐 {order['network']}\n"
+        f"📍 <code>{order['wallet_address'][:15]}...</code>\n"
+        f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
+        f"بانتظار إرسال العميل للإيصال..."
+    )
+    for admin_id in Config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                admin_update_text,
+                reply_markup=order_admin_keyboard(order_id, 'waiting_payment'),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id}: {e}")
+
     await callback.answer("✅ تمت الموافقة!")
     await callback.message.edit_text(f"✅ تمت الموافقة على طلب #{order['order_number']}")
+    # Also send an admin menu link so they can go back
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.answer(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
 
 
 @router.callback_query(F.data == "admin_dashboard")
@@ -307,6 +403,13 @@ async def confirm_payment(callback: CallbackQuery):
 
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
+    # Send admin menu so they can continue
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.answer(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
 
 
 @router.callback_query(F.data.startswith("admin_reject_receipt_"))

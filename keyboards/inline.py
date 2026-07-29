@@ -182,14 +182,14 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📦 الطلبات المعلقة", callback_data="admin_pending_orders"),
-            InlineKeyboardButton(text="📊 لوحة التحكم", callback_data="admin_dashboard")
+            InlineKeyboardButton(text="📋 جميع النشطة", callback_data="admin_active_orders")
         ],
         [
-            InlineKeyboardButton(text="💱 تحديث السعر", callback_data="admin_update_rate"),
-            InlineKeyboardButton(text="⚙️ الإعدادات", callback_data="admin_settings")
+            InlineKeyboardButton(text="📊 لوحة التحكم", callback_data="admin_dashboard"),
+            InlineKeyboardButton(text="💱 تحديث السعر", callback_data="admin_update_rate")
         ],
         [
-            InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups"),
+            InlineKeyboardButton(text="⚙️ الإعدادات", callback_data="admin_settings"),
             InlineKeyboardButton(text="📨 إشعار جماعي", callback_data="admin_broadcast")
         ],
         [
@@ -199,6 +199,9 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📈 التحليلات", callback_data="admin_analytics"),
             InlineKeyboardButton(text="📝 Logs", callback_data="admin_logs")
+        ],
+        [
+            InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups")
         ]
     ])
 
