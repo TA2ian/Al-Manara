@@ -36,22 +36,15 @@ async def show_my_orders(message: Message):
         await message.answer(locale_service.get('no_orders', lang))
         return
 
-    text = f"📋 <b>{locale_service.get('my_orders', lang)}</b>
-
-"
+    text = f"📋 <b>{locale_service.get('my_orders', lang)}</b>\n\n"
 
     for order in orders:
         status_key = f"order_status_{order['status']}"
         status_text = locale_service.get(status_key, lang)
 
-        text += f"📦 #{order['order_number']}
-"
-        text += f"   💰 {order['amount_usdt']} USDT ({order['network']})
-"
-        text += f"   📊 {status_text}
-"
-        text += f"   📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}
-
-"
+        text += f"📦 #{order['order_number']}\n"
+        text += f"   💰 {order['amount_usdt']} USDT ({order['network']})\n"
+        text += f"   📊 {status_text}\n"
+        text += f"   📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}\n\n"
 
     await message.answer(text, parse_mode='HTML', reply_markup=main_menu_inline(lang))

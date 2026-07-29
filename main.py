@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def on_startup(bot: Bot, dp: Dispatcher):
+async def on_startup(bot: Bot):
     """Startup handler."""
     logger.info("Starting bot...")
 
@@ -41,7 +41,7 @@ async def on_startup(bot: Bot, dp: Dispatcher):
         logger.info(f"Webhook set: {Config.WEBHOOK_URL}")
 
 
-async def on_shutdown(bot: Bot, dp: Dispatcher):
+async def on_shutdown(bot: Bot):
     """Shutdown handler."""
     logger.info("Shutting down...")
 
