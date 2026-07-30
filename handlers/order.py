@@ -49,6 +49,15 @@ async def start_order(message: Message, state: FSMContext):
         await message.answer("يرجى قبول الشروط أولاً: /start")
         return
 
+    if user.get('is_blocked', False):
+        lang = user.get('language', 'ar')
+        support = locale_service.get('support_contact', lang)
+        await message.answer(
+            locale_service.get('user_blocked', lang) + "\n\n" + support,
+            parse_mode='HTML'
+        )
+        return
+
     if not user['is_verified']:
         await message.answer(
             "🔒 <b>يرجى إكمال التوثيق أولاً</b>\n\nلإنشاء طلب، يجب توثيق حسابك أولاً عبر إرسال اسمك ورقم شام كاش.",
@@ -61,7 +70,8 @@ async def start_order(message: Message, state: FSMContext):
 
     await message.answer(
         locale_service.get('select_network', lang),
-        reply_markup=network_selection_keyboard(lang)
+        reply_markup=network_selection_keyboard(lang),
+        parse_mode='HTML'
     )
 
     await state.set_state(OrderStates.waiting_network)
@@ -198,7 +208,8 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
         example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
         await message.answer(
             locale_service.get('enter_wallet', lang, network=network, example=example),
-            reply_markup=cancel_keyboard(lang)
+            reply_markup=cancel_keyboard(lang),
+            parse_mode='HTML'
         )
         await state.set_state(OrderStates.waiting_wallet)
 
@@ -301,7 +312,8 @@ async def enter_wallet_manual(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         locale_service.get('enter_wallet', lang, network=network, example=example),
-        reply_markup=cancel_keyboard(lang)
+        reply_markup=cancel_keyboard(lang),
+        parse_mode='HTML'
     )
     await state.set_state(OrderStates.waiting_wallet)
     await callback.answer()

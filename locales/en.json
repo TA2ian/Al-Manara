@@ -111,5 +111,14 @@
   "delete_address_done": "✅ Address deleted successfully.",
   "disclaimer_title": "📋 Disclaimer",
   "disclaimer_btn": "📋 Disclaimer",
+  "ban_user": "🚫 Ban User",
+  "unban_user": "✅ Unban User",
+  "ban_confirm": "🚫 Are you sure you want to ban this user?\n\n{banned_info}\n\nThey won't be able to create orders or use the bot.",
+  "ban_done": "🚫 User {info} has been banned successfully.\n\nThey won't be able to use the bot until unbanned.",
+  "unban_done": "✅ User {info} has been unbanned successfully.\n\nThey can use the bot again.",
+  "unban_confirm": "✅ Are you sure you want to unban this user?\n\n{banned_info}",
+  "user_blocked": "🚫 Your account has been blocked.\n\nFor inquiries, contact support:",
+  "ban_reason_prompt": "📝 Enter ban reason (optional):\nOr send \"Skip\" to ban without a reason.",
+  "ban_reason_skip": "⏭️ Skip",
   "save_address_label_prompt": "🏷️ <b>Enter a name for this address</b>\n\nExample: My Main Wallet\nOr send \"Skip\" to save without a label."
 }

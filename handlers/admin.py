@@ -1543,7 +1543,17 @@ async def admin_search_handler(message: Message, state: FSMContext):
                     f"🚫 محظور: {'✅' if u['is_blocked'] else '❌'}\n"
                     f"📅 التسجيل: {u['created_at'].strftime('%Y-%m-%d')}"
                 )
-                await message.answer(text, parse_mode='HTML')
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                tid = u['telegram_id']
+                if u['is_blocked']:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ فك الحظر", callback_data=f"admin_unban_{tid}")]
+                    ])
+                else:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🚫 حظر", callback_data=f"admin_ban_{tid}")]
+                    ])
+                await message.answer(text, parse_mode='HTML', reply_markup=kb)
         elif search_type == 'order':
             row = await conn.fetchrow("SELECT o.*, u.full_name, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.order_number ILIKE $1", f"%{query}%")
             if not row:
@@ -1561,6 +1571,133 @@ async def admin_search_handler(message: Message, state: FSMContext):
                 )
                 await message.answer(text, parse_mode='HTML')
     await state.clear()
+
+
+# ───── Admin Ban / Unban ─────
+
+@router.callback_query(F.data.startswith("admin_ban_"))
+async def admin_ban_user(callback: CallbackQuery):
+    """Ban a user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_ban_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT full_name, telegram_id, is_blocked FROM users WHERE telegram_id = $1", tid
+        )
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+    if user['is_blocked']:
+        await callback.answer("✅ المستخدم محظور بالفعل", show_alert=True)
+        return
+
+    name = user['full_name'] or 'N/A'
+    await callback.message.edit_text(
+        f"🚫 <b>تأكيد حظر المستخدم</b>\n\n"
+        f"👤 {name}\n"
+        f"🆔 <code>{tid}</code>\n\n"
+        f"هل تريد حظر هذا المستخدم؟\n"
+        f"لن يتمكن من إنشاء طلبات أو استخدام البوت.",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ تأكيد الحظر", callback_data=f"admin_ban_confirm_{tid}"),
+                InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_search_user")
+            ]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_ban_confirm_"))
+async def admin_ban_user_execute(callback: CallbackQuery):
+    """Execute user ban."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_ban_confirm_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_blocked = TRUE WHERE telegram_id = $1", tid
+        )
+        await conn.execute(
+            "INSERT INTO blocked_users (telegram_id, blocked_by) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            tid, callback.from_user.id
+        )
+    await callback.message.edit_text(
+        f"✅ <b>تم حظر المستخدم</b>\n"
+        f"🆔 <code>{tid}</code>",
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        "⚙️ لوحة التحكم",
+        reply_markup=admin_menu_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_unban_"))
+async def admin_unban_user(callback: CallbackQuery):
+    """Unban a user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_unban_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT full_name, telegram_id, is_blocked FROM users WHERE telegram_id = $1", tid
+        )
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+    if not user['is_blocked']:
+        await callback.answer("✅ المستخدم غير محظور", show_alert=True)
+        return
+
+    name = user['full_name'] or 'N/A'
+    await callback.message.edit_text(
+        f"✅ <b>تأكيد فك الحظر</b>\n\n"
+        f"👤 {name}\n"
+        f"🆔 <code>{tid}</code>\n\n"
+        f"هل تريد فك الحظر عن هذا المستخدم؟",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ تأكيد فك الحظر", callback_data=f"admin_unban_confirm_{tid}"),
+                InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_search_user")
+            ]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_unban_confirm_"))
+async def admin_unban_user_execute(callback: CallbackQuery):
+    """Execute user unban."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_unban_confirm_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_blocked = FALSE WHERE telegram_id = $1", tid
+        )
+    await callback.message.edit_text(
+        f"✅ <b>تم فك الحظر عن المستخدم</b>\n"
+        f"🆔 <code>{tid}</code>",
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        "⚙️ لوحة التحكم",
+        reply_markup=admin_menu_keyboard()
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_search_order")

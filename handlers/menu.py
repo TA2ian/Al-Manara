@@ -107,7 +107,8 @@ async def back_to_wallet(callback: CallbackQuery, state: FSMContext):
     example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
     await callback.message.edit_text(
         locale_service.get('enter_wallet', lang, network=network, example=example),
-        reply_markup=cancel_keyboard(lang)
+        reply_markup=cancel_keyboard(lang),
+        parse_mode='HTML'
     )
     await state.set_state('OrderStates:waiting_wallet')
     await callback.answer()
@@ -471,28 +472,6 @@ async def view_saved_address(callback: CallbackQuery):
         parse_mode='HTML',
         reply_markup=kb
     )
-    await callback.message.answer(
-        locale_service.get('main_menu', lang),
-        reply_markup=main_menu_inline(lang)
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("del_addr_"))
-async def delete_saved_address_confirm(callback: CallbackQuery):
-    """Ask for delete confirmation."""
-    addr_id = int(callback.data.replace("del_addr_", ""))
-    lang = 'ar'
-    await callback.message.edit_text(
-        locale_service.get('delete_address_confirm', lang),
-        parse_mode='HTML',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text=locale_service.get('delete_address_confirm_btn', lang), callback_data=f"del_addr_conf_{addr_id}"),
-                InlineKeyboardButton(text=locale_service.get('cancel', lang), callback_data="quick_saved_addresses")
-            ]
-        ])
-    )
     await callback.answer()
 
 
@@ -518,8 +497,25 @@ async def delete_saved_address_execute(callback: CallbackQuery):
         locale_service.get('delete_address_done', lang),
         parse_mode='HTML'
     )
-    await callback.message.answer(
-        locale_service.get('main_menu', lang),
-        reply_markup=main_menu_inline(lang)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("del_addr_"))
+async def delete_saved_address_confirm(callback: CallbackQuery):
+    """Ask for delete confirmation."""
+    addr_id = int(callback.data.replace("del_addr_", ""))
+    # Skip if this is actually a del_addr_conf_ callback that was caught
+    if callback.data.startswith("del_addr_conf_"):
+        return
+    lang = 'ar'
+    await callback.message.edit_text(
+        locale_service.get('delete_address_confirm', lang),
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=locale_service.get('delete_address_confirm_btn', lang), callback_data=f"del_addr_conf_{addr_id}"),
+                InlineKeyboardButton(text=locale_service.get('cancel', lang), callback_data="quick_saved_addresses")
+            ]
+        ])
     )
     await callback.answer()
