@@ -39,7 +39,7 @@
   "select_currency": "💱 Select payment currency:",
   "usd": "🇺🇸 US Dollar (USD)",
   "syp": "🇸🇾 Syrian Pound (SYP)",
-  "order_summary": "📋 Your Order Summary #{order_number}\n\n──── USDT Info ────\nAmount: {amount_usdt} USDT\nNetwork: {network}\nAddress: <code>{wallet}</code>\n\n──── Payment Details ────\nCurrency: {currency}\nExchange Rate: 1 USD = {rate} SYP\nBase Amount: {base_amount:,.2f} {currency}\n{new_syr_line}\n──── Fees ────\nService Fee ({fee_percent}%): {fee_amount:,.2f} {currency}\n{new_syr_fee_line}\n━━━━━━━━━━━━━━━━━━━━\n💰 Total: <b>{total:,.2f} {currency}</b>\n{new_syr_total_line}\n✅ <b>You will receive: {amount_usdt} USDT</b>\n⏱ Estimated Time: 15 minutes - 24 hours",
+  "order_summary": "📋 <b>Your Order Summary #{order_number}</b>\n\n──── 💳 USDT Info ────\n💰 Amount: {amount_usdt} USDT\n🌐 Network: {network}\n📍 Address: <code>{wallet}</code>\n\n──── 💱 Payment Details ────\nCurrency: {currency}\nExchange Rate: 1 USD = {rate} SYP\n💰 <b>Base Amount: {base_amount:,.2f} {currency}</b>\n👇 This is the amount you will receive\n{new_syr_line}\n──── 💰 Fees ────\nService Fee ({fee_percent}%): {fee_amount:,.2f} {currency}\n{new_syr_fee_line}\n━━━━━━━━━━━━━━━━━━━━\n💰 <b>Total: {total:,.2f} {currency}</b>\n{new_syr_total_line}\n⚠️ <b>Note:</b> If you send the amount without service fees, the fees will be deducted from the <b>Base Amount</b>. Thank you for your cooperation 🙏\n━━━━━━━━━━━━━━━━━━━━\n⏱ Estimated Time: 15 minutes - 24 hours",
   "confirm_order": "✅ Confirm & Submit Order",
   "cancel_order": "❌ Cancel",
   "order_created": "✅ Your order has been created!\n\n📦 Order Number: <b>#{order_number}</b>\n\n⏳ Waiting for admin approval...",
