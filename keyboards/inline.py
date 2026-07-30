@@ -258,12 +258,36 @@ def settings_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def preset_amounts_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
+    """Preset USDT amount selection keyboard."""
+    # Common preset amounts - adjust as needed
+    amounts = [50, 100, 200, 500, 1000]
+    rows = []
+    # Two per row
+    for i in range(0, len(amounts), 2):
+        row = []
+        for amt in amounts[i:i+2]:
+            row.append(InlineKeyboardButton(text=f"{amt} USDT", callback_data=f"amount_preset_{amt}"))
+        rows.append(row)
+    # Custom amount at the bottom
+    custom_text = "✏️ مبلغ آخر" if lang == 'ar' else "✏️ Other Amount"
+    rows.append([InlineKeyboardButton(text=custom_text, callback_data="amount_custom")])
+    rows.append([
+        InlineKeyboardButton(text="❌ " + ("إلغاء" if lang == 'ar' else "Cancel"), callback_data="cancel_order")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def language_select_keyboard() -> InlineKeyboardMarkup:
-    """Language selection keyboard at start."""
+    """Language selection keyboard at start.
+    Uses Unicode direction marks for proper RTL/LTR display:
+    Arabic gets RLM (right-to-left) suffix, English gets LRM (left-to-right) suffix.
+    """
+    # \u200F = Right-to-Left Mark (RLM), \u200E = Left-to-Right Mark (LRM)
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
-            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")
+            InlineKeyboardButton(text="🇸🇦 العربية\u200F", callback_data="lang_ar"),
+            InlineKeyboardButton(text="🇬🇧 English\u200E", callback_data="lang_en")
         ]
     ])
 

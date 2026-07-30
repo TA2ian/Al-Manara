@@ -13,7 +13,8 @@ from keyboards.inline import (
     cancel_keyboard,
     main_menu_inline,
     order_admin_keyboard,
-    saved_addresses_keyboard
+    saved_addresses_keyboard,
+    preset_amounts_keyboard,
 )
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
@@ -94,10 +95,89 @@ async def select_network(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         locale_service.get('enter_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
-        reply_markup=cancel_keyboard(lang)
+        reply_markup=preset_amounts_keyboard(lang)
     )
 
     await state.set_state(OrderStates.waiting_amount)
+    await callback.answer()
+
+
+@router.callback_query(OrderStates.waiting_amount, F.data.startswith("amount_preset_"))
+async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
+    """Handle preset amount selection."""
+    amount = float(callback.data.replace("amount_preset_", ""))
+    lang = await _get_user_lang(callback.from_user.id)
+
+    allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_amount')
+    if not allowed:
+        await callback.answer()
+        return
+
+    if amount < Config.MIN_ORDER or amount > Config.MAX_ORDER:
+        await callback.answer(
+            f"❌ المبلغ خارج الحدود ({Config.MIN_ORDER}-{Config.MAX_ORDER} USDT)",
+            show_alert=True
+        )
+        await callback.message.edit_text(
+            locale_service.get('enter_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
+            reply_markup=preset_amounts_keyboard(lang)
+        )
+        return
+
+    await callback.message.delete()
+    await _process_valid_amount(callback.message, state, lang, amount)
+    await callback.answer()
+
+
+async def _process_valid_amount(message: Message, state: FSMContext, lang: str, amount: float):
+    """Continue order flow after amount is validated."""
+    # Check daily limit
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
+        )
+        if user:
+            today_total = await conn.fetchval(
+                "SELECT COALESCE(SUM(amount_usdt), 0) FROM orders "
+                "WHERE user_id = $1 AND created_at >= CURRENT_DATE",
+                user['id']
+            )
+            if today_total + amount > Config.DAILY_LIMIT:
+                await message.answer(
+                    f"❌ تجاوز الحد اليومي!\n"
+                    f"الحد اليومي: {Config.DAILY_LIMIT} USDT\n"
+                    f"المستخدم اليوم: {today_total:.1f} USDT\n"
+                    f"المبلغ المطلوب: {amount} USDT\n"
+                    f"المتبقي: {Config.DAILY_LIMIT - today_total:.1f} USDT"
+                )
+                return False
+
+    await state.update_data(amount_usdt=amount)
+
+    data = await state.get_data()
+    network = data['network']
+
+    example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+
+    await message.answer(
+        locale_service.get('enter_wallet', lang, network=network, example=example),
+        reply_markup=cancel_keyboard(lang)
+    )
+
+    await state.set_state(OrderStates.waiting_wallet)
+    return True
+
+
+@router.callback_query(OrderStates.waiting_amount, F.data == "amount_custom")
+async def enter_amount_custom(callback: CallbackQuery, state: FSMContext):
+    """Let user type custom amount."""
+    lang = await _get_user_lang(callback.from_user.id)
+    from keyboards.inline import cancel_keyboard
+    await callback.message.edit_text(
+        locale_service.get('enter_amount_custom', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
+        reply_markup=cancel_keyboard(lang)
+    )
     await callback.answer()
 
 
@@ -120,41 +200,7 @@ async def enter_amount(message: Message, state: FSMContext):
             )
             return
 
-        # Check daily limit
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
-            )
-            if user:
-                today_total = await conn.fetchval(
-                    "SELECT COALESCE(SUM(amount_usdt), 0) FROM orders "
-                    "WHERE user_id = $1 AND created_at >= CURRENT_DATE",
-                    user['id']
-                )
-                if today_total + amount > Config.DAILY_LIMIT:
-                    await message.answer(
-                        f"❌ تجاوز الحد اليومي!\n"
-                        f"الحد اليومي: {Config.DAILY_LIMIT} USDT\n"
-                        f"المستخدم اليوم: {today_total:.1f} USDT\n"
-                        f"المبلغ المطلوب: {amount} USDT\n"
-                        f"المتبقي: {Config.DAILY_LIMIT - today_total:.1f} USDT"
-                    )
-                    return
-
-        await state.update_data(amount_usdt=amount)
-
-        data = await state.get_data()
-        network = data['network']
-
-        example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
-
-        await message.answer(
-            locale_service.get('enter_wallet', lang, network=network, example=example),
-            reply_markup=cancel_keyboard(lang)
-        )
-
-        await state.set_state(OrderStates.waiting_wallet)
+        await _process_valid_amount(message, state, lang, amount)
 
     except ValueError:
         await message.answer(
@@ -189,9 +235,20 @@ async def enter_wallet(message: Message, state: FSMContext):
     # Check cross-network
     other_network = WalletValidator.detect_network(wallet)
     if other_network and other_network != network:
+        # Offer automatic switch to the corrected network
+        switch_text = f"🔄 التبديل إلى {other_network}" if lang == 'ar' else f"🔄 Switch to {other_network}"
+        continue_text = "✅ الاستمرار مع " + network if lang == 'ar' else f"✅ Continue with {network}"
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        network_switch_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=switch_text, callback_data=f"switch_to_network_{other_network}")],
+            [InlineKeyboardButton(text=continue_text, callback_data="skip_network_switch")]
+        ])
         await message.answer(
-            locale_service.get('wallet_cross_check', lang, other_network=other_network)
+            locale_service.get('wallet_cross_check_switch', lang, other_network=other_network, current_network=network),
+            reply_markup=network_switch_keyboard,
+            parse_mode='HTML'
         )
+        return  # Wait for user to choose
 
     await message.answer(
         locale_service.get('wallet_valid', lang),
@@ -294,6 +351,89 @@ async def skip_wallet_qr_text(message: Message, state: FSMContext):
     await message.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
 
     await state.set_state(OrderStates.waiting_save_address)
+
+
+@router.callback_query(F.data.startswith("switch_to_network_"))
+async def switch_to_network_corrected(callback: CallbackQuery, state: FSMContext):
+    """User clicked to switch to the corrected network after cross-network detection."""
+    target_network = callback.data.replace("switch_to_network_", "")
+    lang = await _get_user_lang(callback.from_user.id)
+
+    # Update state with the corrected network (keep wallet address)
+    await state.update_data(network=target_network)
+
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+
+    await callback.message.edit_text(
+        f"🔄 تم التبديل إلى <b>{target_network}</b> ✓" if lang == 'ar' else
+        f"🔄 Switched to <b>{target_network}</b> ✓",
+        parse_mode='HTML'
+    )
+
+    # Re-validate wallet with new network
+    validation = WalletValidator.validate(wallet, target_network)
+    if validation['valid']:
+        await callback.message.answer(
+            locale_service.get('wallet_valid', lang),
+        )
+        # Ask for QR code (continue the flow from after wallet validation)
+        qr_prompt = "📸 <b>هل تريد إرفاق رمز QR لعنوان محفظتك؟</b>\n\n" \
+                    "يمكنك إرسال صورة QR ليسهل على الأدمن إرسال USDT.\n" \
+                    "أرسل صورة QR، أو اضغط 'تخطي' للمتابعة." if lang == 'ar' else \
+                    "📸 <b>Would you like to attach a QR code of your wallet address?</b>\n\n" \
+                    "Send a QR image to help the admin send USDT.\n" \
+                    "Send a QR image, or click 'Skip' to continue."
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
+        ])
+        await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
+        await state.set_state(OrderStates.waiting_wallet_qr)
+    else:
+        # Wallet invalid on new network - go back to enter_wallet
+        await callback.message.answer(
+            f"❌ المحفظة غير صالحة على {target_network}. أعد إدخال عنوان صحيح." if lang == 'ar' else
+            f"❌ Wallet invalid on {target_network}. Please re-enter a valid address.",
+        )
+        network = data.get('network', 'BEP20')
+        example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+        await callback.message.answer(
+            locale_service.get('enter_wallet', lang, network=network, example=example),
+            reply_markup=cancel_keyboard(lang)
+        )
+        await state.set_state(OrderStates.waiting_wallet)
+
+
+@router.callback_query(F.data == "skip_network_switch")
+async def skip_network_switch(callback: CallbackQuery, state: FSMContext):
+    """User chose to keep the original network despite cross-network warning."""
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+
+    await callback.message.edit_text(
+        "✅ تم الاستمرار مع الشبكة المحددة." if lang == 'ar' else "✅ Continuing with selected network."
+    )
+
+    await callback.message.answer(
+        locale_service.get('wallet_valid', lang),
+    )
+
+    # Continue to QR prompt
+    qr_prompt = "📸 <b>هل تريد إرفاق رمز QR لعنوان محفظتك؟</b>\n\n" \
+                "يمكنك إرسال صورة QR ليسهل على الأدمن إرسال USDT.\n" \
+                "أرسل صورة QR، أو اضغط 'تخطي' للمتابعة." if lang == 'ar' else \
+                "📸 <b>Would you like to attach a QR code of your wallet address?</b>\n\n" \
+                "Send a QR image to help the admin send USDT.\n" \
+                "Send a QR image, or click 'Skip' to continue."
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
+    ])
+    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
+    await state.set_state(OrderStates.waiting_wallet_qr)
+    await callback.answer()
 
 
 @router.callback_query(OrderStates.waiting_currency, F.data.startswith("currency_"))
