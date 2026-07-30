@@ -14,22 +14,37 @@ from config import Config
 router = Router()
 
 
-TERMS_TEXT_AR = """📋 <b>شروط الخدمة وإخلاء المسؤولية</b>
+TERMS_TEXT_AR = """━━━ <b>شروط الخدمة وإخلاء المسؤولية</b> ━━━
 
-مرحباً بك في بوت USDT!
+<b>أولاً: طبيعة الخدمة</b>
+يعمل هذا البوت كوسيط تقني بينك وبين مزود خدمة تحويل العملات الرقمية. البوت هو واجهة لإدارة الطلبات فقط.
 
-▪️ هذا البوت وسيط بينك وبين مزود الخدمة.
-▪️ جميع المعاملات نهائية ولا يمكن التراجع.
-▪️ تأكد من صحة عنوان محفظتك قبل الإرسال.
-▪️ نحن غير مسؤولين عن فقدان الأموال بسبب عنوان خاطئ أو شبكة غير صحيحة.
-▪️ سعر الصرف قابل للتغيير دون إشعار مسبق.
-▪️ الحد الأدنى للطلب: {min_order} USDT.
-▪️ الحد الأقصى للطلب: {max_order} USDT.
-▪️ مدة المعالجة: 15 دقيقة - 24 ساعة.
-▪️ الدفع عبر شام كاش فقط.
-▪️ يجب إرسال إيصال الدفع خلال {timeout} دقيقة.
+<b>ثانياً: المسؤولية</b>
+- أنت وحدك المسؤول عن صحة عنوان محفظة USDT الذي تُدخله.
+- نحن غير مسؤولين عن فقدان الأموال نتيجة إدخال عنوان خاطئ أو اختيار شبكة غير صحيحة.
+- عند حفظ عنوان محفظة، تقع عليك مسؤولية التحقق منه قبل كل استخدام.
+- البوت لا يخزن العملات الرقمية ولا يتعامل بها بشكل مباشر.
 
-<b>بالضغط على "أوافق" فإنك تقر بأنك قرأت وفهمت هذه الشروط.</b>"""
+<b>ثالثاً: المعاملات</b>
+- الحد الأدنى للطلب: {min_order} USDT.
+- الحد الأقصى للطلب: {max_order} USDT.
+- سعر الصرف قابل للتغيير دون إشعار مسبق.
+- مدة المعالجة المتوقعة: 15 دقيقة - 24 ساعة.
+- الدفع عبر شام كاش حصراً.
+- يجب إرفاق إيصال الدفع خلال {timeout} دقيقة من الموافقة على الطلب.
+- جميع المعاملات نهائية بعد تأكيد الدفع.
+
+<b>رابعاً: الخصوصية</b>
+- تُستخدم بياناتك (الاسم، رقم شام كاش، معرف تيليغرام) لأغراض إدارة الطلبات فقط.
+- لا يتم مشاركة بياناتك مع أطراف ثالثة.
+
+<b>خامساً: أحكام عامة</b>
+- نحتفظ بالحق في رفض أو إلغاء أي طلب وفقاً لتقديرنا.
+- نحتفظ بالحق في تحديث هذه الشروط في أي وقت.
+- استخدامك المستمر للبوت بعد التحديث يعني موافقتك على الشروط الجديدة.
+
+━━━━━━━━━━━━━━━━━━━━
+<b>بالضغط على "أوافق" فإنك تقر بأنك قرأت وفهمت وأقريت هذه الشروط.</b>"""
 
 
 WELCOME_TEXT_AR = """🎉 <b>أهلاً وسهلاً يا {name}!</b>
@@ -84,20 +99,31 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
 
     terms_text = (
         TERMS_TEXT_AR if lang == 'ar' else
-        "📋 <b>Terms of Service & Disclaimer</b>\n\n"
-        "Welcome to USDT Bot!\n\n"
-        "▪️ This bot is an intermediary between you and the service provider.\n"
-        "▪️ All transactions are final and irreversible.\n"
-        "▪️ Verify your wallet address before sending.\n"
-        "▪️ We are not responsible for lost funds due to incorrect address or network.\n"
-        "▪️ Exchange rates may change without prior notice.\n"
-        "▪️ Minimum order: {min_order} USDT.\n"
-        "▪️ Maximum order: {max_order} USDT.\n"
-        "▪️ Processing time: 15 minutes - 24 hours.\n"
-        "▪️ Payment via Sham Cash only.\n"
-        "▪️ Payment receipt must be sent within {timeout} minutes.\n"
-        "▪️ Fees: According to current settings.\n\n"
-        "<b>By clicking \"Agree\", you acknowledge that you have read and understood these terms.</b>"
+        "━━━ <b>Terms of Service & Disclaimer</b> ━━━\n\n"
+        "<b>1. Service Nature</b>\n"
+        "This bot serves as a technical intermediary between you and the digital currency exchange service provider. The bot is an order management interface only.\n\n"
+        "<b>2. Liability</b>\n"
+        "- You are solely responsible for the accuracy of the USDT wallet address you enter.\n"
+        "- We are not liable for any loss of funds resulting from an incorrect address or wrong network selection.\n"
+        "- When saving a wallet address, you bear the responsibility of verifying it before each use.\n"
+        "- The bot does not store or directly handle digital currencies.\n\n"
+        "<b>3. Transactions</b>\n"
+        "- Minimum order: {min_order} USDT.\n"
+        "- Maximum order: {max_order} USDT.\n"
+        "- Exchange rates are subject to change without prior notice.\n"
+        "- Estimated processing time: 15 minutes - 24 hours.\n"
+        "- Payment via Sham Cash only.\n"
+        "- Payment receipt must be submitted within {timeout} minutes of order approval.\n"
+        "- All transactions are final once payment is confirmed.\n\n"
+        "<b>4. Privacy</b>\n"
+        "- Your data (name, Sham Cash account, Telegram ID) is used solely for order management.\n"
+        "- Your data is not shared with third parties.\n\n"
+        "<b>5. General Provisions</b>\n"
+        "- We reserve the right to reject or cancel any order at our discretion.\n"
+        "- We reserve the right to update these terms at any time.\n"
+        "- Your continued use of the bot after updates constitutes acceptance of the new terms.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>By clicking \"Agree\", you acknowledge that you have read, understood, and accepted these terms.</b>"
     )
 
     await callback.message.edit_text(
