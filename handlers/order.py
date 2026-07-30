@@ -34,7 +34,7 @@ def generate_order_number() -> str:
     return f"ORD_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6].upper()}"
 
 
-@router.message(F.text.in_(["💰 جديد", "💰 New"]))
+@router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
 async def start_order(message: Message, state: FSMContext):
     """Start new order."""
     pool = await get_pool()
