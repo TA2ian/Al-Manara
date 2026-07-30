@@ -24,6 +24,51 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def send_expiry_reminders(bot: Bot):
+    """Background task: warn users 10 minutes before payment deadline."""
+    while True:
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    soon_expiring = await conn.fetch(
+                        "SELECT o.*, u.telegram_id, u.language FROM orders o "
+                        "JOIN users u ON o.user_id = u.id "
+                        "WHERE o.status = 'waiting_payment' "
+                        "AND o.payment_deadline BETWEEN NOW() + INTERVAL '9 minutes' AND NOW() + INTERVAL '12 minutes'"
+                    )
+                    for order in soon_expiring:
+                        remaining = int((order['payment_deadline'] - datetime.now()).total_seconds() / 60)
+                        lang = order['language'] or 'ar'
+                        msg = (
+                            f"⏰ <b>تنبيه: المهلة على وشك الانتهاء!</b>\n\n"
+                            f"📦 الطلب: #{order['order_number']}\n"
+                            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+                            f"⏱ الوقت المتبقي: <b>{remaining} دقائق</b>\n\n"
+                            f"⚠️ يرجى إرسال إيصال الدفع قبل انتهاء المهلة."
+                        ) if lang == 'ar' else (
+                            f"⏰ <b>Warning: Payment deadline approaching!</b>\n\n"
+                            f"📦 Order: #{order['order_number']}\n"
+                            f"💰 Amount: {order['amount_usdt']} USDT\n"
+                            f"⏱ Time remaining: <b>{remaining} minutes</b>\n\n"
+                            f"⚠️ Please upload your payment receipt before the deadline."
+                        )
+                        try:
+                            from keyboards.inline import receipt_upload_keyboard
+                            await bot.send_message(
+                                order['telegram_id'], msg,
+                                reply_markup=receipt_upload_keyboard(order['id'], lang),
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            logger.error(f"Expiry reminder failed for {order['telegram_id']}: {e}")
+                    if soon_expiring:
+                        logger.info(f"Sent {len(soon_expiring)} expiry reminders")
+        except Exception as e:
+            logger.error(f"Expiry reminder check failed: {e}")
+        await asyncio.sleep(300)
+
+
 async def check_expired_orders(bot: Bot):
     """Background task: auto-cancel orders past payment deadline."""
     while True:
@@ -76,8 +121,9 @@ async def on_startup(bot: Bot):
         )
         logger.info(f"Webhook set: {Config.WEBHOOK_URL}")
 
-    # Start background task for auto-cancelling expired orders
+    # Start background tasks
     asyncio.create_task(check_expired_orders(bot))
+    asyncio.create_task(send_expiry_reminders(bot))
     logger.info("Background expiry checker started")
 
 

@@ -288,7 +288,7 @@ async def reject_order(callback: CallbackQuery):
             f"❌ <b>تم رفض طلبك</b>\n\n"
             f"📦 الطلب: #{order['order_number']}\n"
             f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
-            f"يمكنك إنشاء طلب جديد من القائمة.",
+            f"يمكنك إنشاء طلب جديد بالضغط على زر <b>💰 إنشاء طلب شراء</b> في القائمة السفلية.",
             parse_mode='HTML'
         )
     except Exception as e:
@@ -476,7 +476,7 @@ async def confirm_payment(callback: CallbackQuery):
     try:
         await bot.send_message(
             order['telegram_id'],
-            f"✅ <b>تم تأكيد الدفع!</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n🚀 جاري إرسال USDT إلى محفظتك...",
+            f"✅ <b>تم تأكيد الدفع!</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n🚀 جاري إرسال USDT إلى محفظتك...\n⏱ يستغرق وصول USDT عادة من 5-30 دقيقة حسب شبكة التحويل.",
             parse_mode='HTML'
         )
     except Exception as e:

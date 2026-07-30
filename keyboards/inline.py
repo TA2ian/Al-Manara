@@ -311,6 +311,31 @@ def saved_addresses_keyboard(addresses: list, lang: str = 'ar', select_mode: boo
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def orders_pagination_keyboard(current_page: int, total_pages: int, lang: str = 'ar') -> InlineKeyboardMarkup:
+    """Pagination keyboard for orders list."""
+    buttons = []
+    nav_row = []
+    if current_page > 1:
+        nav_row.append(InlineKeyboardButton(
+            text="⬅️ السابق" if lang == 'ar' else "⬅️ Previous",
+            callback_data=f"orders_page_{current_page - 1}"
+        ))
+    if current_page < total_pages:
+        nav_row.append(InlineKeyboardButton(
+            text="التالي ➡️" if lang == 'ar' else "Next ➡️",
+            callback_data=f"orders_page_{current_page + 1}"
+        ))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([
+        InlineKeyboardButton(
+            text="❌ " + ("إغلاق" if lang == 'ar' else "Close"),
+            callback_data="close_orders_list"
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def quick_actions_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     """Quick actions for returning users."""
     if lang == 'ar':

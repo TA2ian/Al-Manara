@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from states import ReceiptStates
-from keyboards.inline import main_menu_inline, receipt_upload_keyboard, order_admin_keyboard
+from keyboards.inline import main_menu_inline, receipt_upload_keyboard, order_admin_keyboard, orders_pagination_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
 from services.receipt_verifier import ReceiptVerifier
@@ -18,10 +18,46 @@ from config import Config
 logger = logging.getLogger(__name__)
 router = Router()
 
+PAGE_SIZE = 5
+
+
+async def _format_orders_page(pool, user_id: int, lang: str, page: int = 1):
+    """Build orders text and pagination info for a given page. Returns (text, total_pages, orders_list) or (None, 0, []) if no orders."""
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE user_id = $1", user_id
+        )
+        if total == 0:
+            return None, 0, []
+
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * PAGE_SIZE
+
+        orders = await conn.fetch(
+            "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            user_id, PAGE_SIZE, offset
+        )
+
+    lines = [f"📋 <b>{locale_service.get('my_orders', lang)}</b> — ({page}/{total_pages})"]
+    for order in orders:
+        status_key = f"order_status_{order['status']}"
+        status_text = locale_service.get(status_key, lang)
+        lines.append(
+            f"\n━━━━━━━━━━━━━━━\n"
+            f"📦 <b>#{order['order_number']}</b>\n"
+            f"💰 {order['amount_usdt']} USDT ({order['network']})\n"
+            f"📊 {status_text}\n"
+            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
+        )
+
+    text = "\n".join(lines)
+    return text, total_pages, orders
+
 
 @router.message(F.text.in_(["📋 طلباتي", "📋 Orders"]))
 async def show_my_orders(message: Message):
-    """Show user's orders with action buttons."""
+    """Show user's orders with pagination."""
     pool = await get_pool()
 
     async with pool.acquire() as conn:
@@ -30,50 +66,72 @@ async def show_my_orders(message: Message):
             message.from_user.id
         )
 
-        if not user:
-            await message.answer("Please start the bot first: /start")
-            return
-
-        orders = await conn.fetch(
-            "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
-            user['id']
-        )
+    if not user:
+        await message.answer("Please start the bot first: /start")
+        return
 
     lang = user['language']
+    text, total_pages, orders = await _format_orders_page(pool, user['id'], lang, 1)
 
     if not orders:
         await message.answer(locale_service.get('no_orders', lang))
         return
 
     await message.answer(
-        f"📋 <b>{locale_service.get('my_orders', lang)}</b>",
-        parse_mode='HTML'
+        text,
+        parse_mode='HTML',
+        reply_markup=orders_pagination_keyboard(1, total_pages, lang)
     )
 
+    # For orders on page 1 that have action buttons, send them individually below
     for order in orders:
-        status_key = f"order_status_{order['status']}"
-        status_text = locale_service.get(status_key, lang)
-
-        text = (
-            f"📦 <b>#{order['order_number']}</b>\n"
-            f"💰 {order['amount_usdt']} USDT ({order['network']})\n"
-            f"📊 {status_text}\n"
-            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
-        )
-
         if order['status'] == 'waiting_payment':
             await message.answer(
-                text,
+                f"📎 <b>#{order['order_number']}</b> — رفع الإيصال:",
                 parse_mode='HTML',
                 reply_markup=receipt_upload_keyboard(order['id'], lang)
             )
-        else:
-            await message.answer(text, parse_mode='HTML')
 
-    await message.answer(
-        locale_service.get('main_menu', lang),
-        reply_markup=main_menu_inline(lang)
+
+@router.callback_query(F.data.startswith("orders_page_"))
+async def handle_orders_page(callback: CallbackQuery):
+    """Handle pagination navigation for orders list."""
+    page = int(callback.data.replace("orders_page_", ""))
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id = $1",
+            callback.from_user.id
+        )
+
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+
+    lang = user['language']
+    text, total_pages, orders = await _format_orders_page(pool, user['id'], lang, page)
+
+    if not orders:
+        await callback.answer("📭 لا توجد طلبات", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        text,
+        parse_mode='HTML',
+        reply_markup=orders_pagination_keyboard(page, total_pages, lang)
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "close_orders_list")
+async def close_orders_list(callback: CallbackQuery):
+    """Dismiss the orders list."""
+    try:
+        await callback.message.delete()
+    except Exception:
+        await callback.message.edit_text("❌ تم الإغلاق.")
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("upload_receipt_"))
