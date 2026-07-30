@@ -279,7 +279,7 @@ async def use_saved_address_for_order(callback: CallbackQuery, state: FSMContext
         await callback.answer("❌ العنوان غير موجود", show_alert=True)
         return
 
-    await state.update_data(wallet_address=addr['address'])
+    await state.update_data(wallet_address=addr['address'], address_from_saved=True)
 
     await callback.message.edit_text(
         f"✅ " + ("تم استخدام العنوان المحفوظ!" if lang == 'ar' else "Saved address selected!") + f"\n\n"
@@ -392,6 +392,16 @@ async def skip_wallet_qr(callback: CallbackQuery, state: FSMContext):
     wallet = data.get('wallet_address', '')
     network = data.get('network', '')
 
+    # If address came from saved, skip save prompt — go straight to currency
+    if data.get('address_from_saved'):
+        await callback.message.answer(
+            locale_service.get('select_currency', lang),
+            reply_markup=currency_selection_keyboard(lang)
+        )
+        await state.set_state(OrderStates.waiting_currency)
+        await callback.answer()
+        return
+
     # Go to save address prompt instead
     save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -426,6 +436,15 @@ async def receive_wallet_qr(message: Message, state: FSMContext):
         "✅ تم استلام رمز QR الخاص بمحفظتك!" if lang == 'ar' else "✅ Wallet QR code received!"
     )
 
+    # If address came from saved, skip save prompt — go straight to currency
+    if data.get('address_from_saved'):
+        await message.answer(
+            locale_service.get('select_currency', lang),
+            reply_markup=currency_selection_keyboard(lang)
+        )
+        await state.set_state(OrderStates.waiting_currency)
+        return
+
     # Go to save address prompt
     save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -451,6 +470,15 @@ async def skip_wallet_qr_text(message: Message, state: FSMContext):
     await message.answer(
         "✅ سيتم المتابعة بدون رمز QR." if lang == 'ar' else "✅ Continuing without QR code."
     )
+
+    # If address came from saved, skip save prompt — go straight to currency
+    if data.get('address_from_saved'):
+        await message.answer(
+            locale_service.get('select_currency', lang),
+            reply_markup=currency_selection_keyboard(lang)
+        )
+        await state.set_state(OrderStates.waiting_currency)
+        return
 
     # Go to save address prompt
     save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
