@@ -439,7 +439,7 @@ async def confirm_payment(callback: CallbackQuery):
             order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.shamcash_qr_photo_id "
+            "SELECT o.*, u.telegram_id, u.full_name, u.username "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -478,8 +478,8 @@ async def confirm_payment(callback: CallbackQuery):
         f"اضغط على 'إرسال USDT' بعد التنفيذ:"
     )
 
-    # Also send wallet QR code if customer uploaded one
-    qr_id = order.get('shamcash_qr_photo_id')
+    # Send customer's wallet QR code if they uploaded one (NOT Sham Cash QR)
+    wallet_qr_id = order.get('wallet_qr_photo_id')
     tasks = []
     for admin_id in Config.ADMIN_IDS:
         tasks.append(
@@ -490,12 +490,12 @@ async def confirm_payment(callback: CallbackQuery):
                 parse_mode='HTML'
             )
         )
-        if qr_id:
+        if wallet_qr_id:
             tasks.append(
                 bot.send_photo(
                     admin_id,
-                    qr_id,
-                    caption=f"📸 <b>QR code لمحفظة العميل</b> — {order['full_name'] or 'N/A'}\nيمكن مسحه ضوئياً لإرسال USDT بدون خطأ",
+                    wallet_qr_id,
+                    caption=f"📸 <b>QR code لعنوان محفظة العميل</b> — {order['full_name'] or 'N/A'}\n🌐 الشبكة: {order['network']}\nيمكن مسحه ضوئياً لإرسال USDT إلى عنوان العميل بدون خطأ",
                     parse_mode='HTML'
                 )
             )

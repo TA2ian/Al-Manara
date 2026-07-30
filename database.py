@@ -52,6 +52,7 @@ async def init_db():
                 fee_amount REAL DEFAULT 0,
                 total_amount REAL NOT NULL,
                 wallet_address TEXT NOT NULL,
+                wallet_qr_photo_id TEXT,
                 status TEXT DEFAULT 'pending',
                 receipt_photo_id TEXT,
                 receipt_upload_count INTEGER DEFAULT 0,

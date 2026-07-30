@@ -197,7 +197,92 @@ async def enter_wallet(message: Message, state: FSMContext):
         locale_service.get('wallet_valid', lang),
     )
 
-    # Ask to save address
+    # Ask if they want to attach a QR code of their wallet address
+    qr_prompt = "📸 <b>هل تريد إرفاق رمز QR لعنوان محفظتك؟</b>\n\n" \
+                "يمكنك إرسال صورة QR ليسهل على الأدمن إرسال USDT.\n" \
+                "أرسل صورة QR، أو اضغط 'تخطي' للمتابعة." if lang == 'ar' else \
+                "📸 <b>Would you like to attach a QR code of your wallet address?</b>\n\n" \
+                "Send a QR image to help the admin send USDT.\n" \
+                "Send a QR image, or click 'Skip' to continue."
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    skip_only_btn = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=skip_only_btn, callback_data="skip_wallet_qr")]
+    ])
+    await message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
+
+    await state.set_state(OrderStates.waiting_wallet_qr)
+
+
+@router.callback_query(OrderStates.waiting_wallet_qr, F.data == "skip_wallet_qr")
+async def skip_wallet_qr(callback: CallbackQuery, state: FSMContext):
+    """Skip wallet QR code upload."""
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
+
+    # Go to save address prompt instead
+    save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    save_btn = "💾 حفظ العنوان" if lang == 'ar' else "💾 Save Address"
+    skip_btn = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    save_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=save_btn, callback_data="save_address_yes"),
+         InlineKeyboardButton(text=skip_btn, callback_data="save_address_skip")]
+    ])
+    await callback.message.edit_text(
+        save_text,
+        reply_markup=save_keyboard,
+        parse_mode='HTML'
+    )
+    await state.set_state(OrderStates.waiting_save_address)
+    await callback.answer()
+
+
+@router.message(OrderStates.waiting_wallet_qr, F.photo)
+async def receive_wallet_qr(message: Message, state: FSMContext):
+    """Receive wallet QR code photo from customer."""
+    lang = await _get_user_lang(message.from_user.id)
+    qr_photo_id = message.photo[-1].file_id
+
+    await state.update_data(wallet_qr_photo_id=qr_photo_id)
+
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
+
+    await message.answer(
+        "✅ تم استلام رمز QR الخاص بمحفظتك!" if lang == 'ar' else "✅ Wallet QR code received!"
+    )
+
+    # Go to save address prompt
+    save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    save_btn = "💾 حفظ العنوان" if lang == 'ar' else "💾 Save Address"
+    skip_btn = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    save_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=save_btn, callback_data="save_address_yes"),
+         InlineKeyboardButton(text=skip_btn, callback_data="save_address_skip")]
+    ])
+    await message.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
+
+    await state.set_state(OrderStates.waiting_save_address)
+
+
+@router.message(OrderStates.waiting_wallet_qr, F.text)
+async def skip_wallet_qr_text(message: Message, state: FSMContext):
+    """Skip wallet QR if user sends text instead of photo."""
+    lang = await _get_user_lang(message.from_user.id)
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
+
+    await message.answer(
+        "✅ سيتم المتابعة بدون رمز QR." if lang == 'ar' else "✅ Continuing without QR code."
+    )
+
+    # Go to save address prompt
     save_text = locale_service.get('save_address_prompt', lang, address=wallet, network=network)
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     save_btn = "💾 حفظ العنوان" if lang == 'ar' else "💾 Save Address"
@@ -293,19 +378,20 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
 
         order_number = generate_order_number()
 
+        wallet_qr = data.get('wallet_qr_photo_id', None)
         row = await conn.fetchrow("""
             INSERT INTO orders (
                 order_number, user_id, network, amount_usdt, exchange_rate,
                 payment_currency, base_amount, fee_percent, fee_amount,
-                total_amount, wallet_address, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+                total_amount, wallet_address, wallet_qr_photo_id, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
             RETURNING id
         """,
             order_number, user['id'], data['network'], data['amount_usdt'],
             calculation['exchange_rate'], data['payment_currency'],
             calculation['base_amount'], calculation['fee_percent'],
             calculation['fee_amount'], calculation['total_amount'],
-            data['wallet_address']
+            data['wallet_address'], wallet_qr
         )
         order_id = row['id']
 
