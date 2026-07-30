@@ -783,13 +783,20 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
         new_syr_fee_line = f"🇸🇾 بما يعادل: <b>{calculation['new_syr_fee']:,.2f} ل.ج.س</b>\n"
         new_syr_total_line = f"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['new_syr_total']:,.2f} ل.ج.س</b>\n"
 
+    # Map network to display name with symbol
+    network_display = data['network']
+    if data['network'] == 'TRC20':
+        network_display = '🔷 TRC20 (TRX)'
+    elif data['network'] == 'BEP20':
+        network_display = '🟡 BEP20 (BNB)'
+
     # Show summary
     summary = locale_service.get(
         'order_summary',
         lang,
         order_number="PENDING",
         amount_usdt=data['amount_usdt'],
-        network=data['network'],
+        network=network_display,
         wallet=data['wallet_address'],
         currency=currency,
         rate=calculation['exchange_rate'],
