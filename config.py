@@ -32,8 +32,8 @@ class Config:
 
     # Rate Limiting
     RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 0))
-    RATE_LIMIT_HOURLY = int(os.getenv("RATE_LIMIT_HOURLY", 100))
-    RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", 500))
+    RATE_LIMIT_HOURLY = int(os.getenv("RATE_LIMIT_HOURLY", 1000))
+    RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", 10000))
 
     # Order Limits
     MIN_ORDER = float(os.getenv("MIN_ORDER", 10))

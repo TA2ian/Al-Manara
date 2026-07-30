@@ -1447,10 +1447,10 @@ async def admin_search_order_start(callback: CallbackQuery, state: FSMContext):
         return
     await callback.message.edit_text(
         "🔍 <b>بحث عن طلب</b>\n\n"
-        "أرسل رقم الطلب (مثال: ORD-...):",
+        "أرسل رقم الطلب (مثال: ORD_20260730_...):",
         parse_mode='HTML'
     )
-    await state.set_state(AdminStates.waiting_admin_note)
+    await state.set_state(AdminStates.waiting_search)
     await state.update_data(admin_search_type='order')
     await callback.answer()
 
