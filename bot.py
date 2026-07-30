@@ -1,12 +1,5 @@
 """Bot instance creation."""
-from aiogram import Bot, Dispatcher
-
-from config import Config
-
-
-def create_bot() -> Bot:
-    """Create bot instance."""
-    return Bot(token=Config.BOT_TOKEN)
+from aiogram import Dispatcher
 
 
 def create_dispatcher() -> Dispatcher:

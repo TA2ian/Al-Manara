@@ -319,7 +319,7 @@ def saved_addresses_keyboard(addresses: list, lang: str = 'ar', select_mode: boo
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) -> InlineKeyboardMarkup:
+def quick_actions_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     """Quick actions for returning users."""
     if lang == 'ar':
         buttons = [

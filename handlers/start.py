@@ -14,54 +14,6 @@ from config import Config
 router = Router()
 
 
-TERMS_TEXT_AR = """━━━ <b>شروط الخدمة وإخلاء المسؤولية</b> ━━━
-
-<b>أولاً: طبيعة الخدمة</b>
-يعمل هذا البوت كوسيط تقني بينك وبين مزود خدمة تحويل العملات الرقمية. البوت هو واجهة لإدارة الطلبات فقط.
-
-<b>ثانياً: المسؤولية</b>
-- أنت وحدك المسؤول عن صحة عنوان محفظة USDT الذي تُدخله.
-- نحن غير مسؤولين عن فقدان الأموال نتيجة إدخال عنوان خاطئ أو اختيار شبكة غير صحيحة.
-- عند حفظ عنوان محفظة، تقع عليك مسؤولية التحقق منه قبل كل استخدام.
-- البوت لا يخزن العملات الرقمية ولا يتعامل بها بشكل مباشر.
-
-<b>ثالثاً: المعاملات</b>
-- سعر الصرف يُثبت لكل طلب عند إنشائه ولا يتغير بعد ذلك.
-- مدة المعالجة المتوقعة: 15 دقيقة - 24 ساعة.
-- الدفع عبر شام كاش حصراً.
-- يجب إرفاق إيصال الدفع خلال {timeout} دقيقة من الموافقة على الطلب.
-- جميع المعاملات نهائية بعد تأكيد الدفع.
-- قد تُرفض الطلبات إذا كانت مخالفة للشروط أو لا تستوفي المتطلبات.
-
-<b>رابعاً: الخصوصية</b>
-- نلتزم بحماية خصوصية بياناتك والتعامل معها وفقاً لسياسة الخصوصية هذه.
-- البيانات التي نجمعها (الاسم الكامل، معرف تيليغرام، اسم المستخدم، رقم حساب شام كاش) تُستخدم حصراً لأغراض:
-  • توثيق الحساب والتحقق من هويتك.
-  • إدارة الطلبات وتنفيذها.
-  • التواصل معك بخصوص طلباتك.
-  • تحسين جودة الخدمة.
-- لا يتم مشاركة بياناتك أو بيعها أو الكشف عنها لأي طرف ثالث، إلا إذا اقتضى القانون ذلك.
-- يتم تخزين بياناتك بشكل آمن وتُحتفظ بها طالما كان حسابك نشطاً.
-- بيانتك هي ملكك، يمكنك طلب حذفها في أي وقت وسيتم حذف جميع بياناتك نهائياً.
-- نحن غير مسؤولين عن المعلومات التي تشاركها خارج نطاق البوت.
-
-<b>خامساً: أحكام عامة</b>
-- نحتفظ بالحق في رفض أو إلغاء أي طلب يخالف هذه الشروط.
-- نحتفظ بالحق في تحديث هذه الشروط في أي وقت، مع إشعارك بالتحديثات الجوهرية.
-- استخدامك المستمر للبوت بعد التحديث يعني موافقتك على الشروط المعدلة.
-- هذه الشروط تخضع للقوانين والأنظمة السارية.
-
-<b>سادساً: ثقتنا بك</b>
-- نحن فريق من البشر يعمل بجد لخدمتك، ولسنا مجرد واجهة آلية.
-- الشفافية والأمانة هما أساس عملنا — نتعامل مع أموالك وبياناتك كما نتعامل مع أموالنا وبياناتنا.
-- نسعى دائماً لتقديم أفضل تجربة ممكنة، وملاحظاتك تساعدنا على التحسن كل يوم.
-- إذا واجهت أي مشكلة أو استفسار، فريق الدعم متواجد لمساعدتك بشكل شخصي وسريع.
-- رضاك هو هدفنا الأول، ونعمل باستمرار على تحسين جودة خدماتنا.
-
-━━━━━━━━━━━━━━━━━━━━
-<b>بالضغط على "أوافق" فإنك تقر بأنك قرأت وفهمت وأقريت هذه الشروط.</b>"""
-
-
 WELCOME_TEXT_AR = """🎉 <b>أهلاً وسهلاً يا {name}!</b>
 
 تم تفعيل حسابك بنجاح ✅
@@ -112,55 +64,11 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
     """Handle language selection at start."""
     lang = callback.data.replace("lang_", "")
 
-    terms_text = (
-        TERMS_TEXT_AR if lang == 'ar' else
-        "━━━ <b>Terms of Service & Disclaimer</b> ━━━\n\n"
-        "<b>1. Service Nature</b>\n"
-        "This bot serves as a technical intermediary between you and the digital currency exchange service provider. The bot is an order management interface only.\n\n"
-        "<b>2. Liability</b>\n"
-        "- You are solely responsible for the accuracy of the USDT wallet address you enter.\n"
-        "- We are not liable for any loss of funds resulting from an incorrect address or wrong network selection.\n"
-        "- When saving a wallet address, you bear the responsibility of verifying it before each use.\n"
-        "- The bot does not store or directly handle digital currencies.\n\n"
-        "<b>3. Transactions</b>\n"
-        "- The exchange rate is locked at the time of order creation and will not change thereafter.\n"
-        "- Estimated processing time: 15 minutes - 24 hours.\n"
-        "- Payment via Sham Cash only.\n"
-        "- Payment receipt must be submitted within {timeout} minutes of order approval.\n"
-        "- All transactions are final once payment is confirmed.\n"
-        "- Orders may be rejected if they violate the terms or fail to meet requirements.\n\n"
-        "<b>4. Privacy</b>\n"
-        "- We are committed to protecting your privacy and handling your data in accordance with this policy.\n"
-        "- The data we collect (full name, Telegram ID, username, Sham Cash account number) is used solely for:\n"
-        "  • Account verification and identity authentication.\n"
-        "  • Order processing and fulfillment.\n"
-        "  • Communicating with you regarding your orders.\n"
-        "  • Improving service quality.\n"
-        "- Your data will not be shared, sold, or disclosed to any third party unless required by law.\n"
-        "- Your data is stored securely and retained while your account remains active.\n"
-        "- Your data belongs to you. You may request its deletion at any time and all your data will be permanently deleted.\n"
-        "- We are not responsible for information you share outside the bot's scope.\n\n"
-        "<b>5. General Provisions</b>\n"
-        "- We reserve the right to reject or cancel any order that violates these terms.\n"
-        "- We reserve the right to update these terms at any time, with notice of material changes.\n"
-        "- Your continued use of the bot after updates constitutes acceptance of the revised terms.\n"
-        "- These terms are governed by applicable laws and regulations.\n\n"
-        "<b>6. Our Commitment to You</b>\n"
-        "- We are a team of real people working hard to serve you, not just an automated interface.\n"
-        "- Transparency and honesty are the foundation of our work — we handle your money and data as we would our own.\n"
-        "- We constantly strive to provide the best possible experience, and your feedback helps us improve every day.\n"
-        "- If you face any issue or have a question, our support team is here to help you personally and promptly.\n"
-        "- Your satisfaction is our top priority, and we continuously work to improve our service quality.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "<b>By clicking \"Agree\", you acknowledge that you have read, understood, and accepted these terms.</b>"
-    )
-
     await callback.message.edit_text(
-        terms_text.format(
-            min_order=Config.MIN_ORDER,
-            max_order=Config.MAX_ORDER,
-            timeout=Config.PAYMENT_TIMEOUT
-        ),
+        locale_service.get('terms_text', lang,
+                          min_order=Config.MIN_ORDER,
+                          max_order=Config.MAX_ORDER,
+                          timeout=Config.PAYMENT_TIMEOUT),
         reply_markup=terms_keyboard(lang),
         parse_mode='HTML'
     )
