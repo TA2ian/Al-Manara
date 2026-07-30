@@ -398,21 +398,40 @@ async def verify_reject_user(callback: CallbackQuery):
     pool = await get_pool()
 
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET verification_status = 'rejected' WHERE telegram_id = $1",
+        user = await conn.fetchrow(
+            "SELECT username, full_name FROM users WHERE telegram_id = $1",
             telegram_id
         )
+        if user:
+            await conn.execute(
+                "UPDATE users SET verification_status = 'rejected' WHERE telegram_id = $1",
+                telegram_id
+            )
 
-    # Notify user
+    # Notify user — include specific reason if they lack a Telegram username
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
 
-    try:
-        await bot.send_message(
-            telegram_id,
-            "❌ <b>عذراً، لم يتم توثيق حسابك.</b>\n\nيرجى التواصل مع الدعم للمساعدة.",
-            parse_mode='HTML'
+    has_username = user and user.get('username')
+    if not has_username:
+        message_text = (
+            "❌ <b>عذراً، لم يتم توثيق حسابك.</b>\n\n"
+            "السبب: لا تملك اسم مستخدم (Username) في تيليغرام.\n\n"
+            "📌 يرجى اتباع الخطوات التالية:\n"
+            "1️⃣ افتح الإعدادات (Settings) في تيليغرام\n"
+            "2️⃣ اضغط على اسمك\n"
+            "3️⃣ اختر \"Set Username\" أو \"تعيين اسم مستخدم\"\n"
+            "4️⃣ اختر اسماً (مثال: @your_name)\n"
+            "5️⃣ احفظ التغييرات ثم أعد المحاولة بعد 5 دقائق"
         )
+    else:
+        message_text = (
+            "❌ <b>عذراً، لم يتم توثيق حسابك.</b>\n\n"
+            "يرجى التواصل مع الدعم للمساعدة."
+        )
+
+    try:
+        await bot.send_message(telegram_id, message_text, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Failed to notify user {telegram_id}: {e}")
 
