@@ -10,7 +10,7 @@ def compact_reply_keyboard(lang: str = 'ar') -> ReplyKeyboardMarkup:
                 [
                     KeyboardButton(text="💰 جديد"),
                     KeyboardButton(text="📋 طلباتي"),
-                    KeyboardButton(text="⚙️")
+                    KeyboardButton(text="⚙️ القائمة")
                 ]
             ],
             resize_keyboard=True,
@@ -22,7 +22,7 @@ def compact_reply_keyboard(lang: str = 'ar') -> ReplyKeyboardMarkup:
                 [
                     KeyboardButton(text="💰 New"),
                     KeyboardButton(text="📋 Orders"),
-                    KeyboardButton(text="⚙️")
+                    KeyboardButton(text="⚙️ Menu")
                 ]
             ],
             resize_keyboard=True,

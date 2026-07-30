@@ -199,7 +199,7 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📍 قائمة العملاء", callback_data="admin_list_users")
         ],
         [
-            InlineKeyboardButton(text="📝 Logs", callback_data="admin_logs"),
+            InlineKeyboardButton(text="📝 سجل العمليات", callback_data="admin_logs"),
             InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups")
         ]
     ])
@@ -252,9 +252,7 @@ def settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⏱ مهلة الدفع", callback_data="setting_timeout")
         ],
         [
-            InlineKeyboardButton(text="📊 الحدود", callback_data="setting_limits")
-        ],
-        [
+            InlineKeyboardButton(text="📊 الحدود", callback_data="setting_limits"),
             InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")
         ]
     ])
@@ -297,7 +295,7 @@ def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) 
             ],
             [
                 InlineKeyboardButton(text="💱 السعر الحالي", callback_data="quick_rate"),
-                InlineKeyboardButton(text="📞 التواصل", callback_data="quick_contact")
+                InlineKeyboardButton(text="📞 التواصل مع الدعم", callback_data="quick_contact")
             ],
             [
                 InlineKeyboardButton(text="🌐 تغيير اللغة", callback_data="quick_change_lang")
@@ -311,7 +309,7 @@ def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) 
             ],
             [
                 InlineKeyboardButton(text="💱 Current Rate", callback_data="quick_rate"),
-                InlineKeyboardButton(text="📞 Contact", callback_data="quick_contact")
+                InlineKeyboardButton(text="📞 Contact Support", callback_data="quick_contact")
             ],
             [
                 InlineKeyboardButton(text="🌐 Change Language", callback_data="quick_change_lang")
