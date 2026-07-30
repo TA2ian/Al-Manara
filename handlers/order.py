@@ -81,6 +81,11 @@ async def _get_user_lang(telegram_id: int) -> str:
 @router.callback_query(OrderStates.waiting_network, F.data.startswith("network_"))
 async def select_network(callback: CallbackQuery, state: FSMContext):
     """Handle network selection."""
+    allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_network')
+    if not allowed:
+        await callback.answer()
+        return
+
     network = callback.data.replace("network_", "")
     lang = await _get_user_lang(callback.from_user.id)
 
@@ -98,6 +103,10 @@ async def select_network(callback: CallbackQuery, state: FSMContext):
 @router.message(OrderStates.waiting_amount)
 async def enter_amount(message: Message, state: FSMContext):
     """Handle amount input."""
+    allowed, _ = global_rate_limiter.check(message.from_user.id, 'order_amount')
+    if not allowed:
+        return
+
     lang = await _get_user_lang(message.from_user.id)
 
     try:
@@ -155,6 +164,10 @@ async def enter_amount(message: Message, state: FSMContext):
 @router.message(OrderStates.waiting_wallet)
 async def enter_wallet(message: Message, state: FSMContext):
     """Handle wallet input."""
+    allowed, _ = global_rate_limiter.check(message.from_user.id, 'order_wallet')
+    if not allowed:
+        return
+
     lang = await _get_user_lang(message.from_user.id)
     wallet = message.text.strip()
 
@@ -259,6 +272,11 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(OrderStates.waiting_confirmation, F.data == "confirm_order")
 async def confirm_order(callback: CallbackQuery, state: FSMContext):
     """Confirm and create order."""
+    allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_confirm')
+    if not allowed:
+        await callback.answer()
+        return
+
     lang = await _get_user_lang(callback.from_user.id)
 
     data = await state.get_data()

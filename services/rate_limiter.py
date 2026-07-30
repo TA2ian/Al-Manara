@@ -1,11 +1,25 @@
-"""Rate limiting service."""
+"""Rate limiting service with per-action cooldowns."""
 import time
 from typing import Dict
 from collections import defaultdict
 
 
+# Action-specific cooldowns (seconds)
+# Sensitive actions get longer cooldowns to prevent abuse
+ACTION_COOLDOWNS = {
+    'default': 0,           # Navigation / clicks — instant
+    'order_network': 1,     # Network selection
+    'order_amount': 1,      # Amount input
+    'order_wallet': 2,      # Wallet address input
+    'order_confirm': 3,     # Order confirmation
+    'receipt_upload': 5,    # Receipt upload
+    'feedback': 10,         # Feedback submission
+    'admin_action': 0,      # Admin actions — always instant
+}
+
+
 class RateLimiter:
-    """Simple in-memory rate limiter."""
+    """In-memory rate limiter with per-action cooldowns."""
 
     def __init__(self):
         self._requests: Dict[str, list] = defaultdict(list)
@@ -13,6 +27,10 @@ class RateLimiter:
 
     def check(self, user_id: int, action: str = 'default') -> tuple:
         """Check if user is rate limited.
+
+        Args:
+            user_id: Telegram user ID.
+            action: Action type — determines cooldown length.
 
         Returns:
             (allowed: bool, wait_seconds: int)
@@ -51,7 +69,8 @@ class RateLimiter:
         self._requests[key].append(now)
         self._requests[daily_key].append(now)
 
-        # Set cooldown
-        self._cooldowns[key] = now + Config.RATE_LIMIT_COOLDOWN
+        # Set cooldown based on action type
+        cooldown = ACTION_COOLDOWNS.get(action, Config.RATE_LIMIT_COOLDOWN)
+        self._cooldowns[key] = now + cooldown
 
         return True, 0

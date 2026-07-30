@@ -870,6 +870,22 @@ async def admin_settings_menu(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "cancel_admin_settings")
+async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext):
+    """Cancel admin settings input and return to settings menu."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await state.clear()
+    from keyboards.inline import settings_keyboard
+    await callback.message.edit_text(
+        "⚙️ <b>الإعدادات</b>\nاختر الإعداد الذي تريد تعديله:",
+        reply_markup=settings_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "setting_rate")
 async def setting_rate(callback: CallbackQuery, state: FSMContext):
     """Change rate from settings menu."""
@@ -883,7 +899,10 @@ async def setting_rate(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"💱 <b>سعر الصرف الحالي:</b> 1 USDT = {current} SYP\n\n"
         f"أرسل السعر الجديد:",
-        parse_mode='HTML'
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 رجوع للإعدادات", callback_data="cancel_admin_settings")]
+        ])
     )
     await state.set_state(AdminStates.waiting_rate)
     await callback.answer()
