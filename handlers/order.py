@@ -69,6 +69,34 @@ async def start_order(message: Message, state: FSMContext):
 
     lang = user['language']
 
+    # Check for existing active orders
+    active_statuses = ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
+    async with pool.acquire() as conn:
+        active_order = await conn.fetchrow(
+            "SELECT order_number, created_at, amount_usdt, status "
+            "FROM orders WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) "
+            "AND status = ANY($2) ORDER BY created_at DESC LIMIT 1",
+            message.from_user.id, active_statuses
+        )
+
+    if active_order:
+        status_map = {
+            'pending': 'في انتظار الموافقة' if lang == 'ar' else 'Pending Approval',
+            'waiting_payment': 'في انتظار الدفع' if lang == 'ar' else 'Awaiting Payment',
+            'receipt_received': 'الإيصال قيد المراجعة' if lang == 'ar' else 'Receipt Under Review',
+            'payment_confirmed': 'تم تأكيد الدفع' if lang == 'ar' else 'Payment Confirmed',
+        }
+        await message.answer(
+            locale_service.get('active_order_exists', lang,
+                order_number=active_order['order_number'],
+                created_at=active_order['created_at'].strftime('%Y-%m-%d %H:%M'),
+                amount_usdt=active_order['amount_usdt'],
+                status=status_map.get(active_order['status'], active_order['status'])
+            ),
+            parse_mode='HTML'
+        )
+        return
+
     await message.answer(
         locale_service.get('select_network', lang),
         reply_markup=network_selection_keyboard(lang),

@@ -126,5 +126,6 @@
   "user_blocked": "🚫 Your account has been blocked.\n\nFor inquiries, contact support:",
   "ban_reason_prompt": "📝 Enter ban reason (optional):\nOr send \"Skip\" to ban without a reason.",
   "ban_reason_skip": "⏭️ Skip",
-  "save_address_label_prompt": "🏷️ <b>Enter a name for this address</b>\n\nExample: My Main Wallet\nOr send \"Skip\" to save without a label."
+  "save_address_label_prompt": "🏷️ <b>Enter a name for this address</b>\n\nExample: My Main Wallet\nOr send \"Skip\" to save without a label.",
+  "active_order_exists": "⚠️ <b>You have an active order!</b>\n\n📦 Order Number: #{order_number}\n📅 Created: {created_at}\n💰 Amount: {amount_usdt} USDT\n📊 Status: {status}\n\n🔄 You cannot create a new order until the current one is completed or cancelled."
 }
