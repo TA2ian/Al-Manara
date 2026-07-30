@@ -50,4 +50,5 @@ localPort = 8000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "vm"
+run = ["python3", "main.py"]
