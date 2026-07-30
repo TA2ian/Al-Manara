@@ -42,7 +42,7 @@ TERMS_TEXT_AR = """━━━ <b>شروط الخدمة وإخلاء المسؤو�
   • تحسين جودة الخدمة.
 - لا يتم مشاركة بياناتك أو بيعها أو الكشف عنها لأي طرف ثالث، إلا إذا اقتضى القانون ذلك.
 - يتم تخزين بياناتك بشكل آمن وتُحتفظ بها طالما كان حسابك نشطاً.
-- يمكنك طلب حذف بياناتك في أي وقت بالتواصل مع الدعم.
+- بيانتك هي ملكك، يمكنك طلب حذفها في أي وقت وسيتم حذف جميع بياناتك نهائياً.
 - نحن غير مسؤولين عن المعلومات التي تشاركها خارج نطاق البوت.
 
 <b>خامساً: أحكام عامة</b>
@@ -50,6 +50,13 @@ TERMS_TEXT_AR = """━━━ <b>شروط الخدمة وإخلاء المسؤو�
 - نحتفظ بالحق في تحديث هذه الشروط في أي وقت، مع إشعارك بالتحديثات الجوهرية.
 - استخدامك المستمر للبوت بعد التحديث يعني موافقتك على الشروط المعدلة.
 - هذه الشروط تخضع للقوانين والأنظمة السارية.
+
+<b>سادساً: ثقتنا بك</b>
+- نحن فريق من البشر يعمل بجد لخدمتك، ولسنا مجرد واجهة آلية.
+- الشفافية والأمانة هما أساس عملنا — نتعامل مع أموالك وبياناتك كما نتعامل مع أموالنا وبياناتنا.
+- نسعى دائماً لتقديم أفضل تجربة ممكنة، وملاحظاتك تساعدنا على التحسن كل يوم.
+- إذا واجهت أي مشكلة أو استفسار، فريق الدعم متواجد لمساعدتك بشكل شخصي وسريع.
+- رضاك هو هدفنا الأول، ونعمل باستمرار على تحسين جودة خدماتنا.
 
 ━━━━━━━━━━━━━━━━━━━━
 <b>بالضغط على "أوافق" فإنك تقر بأنك قرأت وفهمت وأقريت هذه الشروط.</b>"""
@@ -131,13 +138,19 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
         "  • Improving service quality.\n"
         "- Your data will not be shared, sold, or disclosed to any third party unless required by law.\n"
         "- Your data is stored securely and retained while your account remains active.\n"
-        "- You may request deletion of your data at any time by contacting support.\n"
+        "- Your data belongs to you. You may request its deletion at any time and all your data will be permanently deleted.\n"
         "- We are not responsible for information you share outside the bot's scope.\n\n"
         "<b>5. General Provisions</b>\n"
         "- We reserve the right to reject or cancel any order that violates these terms.\n"
         "- We reserve the right to update these terms at any time, with notice of material changes.\n"
         "- Your continued use of the bot after updates constitutes acceptance of the revised terms.\n"
         "- These terms are governed by applicable laws and regulations.\n\n"
+        "<b>6. Our Commitment to You</b>\n"
+        "- We are a team of real people working hard to serve you, not just an automated interface.\n"
+        "- Transparency and honesty are the foundation of our work — we handle your money and data as we would our own.\n"
+        "- We constantly strive to provide the best possible experience, and your feedback helps us improve every day.\n"
+        "- If you face any issue or have a question, our support team is here to help you personally and promptly.\n"
+        "- Your satisfaction is our top priority, and we continuously work to improve our service quality.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>By clicking \"Agree\", you acknowledge that you have read, understood, and accepted these terms.</b>"
     )

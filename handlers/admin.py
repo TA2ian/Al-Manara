@@ -1564,14 +1564,13 @@ async def admin_search_handler(message: Message, state: FSMContext):
                 )
                 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
                 tid = u['telegram_id']
+                actions = []
                 if u['is_blocked']:
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ فك الحظر", callback_data=f"admin_unban_{tid}")]
-                    ])
+                    actions.append(InlineKeyboardButton(text="✅ فك الحظر", callback_data=f"admin_unban_{tid}"))
                 else:
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🚫 حظر", callback_data=f"admin_ban_{tid}")]
-                    ])
+                    actions.append(InlineKeyboardButton(text="🚫 حظر", callback_data=f"admin_ban_{tid}"))
+                actions.append(InlineKeyboardButton(text="🗑️ حذف", callback_data=f"admin_del_user_{tid}"))
+                kb = InlineKeyboardMarkup(inline_keyboard=[actions])
                 await message.answer(text, parse_mode='HTML', reply_markup=kb)
         elif search_type == 'order':
             row = await conn.fetchrow("SELECT o.*, u.full_name, u.telegram_id FROM orders o JOIN users u ON o.user_id = u.id WHERE o.order_number ILIKE $1", f"%{query}%")
@@ -1793,6 +1792,124 @@ async def admin_logs(callback: CallbackQuery):
         )
     except Exception as e:
         await callback.message.edit_text(f"❌ فشل قراءة السجلات: {e}")
+
+
+# ───── Admin Delete User ─────
+
+@router.callback_query(F.data.startswith("admin_del_user_"))
+async def admin_del_user(callback: CallbackQuery):
+    """Confirm delete user and all their data."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_del_user_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT full_name, telegram_id FROM users WHERE telegram_id = $1", tid
+        )
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+
+    name = user['full_name'] or 'N/A'
+    await callback.message.edit_text(
+        f"🗑️ <b>تأكيد حذف المستخدم</b>\n\n"
+        f"👤 {name}\n"
+        f"🆔 <code>{tid}</code>\n\n"
+        f"⚠️ <b>تحذير:</b> سيتم حذف جميع بيانات هذا المستخدم نهائياً:\n"
+        f"• بيانات الحساب\n"
+        f"• جميع الطلبات\n"
+        f"• العناوين المحفوظة\n"
+        f"• سجل الحظر والإقتراحات\n\n"
+        f"🚫 <b>هذا الإجراء لا يمكن التراجع عنه.</b>\n\n"
+        f"📨 سيتم إخطار المستخدم بحذف حسابه.",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🗑️ تأكيد الحذف", callback_data=f"admin_del_confirm_{tid}"),
+                InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_search_user")
+            ]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_del_confirm_"))
+async def admin_del_user_execute(callback: CallbackQuery):
+    """Execute user deletion and notify the user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    tid = int(callback.data.replace("admin_del_confirm_", ""))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, telegram_id, full_name, language FROM users WHERE telegram_id = $1", tid
+        )
+        if not user:
+            await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+            return
+
+        user_id = user['id']
+        lang = user['language'] or 'ar'
+
+        order_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", user_id)
+        addr_count = await conn.fetchval("SELECT COUNT(*) FROM saved_addresses WHERE user_id = $1", user_id)
+
+        # Delete all user data
+        await conn.execute("DELETE FROM orders WHERE user_id = $1", user_id)
+        await conn.execute("DELETE FROM saved_addresses WHERE user_id = $1", user_id)
+        await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", tid)
+        await conn.execute("DELETE FROM feedback_messages WHERE user_id = $1", user_id)
+        await conn.execute("DELETE FROM audit_logs WHERE user_id = $1", user_id)
+        await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+
+        # Log the action
+        await conn.execute(
+            "INSERT INTO audit_logs (user_id, admin_id, action, details, severity) VALUES ($1, $2, $3, $4, $5)",
+            None, callback.from_user.id, 'user_deleted',
+            f"Deleted user {user['full_name'] or 'N/A'} (tg:{tid}). Orders: {order_count}, Addresses: {addr_count}",
+            'warning'
+        )
+
+    # Notify the user
+    try:
+        from aiogram import Bot
+        from config import Config
+        bot = Bot(token=Config.BOT_TOKEN)
+        if lang == 'ar':
+            await bot.send_message(
+                tid,
+                "🗑️ <b>تم حذف حسابك</b>\n\n"
+                "تم حذف حسابك وجميع بياناتك من نظامنا.\n\n"
+                "إذا كان لديك أي استفسار، يمكنك التواصل مع الدعم.",
+                parse_mode='HTML'
+            )
+        else:
+            await bot.send_message(
+                tid,
+                "🗑️ <b>Your Account Has Been Deleted</b>\n\n"
+                "Your account and all associated data have been deleted from our system.\n\n"
+                "If you have any questions, please contact support.",
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        logger.error(f"Failed to notify deleted user {tid}: {e}")
+
+    await callback.message.edit_text(
+        f"✅ <b>تم حذف المستخدم</b>\n"
+        f"🆔 <code>{tid}</code>\n"
+        f"📊 تم حذف {order_count} طلب/طلبات\n"
+        f"📍 تم حذف {addr_count} عنوان/عناوين محفوظة\n\n"
+        f"📨 تم إخطار المستخدم.",
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        "⚙️ لوحة التحكم",
+        reply_markup=admin_menu_keyboard()
+    )
+    await callback.answer()
 
 
 # ───── Admin Note (already handled above with waiting_note_text) ─────
