@@ -158,14 +158,50 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
     data = await state.get_data()
     network = data['network']
 
-    example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+    # Check for saved addresses for this network
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
+        )
+        if user_row:
+            saved = await conn.fetch(
+                "SELECT id, address, network, label FROM saved_addresses "
+                "WHERE user_id = $1 AND network = $2 ORDER BY created_at DESC",
+                user_row['id'], network
+            )
+        else:
+            saved = []
 
-    await message.answer(
-        locale_service.get('enter_wallet', lang, network=network, example=example),
-        reply_markup=cancel_keyboard(lang)
-    )
+    if saved:
+        # Show saved addresses first + manual entry option
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        buttons = []
+        for addr in saved:
+            label = addr.get('label', '') or ''
+            short_addr = addr['address'][:8] + "..." + addr['address'][-4:]
+            display = f"{label} - {short_addr}" if label else short_addr
+            buttons.append([
+                InlineKeyboardButton(text=f"📍 {display}", callback_data=f"order_use_saved_{addr['id']}")
+            ])
+        manual_text = "✏️ إدخال عنوان جديد" if lang == 'ar' else "✏️ Enter New Address"
+        buttons.append([InlineKeyboardButton(text=manual_text, callback_data="order_wallet_manual")])
+        await message.answer(
+            f"📍 <b>" + ("العناوين المحفوظة" if lang == 'ar' else "Saved Addresses") + f"</b> ({network})\n\n"
+            + ("اختر عنواناً أو أدخل عنواناً جديداً:" if lang == 'ar' else "Select an address or enter a new one:"),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode='HTML'
+        )
+    else:
+        # No saved addresses — go straight to manual entry
+        example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+        fmt = locale_service.get('bep20_format' if network == 'BEP20' else 'trc20_format', lang)
+        await message.answer(
+            locale_service.get('enter_wallet', lang, network=network, example=example, network_format=fmt),
+            reply_markup=cancel_keyboard(lang)
+        )
+        await state.set_state(OrderStates.waiting_wallet)
 
-    await state.set_state(OrderStates.waiting_wallet)
     return True
 
 
@@ -206,6 +242,70 @@ async def enter_amount(message: Message, state: FSMContext):
         await message.answer(
             locale_service.get('invalid_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER)
         )
+
+
+@router.callback_query(F.data.startswith("order_use_saved_"))
+async def use_saved_address_for_order(callback: CallbackQuery, state: FSMContext):
+    """Use a saved address during order creation."""
+    addr_id = int(callback.data.replace("order_use_saved_", ""))
+    pool = await get_pool()
+    lang = await _get_user_lang(callback.from_user.id)
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", callback.from_user.id
+        )
+        if user:
+            addr = await conn.fetchrow(
+                "SELECT address, network FROM saved_addresses WHERE id = $1 AND user_id = $2",
+                addr_id, user['id']
+            )
+        else:
+            addr = None
+
+    if not addr:
+        await callback.answer("❌ العنوان غير موجود", show_alert=True)
+        return
+
+    await state.update_data(wallet_address=addr['address'])
+
+    await callback.message.edit_text(
+        f"✅ " + ("تم استخدام العنوان المحفوظ!" if lang == 'ar' else "Saved address selected!") + f"\n\n"
+        f"📍 <code>{addr['address']}</code>\n"
+        f"🌐 {addr['network']}"
+    )
+
+    # Continue to QR prompt (skip wallet validation — already saved/verified)
+    qr_prompt = "📸 <b>هل تريد إرفاق رمز QR لعنوان محفظتك؟</b>\n\n" \
+                "يمكنك إرسال صورة QR ليسهل على الأدمن إرسال USDT.\n" \
+                "أرسل صورة QR، أو اضغط 'تخطي' للمتابعة." if lang == 'ar' else \
+                "📸 <b>Would you like to attach a QR code of your wallet address?</b>\n\n" \
+                "Send a QR image to help the admin send USDT.\n" \
+                "Send a QR image, or click 'Skip' to continue."
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
+    ])
+    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
+    await state.set_state(OrderStates.waiting_wallet_qr)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "order_wallet_manual")
+async def enter_wallet_manual(callback: CallbackQuery, state: FSMContext):
+    """User chose manual wallet entry instead of saved address."""
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    network = data.get('network', 'BEP20')
+    example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+
+    fmt = locale_service.get('bep20_format' if network == 'BEP20' else 'trc20_format', lang)
+    await callback.message.edit_text(
+        locale_service.get('enter_wallet', lang, network=network, example=example, network_format=fmt),
+        reply_markup=cancel_keyboard(lang)
+    )
+    await state.set_state(OrderStates.waiting_wallet)
+    await callback.answer()
 
 
 @router.message(OrderStates.waiting_wallet)
