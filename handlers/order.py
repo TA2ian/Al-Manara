@@ -420,29 +420,20 @@ async def skip_wallet_qr(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(OrderStates.waiting_wallet_qr, F.photo)
-async def receive_wallet_qr(message: Message, state: FSMContext):
-    """Receive wallet QR code photo from customer."""
-    try:
-        lang = await _get_user_lang(message.from_user.id)
-        qr_photo_id = message.photo[-1].file_id
+async def _proceed_after_qr(message_or_callback, state: FSMContext, lang: str, data: dict):
+    """Continue the order flow after QR processing (save prompt or currency selection)."""
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
 
-        await state.update_data(wallet_qr_photo_id=qr_photo_id)
-
-        data = await state.get_data()
-        wallet = data.get('wallet_address', '')
-        network = data.get('network', '')
-    except Exception as e:
-        logging.getLogger(__name__).error(f"QR receive error: {e}")
-        return
-
-    await message.answer(
-        "✅ تم استلام رمز QR الخاص بمحفظتك!" if lang == 'ar' else "✅ Wallet QR code received!"
-    )
+    # Determine if we have a message or callback
+    if hasattr(message_or_callback, 'from_user'):
+        target = message_or_callback
+    else:
+        target = message_or_callback.message
 
     # If address came from saved, skip save prompt — go straight to currency
     if data.get('address_from_saved'):
-        await message.answer(
+        await target.answer(
             locale_service.get('select_currency', lang),
             reply_markup=currency_selection_keyboard(lang)
         )
@@ -458,9 +449,115 @@ async def receive_wallet_qr(message: Message, state: FSMContext):
         [InlineKeyboardButton(text=save_btn, callback_data="save_address_yes"),
          InlineKeyboardButton(text=skip_btn, callback_data="save_address_skip")]
     ])
-    await message.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
-
+    await target.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
     await state.set_state(OrderStates.waiting_save_address)
+
+
+@router.message(OrderStates.waiting_wallet_qr, F.photo)
+async def receive_wallet_qr(message: Message, state: FSMContext):
+    """Receive wallet QR code photo from customer and verify it matches the entered address."""
+    import io
+    from PIL import Image
+    from pyzbar.pyzbar import decode as qr_decode
+
+    try:
+        lang = await _get_user_lang(message.from_user.id)
+        qr_photo_id = message.photo[-1].file_id
+        data = await state.get_data()
+        wallet = data.get('wallet_address', '')
+        network = data.get('network', '')
+
+        # Download the photo and decode QR
+        photo_bytes = io.BytesIO()
+        await message.bot.download(file=qr_photo_id, destination=photo_bytes)
+        photo_bytes.seek(0)
+        img = Image.open(photo_bytes)
+
+        decoded = qr_decode(img)
+        qr_text = decoded[0].data.decode('utf-8').strip() if decoded else ''
+
+        if qr_text:
+            # Normalize: remove common prefixes like 'bitcoin:', 'ethereum:', 'TRC20:', 'BEP20:'
+            normalized_qr = qr_text.lower().strip()
+            for prefix in ['bitcoin:', 'ethereum:', 'trc20:', 'bep20:', 'tron:', 'usdt:']:
+                if normalized_qr.startswith(prefix):
+                    normalized_qr = normalized_qr[len(prefix):].strip()
+                    break
+
+            normalized_wallet = wallet.lower().strip()
+
+            if normalized_qr == normalized_wallet:
+                # QR matches — confirm and proceed
+                await message.answer(
+                    "✅ ✅ <b>QR متطابق مع العنوان!</b>\n\n"
+                    f"العنوان: <code>{wallet}</code>" if lang == 'ar'
+                    else "✅ ✅ <b>QR matches the entered address!</b>\n\n"
+                    f"Address: <code>{wallet}</code>"
+                )
+                await state.update_data(wallet_qr_photo_id=qr_photo_id)
+                await _proceed_after_qr(message, state, lang, data)
+                return
+            else:
+                # QR does NOT match — warn user with options
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                mismatch_text = "❌ <b>العنوان في QR لا يتطابق مع العنوان الذي أدخلته!</b>\n\n" \
+                                f"العنوان المدخل: <code>{wallet}</code>\n" \
+                                f"عنوان QR: <code>{qr_text}</code>\n\n" \
+                                "اختر الإجراء المناسب:" if lang == 'ar' else \
+                                "❌ <b>QR address doesn't match the address you entered!</b>\n\n" \
+                                f"Entered address: <code>{wallet}</code>\n" \
+                                f"QR address: <code>{qr_text}</code>\n\n" \
+                                "Choose an action:"
+                mismatch_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="⚠️ استمر رغم عدم التطابق" if lang == 'ar' else "⚠️ Continue anyway",
+                        callback_data="qr_mismatch_force"
+                    )],
+                    [InlineKeyboardButton(
+                        text="🔄 إرسال QR آخر" if lang == 'ar' else "🔄 Send another QR",
+                        callback_data="qr_mismatch_retry"
+                    )],
+                    [InlineKeyboardButton(
+                        text="⏭️ تخطي QR" if lang == 'ar' else "⏭️ Skip QR",
+                        callback_data="qr_mismatch_skip"
+                    )],
+                ])
+                await state.update_data(wallet_qr_photo_id=qr_photo_id, qr_mismatch_decoded=qr_text)
+                await message.answer(mismatch_text, reply_markup=mismatch_keyboard, parse_mode='HTML')
+                return
+        else:
+            # No QR code readable in image — continue with a note
+            await message.answer(
+                "⚠️ لم نتمكن من فك QR code في الصورة. سيتم المتابعة بدون تحقق." if lang == 'ar'
+                else "⚠️ Could not decode QR code in the image. Continuing without verification."
+            )
+            await state.update_data(wallet_qr_photo_id=qr_photo_id)
+            await _proceed_after_qr(message, state, lang, data)
+            return
+
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"QR decode error: {e}")
+        try:
+            _ = lang  # check if assigned
+        except NameError:
+            lang = await _get_user_lang(message.from_user.id)
+        try:
+            _ = data
+        except NameError:
+            data = await state.get_data()
+        try:
+            _ = qr_photo_id
+        except NameError:
+            qr_photo_id = None
+        if qr_photo_id:
+            await state.update_data(wallet_qr_photo_id=qr_photo_id)
+        await message.answer(
+            "⚠️ حدث خطأ أثناء معالجة QR code. سيتم المتابعة بدون تحقق." if lang == 'ar'
+            else "⚠️ An error occurred while processing the QR code. Continuing without verification."
+        )
+        await _proceed_after_qr(message, state, lang, data)
+        return
 
 
 @router.message(OrderStates.waiting_wallet_qr, F.text)
@@ -496,6 +593,73 @@ async def skip_wallet_qr_text(message: Message, state: FSMContext):
     await message.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
 
     await state.set_state(OrderStates.waiting_save_address)
+
+
+# ───── QR Mismatch Handlers ─────
+
+
+@router.callback_query(F.data == "qr_mismatch_force")
+async def qr_mismatch_force(callback: CallbackQuery, state: FSMContext):
+    """User chose to continue despite QR mismatch."""
+    await callback.answer()
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    decoded = data.get('qr_mismatch_decoded', '')
+
+    # Update the stored address to the QR address if user is forcing through
+    # We still keep the original address the user entered
+    await callback.message.edit_text(
+        "⚠️ تم الاستمرار رغم عدم تطابق QR مع العنوان المدخل." if lang == 'ar'
+        else "⚠️ Continuing despite QR mismatch."
+    )
+    await _proceed_after_qr(callback, state, lang, data)
+
+
+@router.callback_query(F.data == "qr_mismatch_retry")
+async def qr_mismatch_retry(callback: CallbackQuery, state: FSMContext):
+    """User wants to send another QR code."""
+    await callback.answer()
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+    wallet = data.get('wallet_address', '')
+    network = data.get('network', '')
+
+    # Remove the stored QR photo and prompt again
+    await state.update_data(wallet_qr_photo_id=None, qr_mismatch_decoded=None)
+    await callback.message.edit_text(
+        "🔄 أرسل صورة QR أخرى:" if lang == 'ar'
+        else "🔄 Send another QR image:" if lang == 'en'
+        else "🔄 Send another QR image:"
+    )
+
+    # Re-prompt for QR with skip option
+    qr_prompt = "📸 <b>نفس العنوان:</b> <code>{}</code>\n\nأرسل صورة QR جديدة." if lang == 'ar' \
+                else "📸 <b>Same address:</b> <code>{}</code>\n\nSend a new QR image."
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    skip_only_btn = "⏭️ تخطي" if lang == 'ar' else "⏭️ Skip"
+    qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=skip_only_btn, callback_data="skip_wallet_qr")]
+    ])
+    await callback.message.answer(
+        qr_prompt.format(wallet),
+        reply_markup=qr_keyboard,
+        parse_mode='HTML'
+    )
+    # State is still waiting_wallet_qr, no change needed
+
+
+@router.callback_query(F.data == "qr_mismatch_skip")
+async def qr_mismatch_skip(callback: CallbackQuery, state: FSMContext):
+    """User chose to skip QR after mismatch."""
+    await callback.answer()
+    lang = await _get_user_lang(callback.from_user.id)
+    data = await state.get_data()
+
+    await state.update_data(wallet_qr_photo_id=None, qr_mismatch_decoded=None)
+    await callback.message.edit_text(
+        "✅ تم تخطي QR." if lang == 'ar' else "✅ QR skipped."
+    )
+    await _proceed_after_qr(callback, state, lang, data)
 
 
 @router.callback_query(F.data.startswith("switch_to_network_"))
