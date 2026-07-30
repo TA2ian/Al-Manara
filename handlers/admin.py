@@ -1410,6 +1410,34 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
 
 # ───── Admin Maintenance Toggle ─────
 
+async def _notify_users_maintenance(admin_msg: Message):
+    """Broadcast maintenance notification to all active users."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT telegram_id, language FROM users WHERE terms_accepted = TRUE"
+        )
+    from aiogram import Bot
+    bot = Bot(token=Config.BOT_TOKEN)
+    sent = 0
+    failed = 0
+    for u in users:
+        lang = u['language'] or 'ar'
+        text = locale_service.get('maintenance_notification', lang)
+        try:
+            await bot.send_message(u['telegram_id'], text, parse_mode='HTML')
+            sent += 1
+        except Exception:
+            failed += 1
+    await admin_msg.answer(
+        f"📨 <b>إشعار الصيانة للمستخدمين</b>\n\n"
+        f"✅ تم الإشعار: {sent}\n"
+        f"❌ فشل: {failed}\n"
+        f"📊 المجموع: {len(users)}",
+        parse_mode='HTML'
+    )
+
+
 @router.callback_query(F.data == "admin_maintenance")
 async def admin_maintenance(callback: CallbackQuery):
     """Toggle maintenance mode — checks for active orders first."""
@@ -1496,6 +1524,9 @@ async def admin_maintenance(callback: CallbackQuery):
     )
     await callback.answer()
 
+    # Notify all users
+    await _notify_users_maintenance(callback.message)
+
 
 @router.callback_query(F.data == "admin_maintenance_force")
 async def admin_maintenance_force(callback: CallbackQuery):
@@ -1510,6 +1541,9 @@ async def admin_maintenance_force(callback: CallbackQuery):
         parse_mode='HTML'
     )
     await callback.answer()
+
+    # Notify all users
+    await _notify_users_maintenance(callback.message)
 
 
 # ───── Admin Search ─────

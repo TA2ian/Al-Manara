@@ -66,6 +66,8 @@
   "help_text": "📖 <b>How to Use</b>\n\n━━━ 📦 Orders ━━━\n• Click \"💰 Buy Order\" to start a new order\n• Choose network → amount → wallet → payment\n• Upload payment receipt and receive USDT\n• Reorder from ⚙️ → \"🔄 Reorder\"\n\n━━━ 📍 Saved Addresses ━━━\n• When ordering, you can save your wallet for later use\n• Access saved addresses from ⚙️ → \"📍 Saved Addresses\"\n• You can add a label to each address (e.g. \"My Main Wallet\")\n\n━━━ 🛠 Quick Actions ━━━\n• From ⚙️ (bottom button) you can:\n  • 🔄 Reorder your last order\n  • 📍 Manage saved addresses\n  • 💱 Check exchange rate\n  • 📞 Contact support\n  • 📋 View disclaimer\n  • 🌐 Change bot language\n\n━━━ 👤 Your Account ━━━\n• On your first order, you'll be asked to verify (name + Sham Cash)\n• View your profile from \"👤 Profile\"\n• Rate the service after each completed order\n• Send feedback from \"✉️ Feedback\"\n\n💡 Have a question? Contact support from \"🆘 Support\".",
   "support_contact": "🆘 <b>Support</b>\n\nContact us:\n👤 @Ma7moud_Y\n📧 almanaraexchange@gmail.com\n\n⏰ Working Hours: 9:00 - 21:00",
   "maintenance_mode": "⚠️ Service is temporarily unavailable for maintenance.\n\nPlease try again later.",
+
+  "maintenance_notification": "🛑 <b>Maintenance Mode Activated</b>\n\nThe bot is currently undergoing maintenance to improve our service.\n\n⏳ We will be back shortly.\n\nThank you for your patience 🙏",
   "blocked_message": "🚫 Your account has been blocked.\n\nFor inquiries, contact support.",
   "rate_limit_exceeded": "⏳ Please wait {seconds} seconds before trying again.",
   "daily_limit_exceeded": "❌ You have exceeded the daily limit ({limit} USDT).\n\nPlease try again tomorrow.",
