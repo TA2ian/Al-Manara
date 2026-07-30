@@ -1388,6 +1388,110 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
     await state.clear()
 
 
+# ───── Admin Maintenance Toggle ─────
+
+@router.callback_query(F.data == "admin_maintenance")
+async def admin_maintenance(callback: CallbackQuery):
+    """Toggle maintenance mode — checks for active orders first."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    currently_on = Config.get_maintenance_mode()
+
+    if currently_on:
+        # Turn off maintenance — no checks needed
+        Config.set_maintenance_mode(False)
+        await callback.message.edit_text(
+            "✅ <b>تم إيقاف وضع الصيانة</b>\n\n"
+            "البوت متاح للمستخدمين الآن.",
+            parse_mode='HTML'
+        )
+        await callback.message.answer(
+            "⚙️ <b>لوحة التحكم</b>",
+            reply_markup=admin_menu_keyboard(),
+            parse_mode='HTML'
+        )
+        await callback.answer()
+        return
+
+    # Turning ON — check for active orders first
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        active_orders = await conn.fetch(
+            "SELECT o.id, o.order_number, o.status, o.amount_usdt, "
+            "u.full_name, u.telegram_id "
+            "FROM orders o JOIN users u ON o.user_id = u.id "
+            "WHERE o.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')"
+        )
+
+    if active_orders:
+        # Warn admin with details
+        status_names = {
+            'pending': '⏳ قيد الانتظار',
+            'waiting_payment': '💳 انتظار الدفع',
+            'receipt_received': '📎 قيد المراجعة',
+            'payment_confirmed': '🚀 انتظار الإرسال',
+        }
+        lines = []
+        for o in active_orders[:10]:  # Show first 10
+            icon = status_names.get(o['status'], o['status'])
+            lines.append(
+                f"• #{o['order_number']} — {icon} — {o['full_name'] or 'N/A'} — {o['amount_usdt']} USDT"
+            )
+        detail_text = "\n".join(lines)
+        remaining = len(active_orders) - 10
+        if remaining > 0:
+            detail_text += f"\n... و{remaining} طلب آخر"
+
+        await callback.message.edit_text(
+            f"⛔ <b>لا يمكن تفعيل وضع الصيانة</b>\n\n"
+            f"يوجد <b>{len(active_orders)}</b> طلب نشط يجب إكمالها أولاً:\n\n"
+            f"{detail_text}\n\n"
+            f"⚠️ يرجى إنهاء جميع الطلبات النشطة ثم المحاولة مرة أخرى.",
+            parse_mode='HTML'
+        )
+        await callback.message.answer(
+            "⚙️ <b>لوحة التحكم</b>",
+            reply_markup=admin_menu_keyboard(),
+            parse_mode='HTML'
+        )
+        await callback.answer()
+        return
+
+    # No active orders — safe to enable maintenance
+    Config.set_maintenance_mode(True)
+    await callback.message.edit_text(
+        f"🛑 <b>تم تفعيل وضع الصيانة</b>\n\n"
+        f"جميع الطلبات مكتملة ✅\n"
+        f"المستخدمون سيرون رسالة الصيانة.\n"
+        f"المشرفون ما زالوا قادرين على الوصول.\n\n"
+        f"لإيقاف الصيانة، اضغط على الزر مرة أخرى.",
+        parse_mode='HTML'
+    )
+    await callback.message.answer(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_maintenance_force")
+async def admin_maintenance_force(callback: CallbackQuery):
+    """Force enable maintenance even with active orders."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    Config.set_maintenance_mode(True)
+    await callback.message.edit_text(
+        "🛑 <b>تم تفعيل وضع الصيانة (قسري)</b>\n\n"
+        "⚠️ تم تجاوز الطلبات النشطة.",
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
 # ───── Admin Search ─────
 
 @router.callback_query(F.data == "admin_search_user")

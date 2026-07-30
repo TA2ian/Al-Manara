@@ -10,7 +10,7 @@ class MaintenanceMiddleware(BaseMiddleware):
     """Block users during maintenance."""
 
     async def __call__(self, handler, event, data):
-        if not Config.MAINTENANCE_MODE:
+        if not Config.get_maintenance_mode():
             return await handler(event, data)
 
         user_id = None

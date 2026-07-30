@@ -55,8 +55,16 @@ class Config:
     # Backup
     BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", 30))
 
-    # Maintenance
-    MAINTENANCE_MODE = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
+    # Maintenance — can be toggled at runtime by admin
+    _maintenance_mode = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
+
+    @classmethod
+    def get_maintenance_mode(cls) -> bool:
+        return cls._maintenance_mode
+
+    @classmethod
+    def set_maintenance_mode(cls, value: bool):
+        cls._maintenance_mode = value
 
     @classmethod
     def validate(cls) -> list:

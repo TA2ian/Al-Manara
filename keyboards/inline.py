@@ -201,6 +201,9 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📝 سجل العمليات", callback_data="admin_logs"),
             InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups")
+        ],
+        [
+            InlineKeyboardButton(text="🛑 صيانة", callback_data="admin_maintenance")
         ]
     ])
 
