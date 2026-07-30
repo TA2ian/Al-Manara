@@ -156,21 +156,70 @@ async def show_rate(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_support")
 @router.callback_query(F.data == "quick_contact")
 async def show_support(callback: CallbackQuery):
-    """Show support contact info."""
+    """Show support contact info with pre-filled template."""
     lang = 'ar'
+    extra_data = ""
+    full_name = "N/A"
+    username = "N/A"
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
             user = await conn.fetchrow(
-                "SELECT language FROM users WHERE telegram_id = $1", callback.from_user.id
+                "SELECT language, full_name, username FROM users WHERE telegram_id = $1",
+                callback.from_user.id
             )
             if user:
                 lang = user['language']
+                full_name = user['full_name'] or 'N/A'
+                username = user['username'] or 'N/A'
+
+                # Fetch last active order if any
+                order = await conn.fetchrow(
+                    "SELECT order_number, amount_usdt, status, created_at "
+                    "FROM orders WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) "
+                    "AND status != 'completed' AND status != 'rejected' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    callback.from_user.id
+                )
+                if order:
+                    status_names_ar = {
+                        'pending': 'قيد الانتظار',
+                        'waiting_payment': 'في انتظار الدفع',
+                        'receipt_received': 'الإيصال قيد المراجعة',
+                        'payment_confirmed': 'تم تأكيد الدفع',
+                    }
+                    status_names_en = {
+                        'pending': 'Pending',
+                        'waiting_payment': 'Awaiting Payment',
+                        'receipt_received': 'Receipt Under Review',
+                        'payment_confirmed': 'Payment Confirmed',
+                    }
+                    status_map = status_names_ar if lang == 'ar' else status_names_en
+                    extra_data = (
+                        f"آخر طلب: #{order['order_number']} — {order['amount_usdt']} USDT"
+                        if lang == 'ar' else
+                        f"Last Order: #{order['order_number']} — {order['amount_usdt']} USDT"
+                    )
+                    extra_data += f"\nالحالة: {status_map.get(order['status'], order['status'])}" if lang == 'ar' \
+                        else f"\nStatus: {status_map.get(order['status'], order['status'])}"
+                    extra_data += f"\nالتاريخ: {order['created_at'].strftime('%Y-%m-%d %H:%M')}" if lang == 'ar' \
+                        else f"\nDate: {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
     except Exception:
         pass
 
     support_text = locale_service.get('support_contact', lang)
     await callback.message.edit_text(support_text, parse_mode='HTML')
+
+    # Show pre-filled support template
+    template = locale_service.get(
+        'support_template', lang,
+        full_name=full_name,
+        telegram_id=callback.from_user.id,
+        username=username,
+        extra_data=extra_data or ("لا يوجد طلبات نشطة" if lang == 'ar' else "No active orders")
+    )
+    await callback.message.answer(template, parse_mode='HTML')
+
     await callback.message.answer(
         locale_service.get('main_menu', lang),
         reply_markup=main_menu_inline(lang)
