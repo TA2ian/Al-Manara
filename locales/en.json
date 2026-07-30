@@ -17,7 +17,7 @@
   "support": "🆘 Support",
   "feedback": "✉️ Feedback",
   "help": "📖 Help",
-  "select_network": "🌐 Select Network:",
+  "select_network": "🌐 Select Network:\n\n💡 <b>Important Note:</b>\nEnter <b>YOUR</b> personal wallet address (your USDT wallet) to receive the funds after the order is completed.\n\n⚠️ Make sure to select the correct network that your wallet supports:",
   "bep20": "BEP20 (BNB Chain)",
   "trc20": "TRC20 (TRON)",
   "enter_amount": "💵 Enter top-up amount in USDT\n\nMinimum: {min} USDT\nMaximum: {max} USDT\n\nExample: 100",

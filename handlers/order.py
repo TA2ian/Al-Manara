@@ -23,6 +23,7 @@ from services.notification_service import NotificationService
 from config import Config
 from database import get_pool
 from keyboards.inline import start_verification_keyboard
+from middleware.rate_limit import rate_limiter as global_rate_limiter
 
 router = Router()
 
