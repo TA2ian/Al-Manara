@@ -50,7 +50,13 @@ async def cmd_start(message: Message, state: FSMContext):
         )
         return
 
-    # Show language selection first
+    # Show bot intro before language selection
+    await message.answer(
+        locale_service.get('bot_intro', 'ar'),
+        parse_mode='HTML'
+    )
+
+    # Show language selection
     await message.answer(
         locale_service.get('select_language', 'ar'),
         reply_markup=language_select_keyboard()
