@@ -98,12 +98,11 @@ async def start_order(message: Message, state: FSMContext):
         return
 
     await message.answer(
-        locale_service.get('select_network', lang),
-        reply_markup=network_selection_keyboard(lang),
-        parse_mode='HTML'
+        locale_service.get('enter_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
+        reply_markup=preset_amounts_keyboard(lang)
     )
 
-    await state.set_state(OrderStates.waiting_network)
+    await state.set_state(OrderStates.waiting_amount)
 
 
 async def _get_user_lang(telegram_id: int) -> str:
@@ -117,28 +116,6 @@ async def _get_user_lang(telegram_id: int) -> str:
     except Exception:
         pass
     return 'ar'
-
-
-@router.callback_query(OrderStates.waiting_network, F.data.startswith("network_"))
-async def select_network(callback: CallbackQuery, state: FSMContext):
-    """Handle network selection."""
-    allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_network')
-    if not allowed:
-        await callback.answer()
-        return
-
-    network = callback.data.replace("network_", "")
-    lang = await _get_user_lang(callback.from_user.id)
-
-    await state.update_data(network=network)
-
-    await callback.message.edit_text(
-        locale_service.get('enter_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
-        reply_markup=preset_amounts_keyboard(lang)
-    )
-
-    await state.set_state(OrderStates.waiting_amount)
-    await callback.answer()
 
 
 @router.callback_query(OrderStates.waiting_amount, F.data.startswith("amount_preset_"))
@@ -195,10 +172,7 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
 
     await state.update_data(amount_usdt=amount)
 
-    data = await state.get_data()
-    network = data['network']
-
-    # Check for saved addresses for this network
+    # Check for saved addresses across ALL networks
     pool = await get_pool()
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
@@ -207,8 +181,8 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
         if user_row:
             saved = await conn.fetch(
                 "SELECT id, address, network, label FROM saved_addresses "
-                "WHERE user_id = $1 AND network = $2 ORDER BY created_at DESC",
-                user_row['id'], network
+                "WHERE user_id = $1 ORDER BY created_at DESC",
+                user_row['id']
             )
         else:
             saved = []
@@ -219,25 +193,41 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
         buttons = []
         for addr in saved:
             label = addr.get('label', '') or ''
-            full = addr['address']
-            short_addr = f"<b>{full[:6]}</b>...<b>{full[-4:]}</b>"
-            display = f"{label} - {short_addr}" if label else short_addr
+            net_icon = '🔷' if addr['network'] == 'TRC20' else '🟡'
             buttons.append([
-                InlineKeyboardButton(text=f"📍 {label}: {full[:6]}...{full[-4:]}" if label else f"📍 {full[:6]}...{full[-4:]}", callback_data=f"order_use_saved_{addr['id']}")
+                InlineKeyboardButton(
+                    text=f"{net_icon} {label}: {addr['address'][:6]}...{addr['address'][-4:]}" if label
+                         else f"{net_icon} {addr['address'][:6]}...{addr['address'][-4:]} [{addr['network']}]",
+                    callback_data=f"order_use_saved_{addr['id']}"
+                )
             ])
         manual_text = "✏️ إدخال عنوان جديد" if lang == 'ar' else "✏️ Enter New Address"
         buttons.append([InlineKeyboardButton(text=manual_text, callback_data="order_wallet_manual")])
         await message.answer(
-            f"📍 <b>" + ("العناوين المحفوظة" if lang == 'ar' else "Saved Addresses") + f"</b> ({network})\n\n"
+            f"📍 <b>" + ("العناوين المحفوظة" if lang == 'ar' else "Saved Addresses") + f"</b>\n\n"
             + ("اختر عنواناً أو أدخل عنواناً جديداً:" if lang == 'ar' else "Select an address or enter a new one:"),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
             parse_mode='HTML'
         )
     else:
-        # No saved addresses — go straight to manual entry
-        example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+        # No saved addresses — go straight to manual entry (show both network examples)
+        wallet_prompt = (
+            "📍 <b>أدخل عنوان محفظتك الشخصية</b>\n\n"
+            "يمكنك إدخال عنوان من أي من الشبكات التالية:\n"
+            "🔷 TRC20 (TRON) — <code>TXYZ12...uvwxyz</code>\n"
+            "🟡 BEP20 (BNB Chain) — <code>0x742d35...38f44e</code>\n\n"
+            "⚠️ سيتم التعرف على الشبكة تلقائياً من العنوان.\n"
+            "• انسخ العنوان بالكامل — لا تكتبه يدوياً"
+        ) if lang == 'ar' else (
+            "📍 <b>Enter your wallet address</b>\n\n"
+            "You can enter an address from either network:\n"
+            "🔷 TRC20 (TRON) — <code>TXYZ12...uvwxyz</code>\n"
+            "🟡 BEP20 (BNB Chain) — <code>0x742d35...38f44e</code>\n\n"
+            "⚠️ The network will be detected automatically.\n"
+            "• Copy the full address — don't type it manually"
+        )
         await message.answer(
-            locale_service.get('enter_wallet', lang, network=network, example=example),
+            wallet_prompt,
             reply_markup=cancel_keyboard(lang),
             parse_mode='HTML'
         )
@@ -336,12 +326,24 @@ async def use_saved_address_for_order(callback: CallbackQuery, state: FSMContext
 async def enter_wallet_manual(callback: CallbackQuery, state: FSMContext):
     """User chose manual wallet entry instead of saved address."""
     lang = await _get_user_lang(callback.from_user.id)
-    data = await state.get_data()
-    network = data.get('network', 'BEP20')
-    example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
+    wallet_prompt = (
+        "📍 <b>أدخل عنوان محفظتك الشخصية</b>\n\n"
+        "يمكنك إدخال عنوان من أي من الشبكات التالية:\n"
+        "🔷 TRC20 (TRON) — <code>TXYZ12...uvwxyz</code>\n"
+        "🟡 BEP20 (BNB Chain) — <code>0x742d35...38f44e</code>\n\n"
+        "⚠️ سيتم التعرف على الشبكة تلقائياً من العنوان.\n"
+        "• انسخ العنوان بالكامل — لا تكتبه يدوياً"
+    ) if lang == 'ar' else (
+        "📍 <b>Enter your wallet address</b>\n\n"
+        "You can enter an address from either network:\n"
+        "🔷 TRC20 (TRON) — <code>TXYZ12...uvwxyz</code>\n"
+        "🟡 BEP20 (BNB Chain) — <code>0x742d35...38f44e</code>\n\n"
+        "⚠️ The network will be detected automatically.\n"
+        "• Copy the full address — don't type it manually"
+    )
 
     await callback.message.edit_text(
-        locale_service.get('enter_wallet', lang, network=network, example=example),
+        wallet_prompt,
         reply_markup=cancel_keyboard(lang),
         parse_mode='HTML'
     )
@@ -351,49 +353,55 @@ async def enter_wallet_manual(callback: CallbackQuery, state: FSMContext):
 
 @router.message(OrderStates.waiting_wallet)
 async def enter_wallet(message: Message, state: FSMContext):
-    """Handle wallet input."""
+    """Handle wallet input — auto-detect network from address."""
     allowed, _ = global_rate_limiter.check(message.from_user.id, 'order_wallet')
     if not allowed:
         return
 
     lang = await _get_user_lang(message.from_user.id)
-    # Strip all whitespace including spaces inside the address
     wallet = message.text.replace(' ', '').replace('\t', '').replace('\n', '').strip()
 
-    data = await state.get_data()
-    network = data['network']
+    # Auto-detect network from wallet address
+    network = WalletValidator.detect_network(wallet)
 
-    # Validate wallet
-    validation = WalletValidator.validate(wallet, network)
-
-    if not validation['valid']:
+    if not network:
+        # Could not detect — ask user to pick a network
         await message.answer(
-            locale_service.get('invalid_wallet', lang, network=network)
+            "⚠️ <b>لم نتمكن من التعرف على الشبكة تلقائياً.</b>\n\n"
+            "يرجى اختيار الشبكة المناسبة لعنوان محفظتك:"
+            if lang == 'ar'
+            else "⚠️ <b>Could not detect the network automatically.</b>\n\n"
+            "Please select the correct network for your wallet address:",
+            reply_markup=network_selection_keyboard(lang)
         )
         return
 
-    await state.update_data(wallet_address=wallet)
-
-    # Check cross-network
-    other_network = WalletValidator.detect_network(wallet)
-    if other_network and other_network != network:
-        # Offer automatic switch to the corrected network
-        switch_text = f"🔄 التبديل إلى {other_network}" if lang == 'ar' else f"🔄 Switch to {other_network}"
-        continue_text = "✅ الاستمرار مع " + network if lang == 'ar' else f"✅ Continue with {network}"
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        network_switch_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=switch_text, callback_data=f"switch_to_network_{other_network}")],
-            [InlineKeyboardButton(text=continue_text, callback_data="skip_network_switch")]
-        ])
+    # Validate wallet on detected network
+    validation = WalletValidator.validate(wallet, network)
+    if not validation['valid']:
+        error_msg = validation.get('error', 'تنسيق عنوان غير صحيح')
         await message.answer(
-            locale_service.get('wallet_cross_check_switch', lang, other_network=other_network, current_network=network),
-            reply_markup=network_switch_keyboard,
-            parse_mode='HTML'
+            f"❌ <b>عنوان غير صحيح لشبكة {network}</b>\n\n{error_msg}\n\n"
+            "🔷 TRC20: يبدأ بـ T ويتكون من 34 حرفاً\n"
+            "🟡 BEP20: يبدأ بـ 0x ويتكون من 42 حرفاً"
+            if lang == 'ar'
+            else f"❌ <b>Invalid address for {network}</b>\n\n{error_msg}\n\n"
+            "🔷 TRC20: Starts with T, 34 characters\n"
+            "🟡 BEP20: Starts with 0x, 42 characters"
         )
-        return  # Wait for user to choose
+        return
 
+    await state.update_data(wallet_address=wallet, network=network)
+
+    # Show detected network
+    network_icons = {'TRC20': '🔷', 'BEP20': '🟡'}
+    icon = network_icons.get(network, '🌐')
     await message.answer(
-        locale_service.get('wallet_valid', lang),
+        f"{icon} ✅ <b>تم التعرف على الشبكة: {network}</b>\n\n"
+        f"📍 <code>{wallet[:10]}...{wallet[-6:]}</code>"
+        if lang == 'ar'
+        else f"{icon} ✅ <b>Network detected: {network}</b>\n\n"
+        f"📍 <code>{wallet[:10]}...{wallet[-6:]}</code>"
     )
 
     # Ask if they want to attach a QR code of their wallet address
@@ -410,6 +418,31 @@ async def enter_wallet(message: Message, state: FSMContext):
     ])
     await state.set_state(OrderStates.waiting_wallet_qr)
     await message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
+
+
+@router.callback_query(OrderStates.waiting_network, F.data.startswith("network_"))
+async def manual_network_selection(callback: CallbackQuery, state: FSMContext):
+    """Handle manual network selection (fallback when auto-detect fails)."""
+    allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_network')
+    if not allowed:
+        await callback.answer()
+        return
+
+    network = callback.data.replace("network_", "")
+    lang = await _get_user_lang(callback.from_user.id)
+
+    await state.update_data(network=network)
+
+    wallet_prompt = (
+        f"📍 <b>أدخل عنوان محفظتك (شبكة {network})</b>\n\n"
+        "⚠️ سيتم التحقق من صحة العنوان وفقاً للشبكة المختارة."
+        if lang == 'ar'
+        else f"📍 <b>Enter your wallet address ({network})</b>\n\n"
+        "⚠️ The address will be validated against the selected network."
+    )
+    await callback.message.edit_text(wallet_prompt, reply_markup=cancel_keyboard(lang), parse_mode='HTML')
+    await state.set_state(OrderStates.waiting_wallet)
+    await callback.answer()
 
 
 @router.callback_query(OrderStates.waiting_wallet_qr, F.data == "skip_wallet_qr")
