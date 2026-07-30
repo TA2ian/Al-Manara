@@ -314,7 +314,8 @@ async def enter_wallet(message: Message, state: FSMContext):
         return
 
     lang = await _get_user_lang(message.from_user.id)
-    wallet = message.text.strip()
+    # Strip all whitespace including spaces inside the address
+    wallet = message.text.replace(' ', '').replace('\t', '').replace('\n', '').strip()
 
     data = await state.get_data()
     network = data['network']
