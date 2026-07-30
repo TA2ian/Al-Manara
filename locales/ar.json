@@ -23,7 +23,7 @@
   "enter_amount": "💵 اختر مبلغ الشحن بالـ USDT:",
   "enter_amount_custom": "💵 أدخل مبلغ الشحن بالـ USDT\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT\n\nمثال صحيح: 100",
   "invalid_amount": "❌ مبلغ غير صحيح.\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT",
-  "enter_wallet": "📍 أدخل عنوان محفظتك الشخصية (الخاصة بك) لاستلام الـ USDT\n\n━━━ <b>{network}</b> ━━━\n<b>الصيغة:</b> {network_format}\n<b>مثال:</b> <code>{example}</code>\n\n⚠️ تأكد من نسخ العنوان كاملاً ودون أخطاء.",
+  "enter_wallet": "📍 أدخل عنوان محفظتك الشخصية (الخاصة بك) لاستلام الـ USDT\n\n━━━ <b>{network}</b> ━━━\n<b>مثال:</b> <code>{example}</code>\n\n⚠️ تأكد من صحة العنوان قبل الحفظ:\n• تحقق من أول العنوان وآخره\n• العنوان طويل، انسخه بالكامل",
   "bep20_example": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
   "trc20_example": "TXYZ123456789abcdefghijklmnopqrstuvwxyz",
   "bep20_format": "يبدأ بـ <b>0x</b> ويتكون من <b>42</b> حرفاً (أرقام وحروف a-f)",

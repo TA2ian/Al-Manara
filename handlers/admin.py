@@ -1368,6 +1368,7 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         users = await conn.fetch("SELECT telegram_id FROM users")
+    from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     sent = 0
     failed = 0

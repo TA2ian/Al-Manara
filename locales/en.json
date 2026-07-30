@@ -23,7 +23,7 @@
   "enter_amount": "💵 Select top-up amount in USDT:",
   "enter_amount_custom": "💵 Enter top-up amount in USDT\n\nMinimum: {min} USDT\nMaximum: {max} USDT\n\nExample: 100",
   "invalid_amount": "❌ Invalid amount.\n\nMinimum: {min} USDT\nMaximum: {max} USDT",
-  "enter_wallet": "📍 Enter YOUR wallet address to receive the USDT\n\n━━━ <b>{network}</b> ━━━\n<b>Format:</b> {network_format}\n<b>Example:</b> <code>{example}</code>\n\n⚠️ Make sure to copy the entire address without errors.",
+  "enter_wallet": "📍 Enter YOUR wallet address to receive the USDT\n\n━━━ <b>{network}</b> ━━━\n<b>Example:</b> <code>{example}</code>\n\n⚠️ Double-check before saving:\n• Verify the beginning and end of the address\n• Copy the full address, don't type it manually",
   "bep20_example": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
   "trc20_example": "TXYZ123456789abcdefghijklmnopqrstuvwxyz",
   "bep20_format": "Starts with <b>0x</b> and has <b>42</b> characters (numbers + a-f)",

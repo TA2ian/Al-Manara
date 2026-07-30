@@ -195,9 +195,8 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
     else:
         # No saved addresses — go straight to manual entry
         example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
-        fmt = locale_service.get('bep20_format' if network == 'BEP20' else 'trc20_format', lang)
         await message.answer(
-            locale_service.get('enter_wallet', lang, network=network, example=example, network_format=fmt),
+            locale_service.get('enter_wallet', lang, network=network, example=example),
             reply_markup=cancel_keyboard(lang)
         )
         await state.set_state(OrderStates.waiting_wallet)
@@ -299,9 +298,8 @@ async def enter_wallet_manual(callback: CallbackQuery, state: FSMContext):
     network = data.get('network', 'BEP20')
     example = locale_service.get('bep20_example' if network == 'BEP20' else 'trc20_example', lang)
 
-    fmt = locale_service.get('bep20_format' if network == 'BEP20' else 'trc20_format', lang)
     await callback.message.edit_text(
-        locale_service.get('enter_wallet', lang, network=network, example=example, network_format=fmt),
+        locale_service.get('enter_wallet', lang, network=network, example=example),
         reply_markup=cancel_keyboard(lang)
     )
     await state.set_state(OrderStates.waiting_wallet)
