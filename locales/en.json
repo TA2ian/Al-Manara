@@ -11,7 +11,7 @@
   "main_menu": "👋 Welcome! Choose from the menu:",
   "new_order": "💰 Buy Order",
   "my_orders": "📋 Orders",
-  "exchange_rate": "💱 Rate",
+  "exchange_rate": "💱 Exchange Rate",
   "profile": "👤 Profile",
   "settings": "⚙️",
   "support": "🆘 Support",
@@ -103,6 +103,13 @@
   "address_saved": "✅ Address saved successfully!\nYou can use it from the saved addresses menu.",
   "change_language": "🌐 <b>Change Language</b>\n\nChoose your preferred language:",
   "language_changed": "✅ Language changed successfully!",
-  "address_details": "📍 <b>Saved Address</b>\n\n🌐 Network: {network}\n📍 Address:\n<code>{address}</code>\n📅 Saved: {date}\n🏷️ Label: {label}",
+  "address_details": "📍 <b>Saved Address</b>\n\n🌐 Network: {network}\n🏷️ Label: {label}\n📍 Address:\n<code>{address}</code>\n📅 Saved: {date}",
+  "delete_address": "🗑️ Delete Address",
+  "delete_address_confirm": "🗑️ Are you sure you want to delete this saved address?\n\n<b>Note:</b> This action cannot be undone.",
+  "delete_address_confirm_btn": "✅ Confirm Delete",
+  "delete_address_cancelled": "❌ Deletion cancelled.",
+  "delete_address_done": "✅ Address deleted successfully.",
+  "disclaimer_title": "📋 Disclaimer",
+  "disclaimer_btn": "📋 Disclaimer",
   "save_address_label_prompt": "🏷️ <b>Enter a name for this address</b>\n\nExample: My Main Wallet\nOr send \"Skip\" to save without a label."
 }

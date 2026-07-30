@@ -177,6 +177,33 @@ async def show_support(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu_disclaimer")
+async def show_disclaimer(callback: CallbackQuery):
+    """Show disclaimer / terms of service."""
+    lang = 'ar'
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT language FROM users WHERE telegram_id = $1", callback.from_user.id
+            )
+            if user:
+                lang = user['language']
+    except Exception:
+        pass
+
+    text = locale_service.get('terms_text', lang,
+                              min_order=Config.MIN_ORDER,
+                              max_order=Config.MAX_ORDER,
+                              timeout=Config.PAYMENT_TIMEOUT)
+    await callback.message.edit_text(text, parse_mode='HTML')
+    await callback.message.answer(
+        locale_service.get('main_menu', lang),
+        reply_markup=main_menu_inline(lang)
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "menu_help")
 async def show_help(callback: CallbackQuery):
     """Show help text."""
@@ -428,9 +455,67 @@ async def view_saved_address(callback: CallbackQuery):
 
     label = addr['label'] or ('بدون تصنيف' if lang == 'ar' else 'No label')
     date = addr['created_at'].strftime('%Y-%m-%d %H:%M')
+    full = addr['address']
+    address_display = f"<b>{full[:6]}</b>{full[6:-4]}<b>{full[-4:]}</b>"
+
+    from keyboards.inline import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=locale_service.get('delete_address', lang), callback_data=f"del_addr_{addr_id}"),
+            InlineKeyboardButton(text=locale_service.get('back', lang), callback_data="quick_saved_addresses")
+        ]
+    ])
 
     await callback.message.edit_text(
-        locale_service.get('address_details', lang, network=addr['network'], address=addr['address'], date=date, label=label),
+        locale_service.get('address_details', lang, network=addr['network'], address=address_display, date=date, label=label),
+        parse_mode='HTML',
+        reply_markup=kb
+    )
+    await callback.message.answer(
+        locale_service.get('main_menu', lang),
+        reply_markup=main_menu_inline(lang)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("del_addr_"))
+async def delete_saved_address_confirm(callback: CallbackQuery):
+    """Ask for delete confirmation."""
+    addr_id = int(callback.data.replace("del_addr_", ""))
+    lang = 'ar'
+    await callback.message.edit_text(
+        locale_service.get('delete_address_confirm', lang),
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=locale_service.get('delete_address_confirm_btn', lang), callback_data=f"del_addr_conf_{addr_id}"),
+                InlineKeyboardButton(text=locale_service.get('cancel', lang), callback_data="quick_saved_addresses")
+            ]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("del_addr_conf_"))
+async def delete_saved_address_execute(callback: CallbackQuery):
+    """Actually delete the saved address."""
+    addr_id = int(callback.data.replace("del_addr_conf_", ""))
+    pool = await get_pool()
+    lang = 'ar'
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id = $1", callback.from_user.id
+        )
+        if user:
+            lang = user['language']
+            await conn.execute(
+                "DELETE FROM saved_addresses WHERE id = $1 AND user_id = $2",
+                addr_id, user['id']
+            )
+
+    await callback.message.edit_text(
+        locale_service.get('delete_address_done', lang),
         parse_mode='HTML'
     )
     await callback.message.answer(

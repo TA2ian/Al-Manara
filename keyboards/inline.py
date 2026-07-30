@@ -26,24 +26,30 @@ def main_menu_inline(lang: str = 'ar') -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="👤 حسابي", callback_data="menu_profile"),
-                InlineKeyboardButton(text="💱 السعر", callback_data="menu_rate"),
+                InlineKeyboardButton(text="💱 سعر الصرف", callback_data="menu_rate"),
                 InlineKeyboardButton(text="✉️ اقتراح", callback_data="menu_feedback")
             ],
             [
                 InlineKeyboardButton(text="🆘 دعم", callback_data="menu_support"),
                 InlineKeyboardButton(text="📖 مساعدة", callback_data="menu_help")
+            ],
+            [
+                InlineKeyboardButton(text="📋 إخلاء المسؤولية", callback_data="menu_disclaimer")
             ]
         ])
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="👤 Profile", callback_data="menu_profile"),
-                InlineKeyboardButton(text="💱 Rate", callback_data="menu_rate"),
+                InlineKeyboardButton(text="💱 Exchange Rate", callback_data="menu_rate"),
                 InlineKeyboardButton(text="✉️ Feedback", callback_data="menu_feedback")
             ],
             [
                 InlineKeyboardButton(text="🆘 Support", callback_data="menu_support"),
                 InlineKeyboardButton(text="📖 Help", callback_data="menu_help")
+            ],
+            [
+                InlineKeyboardButton(text="📋 Disclaimer", callback_data="menu_disclaimer")
             ]
         ])
 
@@ -300,7 +306,8 @@ def saved_addresses_keyboard(addresses: list, lang: str = 'ar', select_mode: boo
     buttons = []
     for addr in addresses:
         label = addr.get('label', '') or ''
-        short_addr = addr['address'][:10] + "..."
+        full = addr['address']
+        short_addr = full[:6] + "..." + full[-4:]
         display = f"{label} - {short_addr}" if label else short_addr
         prefix = "select_addr_" if select_mode else "view_addr_"
         buttons.append([
@@ -321,10 +328,11 @@ def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) 
                 InlineKeyboardButton(text="📍 عناويني المحفوظة", callback_data="quick_saved_addresses")
             ],
             [
-                InlineKeyboardButton(text="💱 السعر الحالي", callback_data="quick_rate"),
-                InlineKeyboardButton(text="📞 التواصل مع الدعم", callback_data="quick_contact")
+                InlineKeyboardButton(text="💱 سعر الصرف", callback_data="quick_rate"),
+                InlineKeyboardButton(text="📞 دعم واقتراح", callback_data="quick_contact")
             ],
             [
+                InlineKeyboardButton(text="📋 إخلاء المسؤولية", callback_data="menu_disclaimer"),
                 InlineKeyboardButton(text="🌐 تغيير اللغة", callback_data="quick_change_lang")
             ]
         ]
@@ -335,10 +343,11 @@ def quick_actions_keyboard(lang: str = 'ar', has_saved_addresses: bool = False) 
                 InlineKeyboardButton(text="📍 Saved Addresses", callback_data="quick_saved_addresses")
             ],
             [
-                InlineKeyboardButton(text="💱 Current Rate", callback_data="quick_rate"),
-                InlineKeyboardButton(text="📞 Contact Support", callback_data="quick_contact")
+                InlineKeyboardButton(text="💱 Exchange Rate", callback_data="quick_rate"),
+                InlineKeyboardButton(text="📞 Support & Feedback", callback_data="quick_contact")
             ],
             [
+                InlineKeyboardButton(text="📋 Disclaimer", callback_data="menu_disclaimer"),
                 InlineKeyboardButton(text="🌐 Change Language", callback_data="quick_change_lang")
             ]
         ]

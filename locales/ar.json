@@ -11,7 +11,7 @@
   "main_menu": "👋 مرحباً! اختر من القائمة:",
   "new_order": "💰 إنشاء طلب شراء",
   "my_orders": "📋 طلباتي",
-  "exchange_rate": "💱 السعر",
+  "exchange_rate": "💱 سعر الصرف",
   "profile": "👤 حسابي",
   "settings": "⚙️",
   "support": "🆘 دعم",
@@ -103,6 +103,13 @@
   "address_saved": "✅ تم حفظ العنوان بنجاح!\nيمكنك استخدامه من قائمة العناوين المحفوظة.",
   "change_language": "🌐 <b>تغيير اللغة</b>\n\nاختر اللغة المفضلة:",
   "language_changed": "✅ تم تغيير اللغة بنجاح!",
-  "address_details": "📍 <b>العنوان المحفوظ</b>\n\n🌐 الشبكة: {network}\n📍 العنوان:\n<code>{address}</code>\n📅 تم الحفظ: {date}\n🏷️ التصنيف: {label}",
+  "address_details": "📍 <b>العنوان المحفوظ</b>\n\n🌐 الشبكة: {network}\n🏷️ التصنيف: {label}\n📍 العنوان:\n<code>{address}</code>\n📅 تم الحفظ: {date}",
+  "delete_address": "🗑️ حذف العنوان",
+  "delete_address_confirm": "🗑️ هل أنت متأكد من حذف هذا العنوان المحفوظ؟\n\n<b>ملاحظة:</b> هذا الإجراء لا يمكن التراجع عنه.",
+  "delete_address_confirm_btn": "✅ تأكيد الحذف",
+  "delete_address_cancelled": "❌ تم إلغاء الحذف.",
+  "delete_address_done": "✅ تم حذف العنوان بنجاح.",
+  "disclaimer_title": "📋 إخلاء المسؤولية",
+  "disclaimer_btn": "📋 إخلاء المسؤولية",
   "save_address_label_prompt": "🏷️ <b>أدخل اسماً لهذا العنوان</b>\n\nمثال: محفظتي الرئيسية\nأو أرسل \"تخطي\" لحفظه بدون اسم."
 }

@@ -179,10 +179,11 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
         buttons = []
         for addr in saved:
             label = addr.get('label', '') or ''
-            short_addr = addr['address'][:8] + "..." + addr['address'][-4:]
+            full = addr['address']
+            short_addr = f"<b>{full[:6]}</b>...<b>{full[-4:]}</b>"
             display = f"{label} - {short_addr}" if label else short_addr
             buttons.append([
-                InlineKeyboardButton(text=f"📍 {display}", callback_data=f"order_use_saved_{addr['id']}")
+                InlineKeyboardButton(text=f"📍 {label}: {full[:6]}...{full[-4:]}" if label else f"📍 {full[:6]}...{full[-4:]}", callback_data=f"order_use_saved_{addr['id']}")
             ])
         manual_text = "✏️ إدخال عنوان جديد" if lang == 'ar' else "✏️ Enter New Address"
         buttons.append([InlineKeyboardButton(text=manual_text, callback_data="order_wallet_manual")])
