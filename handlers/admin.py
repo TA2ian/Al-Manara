@@ -231,7 +231,6 @@ async def approve_order(callback: CallbackQuery):
         bot.send_message(
             admin_id,
             admin_update_text,
-            reply_markup=order_admin_keyboard(order_id, 'waiting_payment'),
             parse_mode='HTML'
         )
         for admin_id in Config.ADMIN_IDS
