@@ -27,10 +27,6 @@ def main_menu_inline(lang: str = 'ar') -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="👤 حسابي", callback_data="menu_profile"),
                 InlineKeyboardButton(text="💱 سعر الصرف", callback_data="menu_rate"),
-                InlineKeyboardButton(text="✉️ اقتراح", callback_data="menu_feedback")
-            ],
-            [
-                InlineKeyboardButton(text="🆘 دعم", callback_data="menu_support"),
                 InlineKeyboardButton(text="📖 مساعدة", callback_data="menu_help")
             ],
             [
@@ -42,10 +38,6 @@ def main_menu_inline(lang: str = 'ar') -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="👤 Profile", callback_data="menu_profile"),
                 InlineKeyboardButton(text="💱 Exchange Rate", callback_data="menu_rate"),
-                InlineKeyboardButton(text="✉️ Feedback", callback_data="menu_feedback")
-            ],
-            [
-                InlineKeyboardButton(text="🆘 Support", callback_data="menu_support"),
                 InlineKeyboardButton(text="📖 Help", callback_data="menu_help")
             ],
             [

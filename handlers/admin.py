@@ -1410,7 +1410,7 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
 
 # ───── Admin Maintenance Toggle ─────
 
-async def _notify_users_maintenance(admin_msg: Message):
+async def _notify_users_maintenance(admin_msg: Message, locale_key: str = 'maintenance_notification'):
     """Broadcast maintenance notification to all active users."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1423,7 +1423,7 @@ async def _notify_users_maintenance(admin_msg: Message):
     failed = 0
     for u in users:
         lang = u['language'] or 'ar'
-        text = locale_service.get('maintenance_notification', lang)
+        text = locale_service.get(locale_key, lang)
         try:
             await bot.send_message(u['telegram_id'], text, parse_mode='HTML')
             sent += 1
@@ -1461,6 +1461,9 @@ async def admin_maintenance(callback: CallbackQuery):
             parse_mode='HTML'
         )
         await callback.answer()
+
+        # Notify all users that maintenance ended
+        await _notify_users_maintenance(callback.message, 'maintenance_ended')
         return
 
     # Turning ON — check for active orders first

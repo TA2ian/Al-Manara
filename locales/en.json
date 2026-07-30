@@ -68,6 +68,8 @@
   "maintenance_mode": "⚠️ Service is temporarily unavailable for maintenance.\n\nPlease try again later.",
 
   "maintenance_notification": "🛑 <b>Maintenance Mode Activated</b>\n\nThe bot is currently undergoing maintenance to improve our service.\n\n⏳ We will be back shortly.\n\nThank you for your patience 🙏",
+
+  "maintenance_ended": "✅ <b>Maintenance Completed</b>\n\nThe bot is back online! 🎉\n\nYou can now use the bot normally again.\n\nThank you for your patience 🙏",
   "blocked_message": "🚫 Your account has been blocked.\n\nFor inquiries, contact support.",
   "rate_limit_exceeded": "⏳ Please wait {seconds} seconds before trying again.",
   "daily_limit_exceeded": "❌ You have exceeded the daily limit ({limit} USDT).\n\nPlease try again tomorrow.",
