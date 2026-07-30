@@ -204,7 +204,8 @@ async def approve_order(callback: CallbackQuery):
             f"🔔 <b>Your order #{order['order_number']} has been approved!</b>\n"
             f"⏳ You have {Config.PAYMENT_TIMEOUT} minutes to complete payment."
         )
-        await bot.send_message(user['telegram_id'], short_notice, parse_mode='HTML')
+        from keyboards.reply import compact_reply_keyboard
+        await bot.send_message(user['telegram_id'], short_notice, parse_mode='HTML', reply_markup=compact_reply_keyboard(user_lang))
     except Exception as e:
         logger.error(f"Failed to send approval notification: {e}")
 
@@ -285,7 +286,7 @@ async def reject_order(callback: CallbackQuery):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id AS user_tg, u.full_name FROM orders o "
+            "SELECT o.*, u.telegram_id AS user_tg, u.full_name, u.language FROM orders o "
             "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -301,7 +302,9 @@ async def reject_order(callback: CallbackQuery):
 
     # Notify user their order was rejected
     from aiogram import Bot
+    from keyboards.reply import compact_reply_keyboard
     bot = Bot(token=Config.BOT_TOKEN)
+    rej_lang = order['language'] or 'ar'
     try:
         await bot.send_message(
             order['user_tg'],
@@ -309,7 +312,8 @@ async def reject_order(callback: CallbackQuery):
             f"📦 الطلب: #{order['order_number']}\n"
             f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
             f"يمكنك إنشاء طلب جديد بالضغط على زر <b>💰 إنشاء طلب شراء</b> في القائمة السفلية.",
-            parse_mode='HTML'
+            parse_mode='HTML',
+            reply_markup=compact_reply_keyboard(rej_lang)
         )
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
@@ -350,18 +354,17 @@ async def admin_dashboard(callback: CallbackQuery):
             "SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE created_at >= CURRENT_DATE"
         )
 
-    text = f"""
-📊 <b>لوحة التحكم - اليوم</b>
-
-┌─────────┐ ┌─────────┐ ┌─────────┐
-│  📦 {today_orders}   │ │  ✅ {today_completed}   │ │  ⏳ {pending}   │
-│ طلبات   │ │ مكتمل   │ │ معلق    │
-└─────────┘ └─────────┘ └─────────┘
-
-💰 إجمالي: {total_amount} USDT
-
-[📦 الطلبات] [📈 التحليلات] [⚙️ الإعدادات]
-"""
+    text = (
+        f"📊 <b>لوحة التحكم — اليوم</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 إجمالي الطلبات:     <b>{today_orders}</b>\n"
+        f"✅ المكتملة:           <b>{today_completed}</b>\n"
+        f"⏳ المعلقة:            <b>{pending}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>إجمالي الحجم: {total_amount:.0f} USDT</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📋 استخدم الأزرار أدناه لإدارة الطلبات والإعدادات."
+    )
 
     await callback.message.edit_text(text, parse_mode='HTML', reply_markup=admin_menu_keyboard())
     await callback.answer()
@@ -450,8 +453,9 @@ async def verify_reject_user(callback: CallbackQuery):
             "يرجى التواصل مع الدعم للمساعدة."
         )
 
+    from keyboards.reply import compact_reply_keyboard
     try:
-        await bot.send_message(telegram_id, message_text, parse_mode='HTML')
+        await bot.send_message(telegram_id, message_text, parse_mode='HTML', reply_markup=compact_reply_keyboard('ar'))
     except Exception as e:
         logger.error(f"Failed to notify user {telegram_id}: {e}")
 
@@ -487,8 +491,17 @@ async def confirm_payment(callback: CallbackQuery):
         await callback.answer("الطلب غير موجود", show_alert=True)
         return
 
+    # Get user language
+    pool2 = await get_pool()
+    async with pool2.acquire() as conn:
+        lang_row = await conn.fetchval(
+            "SELECT language FROM users WHERE telegram_id = $1", order['telegram_id']
+        )
+    pay_lang = lang_row or 'ar'
+
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
+    from keyboards.reply import compact_reply_keyboard
     from keyboards.inline import order_admin_keyboard
     import asyncio
 
@@ -497,7 +510,8 @@ async def confirm_payment(callback: CallbackQuery):
         await bot.send_message(
             order['telegram_id'],
             f"✅ <b>تم تأكيد الدفع!</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n🚀 جاري إرسال USDT إلى محفظتك...\n⏱ يستغرق وصول USDT عادة من 5-30 دقيقة حسب شبكة التحويل.",
-            parse_mode='HTML'
+            parse_mode='HTML',
+            reply_markup=compact_reply_keyboard(pay_lang)
         )
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
@@ -575,7 +589,7 @@ async def reject_receipt(callback: CallbackQuery):
             order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id, u.full_name, u.language FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
 
@@ -585,6 +599,7 @@ async def reject_receipt(callback: CallbackQuery):
 
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
+    from keyboards.reply import compact_reply_keyboard
     from keyboards.inline import receipt_upload_keyboard
     from datetime import datetime
 
@@ -743,7 +758,7 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
             txid, order_id
         )
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.username "
+            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id
         )
@@ -754,8 +769,10 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
         return
 
     from aiogram import Bot
+    from keyboards.reply import compact_reply_keyboard
     bot = Bot(token=Config.BOT_TOKEN)
     import asyncio
+    comp_lang = order['language'] or 'ar'
 
     # Build completion message for customer
     network_name = order['network'] or 'TRC20'
@@ -781,13 +798,15 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
                 order['telegram_id'],
                 screenshot_id,
                 caption=completion_text,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=compact_reply_keyboard(comp_lang)
             )
         else:
             await bot.send_message(
                 order['telegram_id'],
                 completion_text,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=compact_reply_keyboard(comp_lang)
             )
     except Exception as e:
         logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
@@ -819,6 +838,12 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
             order['telegram_id'],
             "⭐ يرجى تقييم تجربتك بالضغط على أحد النجوم:",
             reply_markup=rating_keyboard(order_id)
+        )
+        # Re-send reply keyboard after inline rating keyboard
+        await bot.send_message(
+            order['telegram_id'],
+            "👇",
+            reply_markup=compact_reply_keyboard(comp_lang)
         )
     except Exception as e:
         logger.error(f"Failed to send rating prompt: {e}")

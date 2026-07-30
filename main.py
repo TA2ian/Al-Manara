@@ -77,7 +77,7 @@ async def check_expired_orders(bot: Bot):
             if pool:
                 async with pool.acquire() as conn:
                     expired = await conn.fetch(
-                        "SELECT o.*, u.telegram_id FROM orders o "
+                        "SELECT o.*, u.telegram_id, u.language FROM orders o "
                         "JOIN users u ON o.user_id = u.id "
                         "WHERE o.status = 'waiting_payment' "
                         "AND o.payment_deadline < NOW()"
@@ -87,14 +87,25 @@ async def check_expired_orders(bot: Bot):
                             "UPDATE orders SET status = 'expired' WHERE id = $1",
                             order['id']
                         )
+                        exp_lang = order['language'] or 'ar'
+                        from keyboards.reply import compact_reply_keyboard
+                        exp_msg = (
+                            f"⏰ <b>انتهت مهلة الدفع</b>\n\n"
+                            f"📦 الطلب: #{order['order_number']}\n"
+                            f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
+                            f"انتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد بالضغط على <b>💰 إنشاء طلب شراء</b>."
+                        ) if exp_lang == 'ar' else (
+                            f"⏰ <b>Payment deadline expired</b>\n\n"
+                            f"📦 Order: #{order['order_number']}\n"
+                            f"💰 Amount: {order['amount_usdt']} USDT\n\n"
+                            f"The payment deadline has expired. You can create a new order by pressing <b>💰 Buy Order</b>."
+                        )
                         try:
                             await bot.send_message(
                                 order['telegram_id'],
-                                f"⏰ <b>انتهت مهلة الدفع</b>\n\n"
-                                f"📦 الطلب: #{order['order_number']}\n"
-                                f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
-                                f"انتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد.",
-                                parse_mode='HTML'
+                                exp_msg,
+                                parse_mode='HTML',
+                                reply_markup=compact_reply_keyboard(exp_lang)
                             )
                         except Exception as e:
                             logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
