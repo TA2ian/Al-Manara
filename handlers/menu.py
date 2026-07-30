@@ -6,6 +6,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 
 from keyboards.inline import main_menu_inline, settings_keyboard, cancel_keyboard, saved_addresses_keyboard
+from states import OrderStates
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
 from database import get_pool

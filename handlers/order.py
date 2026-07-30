@@ -298,7 +298,7 @@ async def use_saved_address_for_order(callback: CallbackQuery, state: FSMContext
         await callback.answer("❌ العنوان غير موجود", show_alert=True)
         return
 
-    await state.update_data(wallet_address=addr['address'], address_from_saved=True)
+    await state.update_data(wallet_address=addr['address'], network=addr['network'], address_from_saved=True)
 
     await callback.message.edit_text(
         f"✅ " + ("تم استخدام العنوان المحفوظ!" if lang == 'ar' else "Saved address selected!") + f"\n\n"
