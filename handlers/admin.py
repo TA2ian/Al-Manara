@@ -189,12 +189,26 @@ async def approve_order(callback: CallbackQuery):
 
     user_lang = user['language'] or 'ar'
 
-    # Notify user with receipt upload button
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     from services.notification_service import NotificationService
+    from services.locale_service import locale_service
     from keyboards.inline import receipt_upload_keyboard
 
+    # Send a short, punchy notification first (triggers notification sound with clear preview)
+    try:
+        short_notice = (
+            f"🔔 <b>تمت الموافقة على طلبك #{order['order_number']}!</b>\n"
+            f"⏳ لديك {Config.PAYMENT_TIMEOUT} دقيقة لإتمام الدفع."
+        ) if user_lang == 'ar' else (
+            f"🔔 <b>Your order #{order['order_number']} has been approved!</b>\n"
+            f"⏳ You have {Config.PAYMENT_TIMEOUT} minutes to complete payment."
+        )
+        await bot.send_message(user['telegram_id'], short_notice, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Failed to send approval notification: {e}")
+
+    # Follow up with detailed payment info
     notification = NotificationService(bot, Config.ADMIN_IDS)
     await notification.notify_order_approved(
         user['telegram_id'],
@@ -204,7 +218,6 @@ async def approve_order(callback: CallbackQuery):
 
     # Send receipt upload button to user in their language
     try:
-        from services.locale_service import locale_service
         upload_text = locale_service.get('upload_receipt_prompt', user_lang,
             order_number=order['order_number'],
             timeout=Config.PAYMENT_TIMEOUT
