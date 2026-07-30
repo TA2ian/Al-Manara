@@ -22,7 +22,7 @@
   "trc20": "TRC20 (TRON)",
   "enter_amount": "💵 Enter top-up amount in USDT\n\nMinimum: {min} USDT\nMaximum: {max} USDT\n\nExample: 100",
   "invalid_amount": "❌ Invalid amount.\n\nMinimum: {min} USDT\nMaximum: {max} USDT",
-  "enter_wallet": "📍 Enter your wallet address\n\n<b>Network: {network}</b>\n\nExample {network}:\n{example}",
+  "enter_wallet": "📍 Enter YOUR wallet address to receive the USDT\n\n<b>Network: {network}</b>\n\nExample {network}:\n{example}",
   "bep20_example": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
   "trc20_example": "Txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "invalid_wallet": "❌ Invalid address for {network}.\n\nPlease verify and re-enter.",

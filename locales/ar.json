@@ -22,7 +22,7 @@
   "trc20": "TRC20 (TRON)",
   "enter_amount": "💵 أدخل مبلغ الشحن بالـ USDT\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT\n\nمثال صحيح: 100",
   "invalid_amount": "❌ مبلغ غير صحيح.\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT",
-  "enter_wallet": "📍 أدخل عنوان محفظتك\n\n<b>الشبكة: {network}</b>\n\nمثال {network}:\n{example}",
+  "enter_wallet": "📍 أدخل عنوان محفظتك الشخصية (الخاصة بك) لاستلام الـ USDT\n\n<b>الشبكة: {network}</b>\n\nمثال {network}:\n{example}",
   "bep20_example": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
   "trc20_example": "Txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "invalid_wallet": "❌ عنوان غير صحيح لشبكة {network}.\n\nيرجى التأكد وإعادة الإدخال.",
