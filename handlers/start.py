@@ -26,22 +26,30 @@ TERMS_TEXT_AR = """━━━ <b>شروط الخدمة وإخلاء المسؤو�
 - البوت لا يخزن العملات الرقمية ولا يتعامل بها بشكل مباشر.
 
 <b>ثالثاً: المعاملات</b>
-- الحد الأدنى للطلب: {min_order} USDT.
-- الحد الأقصى للطلب: {max_order} USDT.
-- سعر الصرف قابل للتغيير دون إشعار مسبق.
+- سعر الصرف يُثبت لكل طلب عند إنشائه ولا يتغير بعد ذلك.
 - مدة المعالجة المتوقعة: 15 دقيقة - 24 ساعة.
 - الدفع عبر شام كاش حصراً.
 - يجب إرفاق إيصال الدفع خلال {timeout} دقيقة من الموافقة على الطلب.
 - جميع المعاملات نهائية بعد تأكيد الدفع.
+- قد تُرفض الطلبات إذا كانت مخالفة للشروط أو لا تستوفي المتطلبات.
 
 <b>رابعاً: الخصوصية</b>
-- تُستخدم بياناتك (الاسم، رقم شام كاش، معرف تيليغرام) لأغراض إدارة الطلبات فقط.
-- لا يتم مشاركة بياناتك مع أطراف ثالثة.
+- نلتزم بحماية خصوصية بياناتك والتعامل معها وفقاً لسياسة الخصوصية هذه.
+- البيانات التي نجمعها (الاسم الكامل، معرف تيليغرام، اسم المستخدم، رقم حساب شام كاش) تُستخدم حصراً لأغراض:
+  • توثيق الحساب والتحقق من هويتك.
+  • إدارة الطلبات وتنفيذها.
+  • التواصل معك بخصوص طلباتك.
+  • تحسين جودة الخدمة.
+- لا يتم مشاركة بياناتك أو بيعها أو الكشف عنها لأي طرف ثالث، إلا إذا اقتضى القانون ذلك.
+- يتم تخزين بياناتك بشكل آمن وتُحتفظ بها طالما كان حسابك نشطاً.
+- يمكنك طلب حذف بياناتك في أي وقت بالتواصل مع الدعم.
+- نحن غير مسؤولين عن المعلومات التي تشاركها خارج نطاق البوت.
 
 <b>خامساً: أحكام عامة</b>
-- نحتفظ بالحق في رفض أو إلغاء أي طلب وفقاً لتقديرنا.
-- نحتفظ بالحق في تحديث هذه الشروط في أي وقت.
-- استخدامك المستمر للبوت بعد التحديث يعني موافقتك على الشروط الجديدة.
+- نحتفظ بالحق في رفض أو إلغاء أي طلب يخالف هذه الشروط.
+- نحتفظ بالحق في تحديث هذه الشروط في أي وقت، مع إشعارك بالتحديثات الجوهرية.
+- استخدامك المستمر للبوت بعد التحديث يعني موافقتك على الشروط المعدلة.
+- هذه الشروط تخضع للقوانين والأنظمة السارية.
 
 ━━━━━━━━━━━━━━━━━━━━
 <b>بالضغط على "أوافق" فإنك تقر بأنك قرأت وفهمت وأقريت هذه الشروط.</b>"""
@@ -108,20 +116,28 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
         "- When saving a wallet address, you bear the responsibility of verifying it before each use.\n"
         "- The bot does not store or directly handle digital currencies.\n\n"
         "<b>3. Transactions</b>\n"
-        "- Minimum order: {min_order} USDT.\n"
-        "- Maximum order: {max_order} USDT.\n"
-        "- Exchange rates are subject to change without prior notice.\n"
+        "- The exchange rate is locked at the time of order creation and will not change thereafter.\n"
         "- Estimated processing time: 15 minutes - 24 hours.\n"
         "- Payment via Sham Cash only.\n"
         "- Payment receipt must be submitted within {timeout} minutes of order approval.\n"
-        "- All transactions are final once payment is confirmed.\n\n"
+        "- All transactions are final once payment is confirmed.\n"
+        "- Orders may be rejected if they violate the terms or fail to meet requirements.\n\n"
         "<b>4. Privacy</b>\n"
-        "- Your data (name, Sham Cash account, Telegram ID) is used solely for order management.\n"
-        "- Your data is not shared with third parties.\n\n"
+        "- We are committed to protecting your privacy and handling your data in accordance with this policy.\n"
+        "- The data we collect (full name, Telegram ID, username, Sham Cash account number) is used solely for:\n"
+        "  • Account verification and identity authentication.\n"
+        "  • Order processing and fulfillment.\n"
+        "  • Communicating with you regarding your orders.\n"
+        "  • Improving service quality.\n"
+        "- Your data will not be shared, sold, or disclosed to any third party unless required by law.\n"
+        "- Your data is stored securely and retained while your account remains active.\n"
+        "- You may request deletion of your data at any time by contacting support.\n"
+        "- We are not responsible for information you share outside the bot's scope.\n\n"
         "<b>5. General Provisions</b>\n"
-        "- We reserve the right to reject or cancel any order at our discretion.\n"
-        "- We reserve the right to update these terms at any time.\n"
-        "- Your continued use of the bot after updates constitutes acceptance of the new terms.\n\n"
+        "- We reserve the right to reject or cancel any order that violates these terms.\n"
+        "- We reserve the right to update these terms at any time, with notice of material changes.\n"
+        "- Your continued use of the bot after updates constitutes acceptance of the revised terms.\n"
+        "- These terms are governed by applicable laws and regulations.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>By clicking \"Agree\", you acknowledge that you have read, understood, and accepted these terms.</b>"
     )
