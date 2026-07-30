@@ -12,6 +12,7 @@ from config import Config
 from database import init_db, close_db, get_pool
 from bot import create_dispatcher
 from keep_alive import keep_alive
+from services.settings_service import SettingsService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,6 +123,13 @@ async def on_startup(bot: Bot):
 
     # Initialize database
     await init_db()
+
+    # Load persistent settings from DB (e.g. maintenance mode)
+    await SettingsService.init()
+    maintenance_active = await SettingsService.get_bool('maintenance_mode', False)
+    Config.set_maintenance_mode_sync(maintenance_active)
+    if maintenance_active:
+        logger.info("Maintenance mode is ACTIVE (from DB)")
 
     # Set webhook if configured
     if Config.WEBHOOK_URL:

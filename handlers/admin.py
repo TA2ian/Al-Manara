@@ -9,6 +9,7 @@ from states import AdminStates
 from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, admin_verify_keyboard
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
+from services.settings_service import SettingsService
 from database import get_pool
 from config import Config
 
@@ -1530,8 +1531,9 @@ async def admin_maintenance(callback: CallbackQuery):
     currently_on = Config.get_maintenance_mode()
 
     if currently_on:
-        # Turn off maintenance — no checks needed
-        Config.set_maintenance_mode(False)
+        # Turn off maintenance — persist to DB
+        await SettingsService.set_bool('maintenance_mode', False)
+        Config.set_maintenance_mode_sync(False)
         await callback.message.edit_text(
             "✅ <b>تم إيقاف وضع الصيانة</b>\n\n"
             "البوت متاح للمستخدمين الآن.",
@@ -1592,8 +1594,9 @@ async def admin_maintenance(callback: CallbackQuery):
         await callback.answer()
         return
 
-    # No active orders — safe to enable maintenance
-    Config.set_maintenance_mode(True)
+    # No active orders — safe to enable maintenance (persist to DB)
+    await SettingsService.set_bool('maintenance_mode', True)
+    Config.set_maintenance_mode_sync(True)
     await callback.message.edit_text(
         f"🛑 <b>تم تفعيل وضع الصيانة</b>\n\n"
         f"جميع الطلبات مكتملة ✅\n"
@@ -1619,7 +1622,8 @@ async def admin_maintenance_force(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    Config.set_maintenance_mode(True)
+    await SettingsService.set_bool('maintenance_mode', True)
+    Config.set_maintenance_mode_sync(True)
     await callback.message.edit_text(
         "🛑 <b>تم تفعيل وضع الصيانة (قسري)</b>\n\n"
         "⚠️ تم تجاوز الطلبات النشطة.",

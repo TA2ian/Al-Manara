@@ -55,16 +55,21 @@ class Config:
     # Backup
     BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", 30))
 
-    # Maintenance — can be toggled at runtime by admin
-    _maintenance_mode = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
+    # Maintenance — persisted in DB so it survives restarts.
+    # Getter still synchronous for middleware; falls back to env var on first call,
+    # then uses the DB-backed cache once the settings service is initialized.
+    _maintenance_override: bool | None = None
 
     @classmethod
     def get_maintenance_mode(cls) -> bool:
-        return cls._maintenance_mode
+        if cls._maintenance_override is not None:
+            return cls._maintenance_override
+        return os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
 
     @classmethod
-    def set_maintenance_mode(cls, value: bool):
-        cls._maintenance_mode = value
+    def set_maintenance_mode_sync(cls, value: bool):
+        """Set in-memory cache. Call persist_maintenance_mode() to save to DB."""
+        cls._maintenance_override = value
 
     @classmethod
     def validate(cls) -> list:
