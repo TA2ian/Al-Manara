@@ -220,6 +220,11 @@ async def show_support(callback: CallbackQuery):
     )
     await callback.message.answer(template, parse_mode='HTML')
 
+    # Re-send reply keyboard so it stays visible at the bottom
+    await callback.message.answer(
+        "👇",
+        reply_markup=compact_reply_keyboard(lang)
+    )
     await callback.message.answer(
         locale_service.get('main_menu', lang),
         reply_markup=main_menu_inline(lang)
