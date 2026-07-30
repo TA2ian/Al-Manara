@@ -35,7 +35,7 @@
   "select_currency": "💱 اختر عملة الدفع:",
   "usd": "🇺🇸 الدولار الأمريكي (USD)",
   "syp": "🇸🇾 الليرة السورية (SYP)",
-  "order_summary": "📋 ملخص طلبك #{order_number}\n\n──── معلومات USDT ────\nالمبلغ: {amount_usdt} USDT\nالشبكة: {network}\nالعنوان: <code>{wallet}</code>\n\n──── تفاصيل الدفع ────\nالعملة: {currency}\nسعر الصرف: 1 USD = {rate} SYP\nالمبلغ الأساسي: {base_amount:,.2f} {currency}\n\n──── الرسوم ────\nرسوم الخدمة ({fee_percent}%): {fee_amount:,.2f} {currency}\n━━━━━━━━━━━━━━━━━━━━\n💰 المجموع: <b>{total:,.2f} {currency}</b>\n\n⏱ المدة المتوقعة: 15 دقيقة - 24 ساعة",
+  "order_summary": "📋 ملخص طلبك #{order_number}\n\n──── معلومات USDT ────\nالمبلغ: {amount_usdt} USDT\nالشبكة: {network}\nالعنوان: <code>{wallet}</code>\n\n──── تفاصيل الدفع ────\nالعملة: {currency}\nسعر الصرف: 1 USD = {rate} SYP\nالمبلغ الأساسي: {base_amount:,.2f} {currency}\n{new_syr_line}\n──── الرسوم ────\nرسوم الخدمة ({fee_percent}%): {fee_amount:,.2f} {currency}\n{new_syr_fee_line}\n━━━━━━━━━━━━━━━━━━━━\n💰 المجموع: <b>{total:,.2f} {currency}</b>\n{new_syr_total_line}\n⏱ المدة المتوقعة: 15 دقيقة - 24 ساعة",
   "confirm_order": "✅ تأكيد وإرسال الطلب",
   "cancel_order": "❌ إلغاء",
   "order_created": "✅ تم إنشاء طلبك بنجاح!\n\n📦 رقم الطلب: <b>#{order_number}</b>\n\n⏳ في انتظار موافقة الإدارة...",

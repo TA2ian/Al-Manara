@@ -51,3 +51,4 @@ class AdminStates(StatesGroup):
     waiting_search = State()
     waiting_timeout = State()
     waiting_note_text = State()
+    waiting_shamcash_name = State()

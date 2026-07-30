@@ -28,8 +28,8 @@ router = Router()
 
 
 def generate_order_number() -> str:
-    """Generate unique order number."""
-    return f"ORD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    """Generate unique order number with underscores for hashtag compatibility."""
+    return f"ORD_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6].upper()}"
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New"]))
@@ -218,6 +218,15 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(calculation=calculation)
 
+    # Build new Syrian Lira lines if SYP
+    new_syr_line = ""
+    new_syr_fee_line = ""
+    new_syr_total_line = ""
+    if currency == 'SYP':
+        new_syr_line = f"🇸🇾 بما يعادل: <b>{calculation['new_syr_amount']:,.2f} ل.ج.س</b> (ليرة جديدة سورية)\n"
+        new_syr_fee_line = f"🇸🇾 بما يعادل: <b>{calculation['new_syr_fee']:,.2f} ل.ج.س</b>\n"
+        new_syr_total_line = f"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['new_syr_total']:,.2f} ل.ج.س</b>\n"
+
     # Show summary
     summary = locale_service.get(
         'order_summary',
@@ -231,7 +240,10 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
         base_amount=calculation['base_amount'],
         fee_percent=calculation['fee_percent'],
         fee_amount=calculation['fee_amount'],
-        total=calculation['total_amount']
+        total=calculation['total_amount'],
+        new_syr_line=new_syr_line,
+        new_syr_fee_line=new_syr_fee_line,
+        new_syr_total_line=new_syr_total_line
     )
 
     await callback.message.edit_text(summary, parse_mode='HTML')

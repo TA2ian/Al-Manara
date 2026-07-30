@@ -215,8 +215,8 @@ async def approve_order(callback: CallbackQuery):
         f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
         f"━━━ 👤 العميل ━━━\n"
         f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
-        f"🆔 المعرف: <code>{order['user_id']}</code>\n"
-        f"📱 المستخدم: @{user.get('username') or 'N/A'}\n\n"
+        f"🆔 المعرف: <code>{user['telegram_id']}</code>\n"
+        f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
         f"━━━ 📦 تفاصيل الطلب ━━━\n"
         f"📦 #{order['order_number']}\n"
         f"💰 {order['amount_usdt']} USDT\n"
@@ -1039,6 +1039,34 @@ async def admin_set_shamcash_syp(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.callback_query(F.data == "setting_shamcash_name")
+async def setting_shamcash_name(callback: CallbackQuery, state: FSMContext):
+    """Change Sham Cash account name."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"👤 <b>اسم حساب شام كاش الحالي:</b>\n{Config.SHAMCASH_NAME or 'N/A'}\n\n"
+        f"أرسل الاسم الجديد لحساب شام كاش:",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_shamcash_name)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_shamcash_name)
+async def admin_set_shamcash_name(message: Message, state: FSMContext):
+    """Save new Sham Cash name."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Access denied")
+        await state.clear()
+        return
+    name = message.text.strip()
+    Config.SHAMCASH_NAME = name
+    await message.answer(f"✅ تم تحديث اسم حساب شام كاش:\n{name}")
+    await state.clear()
+
+
 @router.callback_query(F.data == "setting_timeout")
 async def setting_timeout(callback: CallbackQuery, state: FSMContext):
     """Change payment timeout."""
@@ -1141,6 +1169,123 @@ async def admin_menu_back(callback: CallbackQuery):
         reply_markup=admin_menu_keyboard(),
         parse_mode='HTML'
     )
+    await callback.answer()
+
+
+# ───── Admin List Users (Alphabetical) ─────
+
+@router.callback_query(F.data == "admin_list_users")
+async def admin_list_users(callback: CallbackQuery):
+    """List all verified/non-blocked users alphabetically."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT telegram_id, full_name, username, language, is_verified, is_blocked, created_at "
+            "FROM users WHERE terms_accepted = TRUE AND is_blocked = FALSE "
+            "ORDER BY full_name ASC NULLS LAST"
+        )
+
+    if not users:
+        await callback.message.edit_text("📭 لا يوجد عملاء مسجلون.", parse_mode='HTML')
+        await callback.answer()
+        return
+
+    # Build the user list in chunks to avoid message too long
+    lines = []
+    for i, u in enumerate(users, 1):
+        name = u['full_name'] or '—'
+        verified = "✅" if u['is_verified'] else "⏳"
+        lang_flag = "🇸🇦" if u['language'] == 'ar' else "🇬🇧"
+        lines.append(
+            f"{i}. {verified} <b>{name}</b>\n"
+            f"   🆔 <code>{u['telegram_id']}</code> | @{u['username'] or '—'} | {lang_flag}"
+        )
+
+    # Split into pages of 15 users each
+    page_size = 15
+    total_pages = (len(lines) + page_size - 1) // page_size
+    page = 0  # 0-indexed
+
+    def build_page(p):
+        start = p * page_size
+        end = start + page_size
+        page_lines = lines[start:end]
+        text = (
+            f"📍 <b>قائمة العملاء</b> ({len(users)})\n"
+            f"━━━━━━━━━━━━━━━━━━\n" +
+            "\n".join(page_lines)
+        )
+        buttons = []
+        if total_pages > 1:
+            nav = []
+            if p > 0:
+                nav.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"users_page_{p-1}"))
+            nav.append(InlineKeyboardButton(text=f"{p+1}/{total_pages}", callback_data="admin_noop"))
+            if p < total_pages - 1:
+                nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"users_page_{p+1}"))
+            buttons.append(nav)
+        buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")])
+        return text, InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    text, kb = build_page(page)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("users_page_"))
+async def admin_users_page(callback: CallbackQuery):
+    """Navigate user list pages."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    page = int(callback.data.replace("users_page_", ""))
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT telegram_id, full_name, username, language, is_verified, is_blocked, created_at "
+            "FROM users WHERE terms_accepted = TRUE AND is_blocked = FALSE "
+            "ORDER BY full_name ASC NULLS LAST"
+        )
+
+    lines = []
+    for i, u in enumerate(users, 1):
+        name = u['full_name'] or '—'
+        verified = "✅" if u['is_verified'] else "⏳"
+        lang_flag = "🇸🇦" if u['language'] == 'ar' else "🇬🇧"
+        lines.append(
+            f"{i}. {verified} <b>{name}</b>\n"
+            f"   🆔 <code>{u['telegram_id']}</code> | @{u['username'] or '—'} | {lang_flag}"
+        )
+
+    page_size = 15
+    total_pages = (len(lines) + page_size - 1) // page_size
+
+    start = page * page_size
+    end = start + page_size
+    page_lines = lines[start:end]
+    text = (
+        f"📍 <b>قائمة العملاء</b> ({len(users)})\n"
+        f"━━━━━━━━━━━━━━━━━━\n" +
+        "\n".join(page_lines)
+    )
+    buttons = []
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"users_page_{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="admin_noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"users_page_{page+1}"))
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode='HTML')
     await callback.answer()
 
 

@@ -69,6 +69,15 @@ class ExchangeService:
         fee_amount = (base_amount * fee_percent / 100) + fee_fixed
         total = base_amount + fee_amount
 
+        new_syr_amount = 0
+        if currency == 'SYP':
+            new_syr_amount = base_amount / 100  # ل.ج.س (New Syrian Lira = SYP / 100)
+            new_syr_fee = fee_amount / 100
+            new_syr_total = total / 100
+        else:
+            new_syr_fee = 0
+            new_syr_total = 0
+
         return {
             'amount_usdt': amount_usdt,
             'exchange_rate': rate,
@@ -76,5 +85,8 @@ class ExchangeService:
             'base_amount': base_amount,
             'fee_percent': fee_percent,
             'fee_amount': fee_amount,
-            'total_amount': total
+            'total_amount': total,
+            'new_syr_amount': new_syr_amount,
+            'new_syr_fee': new_syr_fee,
+            'new_syr_total': new_syr_total
         }

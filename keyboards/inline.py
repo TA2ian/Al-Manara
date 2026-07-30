@@ -115,15 +115,13 @@ def order_confirmation_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
 
 
 def rating_keyboard(order_id: int) -> InlineKeyboardMarkup:
-    """Customer rating keyboard with order id."""
+    """Customer rating keyboard with order id - each row has one clear rating option."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="⭐", callback_data=f"rate_1_{order_id}"),
-            InlineKeyboardButton(text="⭐⭐", callback_data=f"rate_2_{order_id}"),
-            InlineKeyboardButton(text="⭐⭐⭐", callback_data=f"rate_3_{order_id}"),
-            InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data=f"rate_4_{order_id}"),
-            InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{order_id}")
-        ]
+        [InlineKeyboardButton(text="⭐ 1 - سيء جداً", callback_data=f"rate_1_{order_id}")],
+        [InlineKeyboardButton(text="⭐⭐ 2 - سيء", callback_data=f"rate_2_{order_id}")],
+        [InlineKeyboardButton(text="⭐⭐⭐ 3 - مقبول", callback_data=f"rate_3_{order_id}")],
+        [InlineKeyboardButton(text="⭐⭐⭐⭐ 4 - جيد", callback_data=f"rate_4_{order_id}")],
+        [InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5 - ممتاز", callback_data=f"rate_5_{order_id}")]
     ])
 
 
@@ -198,9 +196,10 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📈 التحليلات", callback_data="admin_analytics"),
-            InlineKeyboardButton(text="📝 Logs", callback_data="admin_logs")
+            InlineKeyboardButton(text="📍 قائمة العملاء", callback_data="admin_list_users")
         ],
         [
+            InlineKeyboardButton(text="📝 Logs", callback_data="admin_logs"),
             InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups")
         ]
     ])
@@ -249,7 +248,10 @@ def settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📱 شام كاش SYP", callback_data="setting_shamcash_syp")
         ],
         [
-            InlineKeyboardButton(text="⏱ مهلة الدفع", callback_data="setting_timeout"),
+            InlineKeyboardButton(text="👤 اسم شام كاش", callback_data="setting_shamcash_name"),
+            InlineKeyboardButton(text="⏱ مهلة الدفع", callback_data="setting_timeout")
+        ],
+        [
             InlineKeyboardButton(text="📊 الحدود", callback_data="setting_limits")
         ],
         [

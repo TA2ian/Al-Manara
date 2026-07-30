@@ -47,6 +47,13 @@ class NotificationService:
         from services.locale_service import locale_service
         from config import Config
 
+        amount = order['total_amount']
+        currency = order['payment_currency']
+        new_syr_line = ""
+        if currency == 'SYP':
+            new_syr_amount = amount / 100
+            new_syr_line = f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>"
+
         text = locale_service.get(
             'order_approved',
             'ar',
@@ -54,9 +61,9 @@ class NotificationService:
             timeout=Config.PAYMENT_TIMEOUT,
             account=Config.SHAMCASH_SYP_ACCOUNT if order['payment_currency'] == 'SYP' else Config.SHAMCASH_USD_ACCOUNT,
             name=Config.SHAMCASH_NAME,
-            amount=order['total_amount'],
-            currency=order['payment_currency']
-        )
+            amount=amount,
+            currency=currency
+        ) + new_syr_line
 
         await self.notify_user(user_id, text)
 
