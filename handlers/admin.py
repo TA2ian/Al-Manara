@@ -182,10 +182,12 @@ async def approve_order(callback: CallbackQuery):
             deadline, order_id
         )
 
-        # Get user telegram_id
+        # Get user telegram_id and language
         user = await conn.fetchrow(
-            "SELECT telegram_id FROM users WHERE id = $1", order['user_id']
+            "SELECT telegram_id, language FROM users WHERE id = $1", order['user_id']
         )
+
+    user_lang = user['language'] or 'ar'
 
     # Notify user with receipt upload button
     from aiogram import Bot
@@ -196,16 +198,21 @@ async def approve_order(callback: CallbackQuery):
     notification = NotificationService(bot, Config.ADMIN_IDS)
     await notification.notify_order_approved(
         user['telegram_id'],
-        dict(order)
+        dict(order),
+        lang=user_lang
     )
 
-    # Send receipt upload button to user
+    # Send receipt upload button to user in their language
     try:
         from services.locale_service import locale_service
+        upload_text = locale_service.get('upload_receipt_prompt', user_lang,
+            order_number=order['order_number'],
+            timeout=Config.PAYMENT_TIMEOUT
+        )
         await bot.send_message(
             user['telegram_id'],
-            "📎 بعد إتمام الدفع، اضغط على الزر أدناه لرفع الإيصال:",
-            reply_markup=receipt_upload_keyboard(order['id'])
+            upload_text,
+            reply_markup=receipt_upload_keyboard(order['id'], user_lang)
         )
     except Exception as e:
         logger.error(f"Failed to send receipt upload button: {e}")

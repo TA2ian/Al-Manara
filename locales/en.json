@@ -44,6 +44,7 @@
   "cancel_order": "❌ Cancel",
   "order_created": "✅ Your order has been created!\n\n📦 Order Number: <b>#{order_number}</b>\n\n⏳ Waiting for admin approval...",
   "order_approved": "✅ Your order #{order_number} has been approved!\n\n⏳ You have {timeout} minutes to complete payment\n\n💳 Sham Cash Payment Details:\n\n📱 Account Number:\n<code>{account}</code>\n\n👤 Account Name: {name}\n💰 Amount Due: <b>{amount:,.2f} {currency}</b>",
+  "upload_receipt_prompt": "📎 After completing the payment via Sham Cash, click the button below to upload your payment receipt for order #{order_number}:\n\n⏳ Receipt upload deadline: {timeout} minutes.",
   "upload_receipt": "📎 Upload Payment Receipt",
   "time_remaining": "⏰ Time Remaining",
   "receipt_uploaded": "✅ Your receipt has been received!\n\n⏳ Under review...",

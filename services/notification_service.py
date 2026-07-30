@@ -42,7 +42,7 @@ class NotificationService:
 """
         await self.notify_admins(text)
 
-    async def notify_order_approved(self, user_id: int, order: dict):
+    async def notify_order_approved(self, user_id: int, order: dict, lang: str = 'ar'):
         """Notify user that order is approved."""
         from services.locale_service import locale_service
         from config import Config
@@ -52,11 +52,12 @@ class NotificationService:
         new_syr_line = ""
         if currency == 'SYP':
             new_syr_amount = amount / 100
-            new_syr_line = f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>"
+            note_key = 'syp_equivalent' if lang == 'en' else 'syp_equivalent'
+            new_syr_line = f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>" if lang == 'ar' else f"\n🇸🇾 Equivalent: <b>{new_syr_amount:,.2f} SYP</b>"
 
         text = locale_service.get(
             'order_approved',
-            'ar',
+            lang,
             order_number=order['order_number'],
             timeout=Config.PAYMENT_TIMEOUT,
             account=Config.SHAMCASH_SYP_ACCOUNT if order['payment_currency'] == 'SYP' else Config.SHAMCASH_USD_ACCOUNT,

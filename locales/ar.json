@@ -44,6 +44,7 @@
   "cancel_order": "❌ إلغاء",
   "order_created": "✅ تم إنشاء طلبك بنجاح!\n\n📦 رقم الطلب: <b>#{order_number}</b>\n\n⏳ في انتظار موافقة الإدارة...",
   "order_approved": "✅ تمت الموافقة على طلبك #{order_number}!\n\n⏳ لديك {timeout} دقيقة لإتمام الدفع\n\n💳 بيانات الدفع عبر شام كاش:\n\n📱 رقم الحساب:\n<code>{account}</code>\n\n👤 اسم الحساب: {name}\n💰 المبلغ المطلوب: <b>{amount:,.2f} {currency}</b>",
+  "upload_receipt_prompt": "📎 بعد إتمام الدفع عبر شام كاش، اضغط على الزر أدناه لرفع إيصال الدفع للطلب #{order_number}:\n\n⏳ مهلة رفع الإيصال: {timeout} دقيقة.",
   "upload_receipt": "📎 رفع إيصال الدفع",
   "time_remaining": "⏰ الوقت المتبقي",
   "receipt_uploaded": "✅ تم استلام إيصالك!\n\n⏳ جاري المراجعة...",
