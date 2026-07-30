@@ -135,17 +135,18 @@ async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
         return
 
     await callback.message.delete()
-    await _process_valid_amount(callback.message, state, lang, amount)
+    await _process_valid_amount(callback.message, state, lang, amount, telegram_id=callback.from_user.id)
     await callback.answer()
 
 
-async def _process_valid_amount(message: Message, state: FSMContext, lang: str, amount: float):
+async def _process_valid_amount(message: Message, state: FSMContext, lang: str, amount: float, telegram_id: int | None = None):
     """Continue order flow after amount is validated."""
+    uid = telegram_id or message.from_user.id
     # Check daily limit
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
+            "SELECT id FROM users WHERE telegram_id = $1", uid
         )
         if user:
             today_total = await conn.fetchval(
@@ -172,7 +173,7 @@ async def _process_valid_amount(message: Message, state: FSMContext, lang: str, 
     pool = await get_pool()
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
-            "SELECT id FROM users WHERE telegram_id = $1", message.from_user.id
+            "SELECT id FROM users WHERE telegram_id = $1", uid
         )
         if user_row:
             saved = await conn.fetch(
