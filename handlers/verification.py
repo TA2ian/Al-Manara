@@ -1,4 +1,5 @@
 """Verification handlers for user account verification."""
+import html
 import logging
 
 from aiogram import Router, F, Bot
@@ -156,7 +157,7 @@ async def submit_verification(msg: Message, state: FSMContext):
         f"🔔 <b>طلب توثيق جديد</b>\n\n"
         f"👤 المستخدم: @{msg.chat.username or 'بدون'}\n"
         f"🆔 ID: <code>{msg.chat.id}</code>\n"
-        f"📛 الاسم: {full_name}\n"
+        f"📛 الاسم: {html.escape(full_name)}\n"
         f"📱 شام كاش: <code>{shamcash_account}</code>\n\n"
         f"اختر إجراء:"
     )
@@ -173,7 +174,7 @@ async def submit_verification(msg: Message, state: FSMContext):
                 await bot.send_photo(
                     admin_id,
                     shamcash_qr_photo_id,
-                    caption=f"📸 QR لحساب شام كاش للمستخدم {full_name}"
+                    caption=f"📸 QR لحساب شام كاش للمستخدم {html.escape(full_name)}"
                 )
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}")

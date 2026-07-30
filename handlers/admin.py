@@ -1,4 +1,5 @@
 """Admin handlers."""
+import html
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -62,7 +63,7 @@ async def pending_orders(callback: CallbackQuery):
     for order in orders:
         text = (
             f"📦 <b>#{order['order_number']}</b>\n"
-            f"👤 {order['full_name'] or 'N/A'} (<code>{order['user_tg']}</code>)\n"
+            f"👤 {html.escape(order['full_name'] or 'N/A')} (<code>{order['user_tg']}</code>)\n"
             f"💰 {order['amount_usdt']} USDT | 🌐 {order['network']}\n"
             f"💱 {order['payment_currency']} | 💵 {order['total_amount']:.2f}\n"
             f"📍 <code>{order['wallet_address'][:15]}...</code>\n"
@@ -124,7 +125,7 @@ async def admin_active_orders(callback: CallbackQuery):
         text = (
             f"{icon} <b>#{order['order_number']}</b>\n"
             f"━━━ 👤 العميل ━━━\n"
-            f"👤 الاسم: {order['full_name'] or 'N/A'}\n"
+            f"👤 الاسم: {html.escape(order['full_name'] or 'N/A')}\n"
             f"🆔 المعرف: <code>{order['user_tg']}</code>\n"
             f"━━━ 💳 الطلب ━━━\n"
             f"💰 المبلغ: {order['amount_usdt']} USDT\n"
@@ -214,7 +215,7 @@ async def approve_order(callback: CallbackQuery):
     admin_update_text = (
         f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
         f"━━━ 👤 العميل ━━━\n"
-        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"👤 الاسم: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
         f"🆔 المعرف: <code>{user['telegram_id']}</code>\n"
         f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
         f"━━━ 📦 تفاصيل الطلب ━━━\n"
@@ -486,7 +487,7 @@ async def confirm_payment(callback: CallbackQuery):
     admin_text = (
         f"🚀 <b>تم تأكيد الدفع</b>\n\n"
         f"━━━ 👤 العميل ━━━\n"
-        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"👤 الاسم: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
         f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
         f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
         f"━━━ 💳 تفاصيل الطلب ━━━\n"
@@ -514,7 +515,7 @@ async def confirm_payment(callback: CallbackQuery):
                 bot.send_photo(
                     admin_id,
                     wallet_qr_id,
-                    caption=f"📸 <b>QR code لعنوان محفظة العميل</b> — {order['full_name'] or 'N/A'}\n🌐 الشبكة: {order['network']}\nيمكن مسحه ضوئياً لإرسال USDT إلى عنوان العميل بدون خطأ",
+                    caption=f"📸 <b>QR code لعنوان محفظة العميل</b> — {html.escape(order['full_name'] or 'N/A')}\n🌐 الشبكة: {order['network']}\nيمكن مسحه ضوئياً لإرسال USDT إلى عنوان العميل بدون خطأ",
                     parse_mode='HTML'
                 )
             )
@@ -577,7 +578,7 @@ async def reject_receipt(callback: CallbackQuery):
         await bot.send_message(
             order['telegram_id'],
             f"⚠️ <b>الإيصال المرفوض</b>\n\n"
-            f"عذراً {order['full_name'] or 'عميلنا العزيز'}، الإيصال الذي أرسلته غير مطابق أو غير واضح.\n\n"
+            f"عذراً {html.escape(order['full_name'] or 'عميلنا العزيز')}، الإيصال الذي أرسلته غير مطابق أو غير واضح.\n\n"
             f"📌 نرجو منك إرسال إيصال جديد وصحيح مع ضرورة ظهور:\n"
             f"• المبلغ المحوّل بوضوح\n"
             f"• اسم المستفيد (SHAMCASH)\n"
@@ -621,7 +622,7 @@ async def send_usdt(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"🚀 <b>إرسال USDT</b>\n\n"
         f"━━━ 👤 العميل ━━━\n"
-        f"👤 الاسم: {order['full_name'] or 'N/A'}\n"
+        f"👤 الاسم: {html.escape(order['full_name'] or 'N/A')}\n"
         f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
         f"📦 الطلب: #{order['order_number']}\n"
         f"💰 المبلغ: {order['amount_usdt']} USDT\n"
@@ -767,7 +768,7 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
     admin_done = (
         f"✅ <b>تم إكمال الطلب</b>\n\n"
         f"━━━ 👤 العميل ━━━\n"
-        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"👤 الاسم: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
         f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
         f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
         f"━━━ 📦 تفاصيل الإتمام ━━━\n"

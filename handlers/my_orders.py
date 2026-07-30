@@ -1,4 +1,5 @@
 """My orders handlers."""
+import html
 import io
 import logging
 
@@ -193,10 +194,10 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         f"💱 سعر الصرف: 1 USDT = {order['exchange_rate']:,.0f} {order['payment_currency']}\n"
         f"💵 الإجمالي المطلوب: {order['total_amount']:.2f} {order['payment_currency']}\n\n"
         f"━━━ 👤 معلومات العميل ━━━\n"
-        f"👤 الاسم: <b>{order['full_name'] or 'N/A'}</b>\n"
+        f"👤 الاسم: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
         f"🆔 المعرف: <code>{order['user_telegram_id']}</code>\n"
         f"📱 المستخدم: @{message.chat.username or 'N/A'}\n"
-        f"🏦 شام كاش: {order['shamcash_account'] or 'N/A'}\n\n"
+        f"🏦 شام كاش: <code>{html.escape(order['shamcash_account'] or 'N/A')}</code>\n\n"
         f"━━━ 📍 عنوان الـUSDT ━━━\n"
         f"🌐 الشبكة: {order['network']}\n"
         f"📍 المحفظة: <code>{order['wallet_address']}</code>\n\n"
