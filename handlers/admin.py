@@ -275,7 +275,7 @@ async def reject_order(callback: CallbackQuery):
             return
 
         await conn.execute(
-            "UPDATE orders SET status = 'rejected' WHERE id = $1",
+            "UPDATE orders SET status = 'rejected', wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $1",
             order_id
         )
 
@@ -520,6 +520,14 @@ async def confirm_payment(callback: CallbackQuery):
             )
     await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Clean up: clear QR photo ID from DB after sending to admin
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET wallet_qr_photo_id = NULL WHERE id = $1",
+            order_id
+        )
+
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
     # Send admin menu so they can continue
@@ -710,7 +718,8 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE orders SET status = 'completed', txid = $1, completed_at = NOW() WHERE id = $2",
+            "UPDATE orders SET status = 'completed', txid = $1, completed_at = NOW(), "
+            "wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $2",
             txid, order_id
         )
         order = await conn.fetchrow(

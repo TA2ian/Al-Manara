@@ -425,15 +425,16 @@ async def _proceed_after_qr(message_or_callback, state: FSMContext, lang: str, d
     wallet = data.get('wallet_address', '')
     network = data.get('network', '')
 
-    # Determine if we have a message or callback
-    if hasattr(message_or_callback, 'from_user'):
-        target = message_or_callback
+    # Determine the target Message object for sending messages
+    from aiogram.types import CallbackQuery
+    if isinstance(message_or_callback, CallbackQuery):
+        target_msg = message_or_callback.message
     else:
-        target = message_or_callback.message
+        target_msg = message_or_callback
 
     # If address came from saved, skip save prompt — go straight to currency
     if data.get('address_from_saved'):
-        await target.answer(
+        await target_msg.answer(
             locale_service.get('select_currency', lang),
             reply_markup=currency_selection_keyboard(lang)
         )
@@ -449,7 +450,7 @@ async def _proceed_after_qr(message_or_callback, state: FSMContext, lang: str, d
         [InlineKeyboardButton(text=save_btn, callback_data="save_address_yes"),
          InlineKeyboardButton(text=skip_btn, callback_data="save_address_skip")]
     ])
-    await target.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
+    await target_msg.answer(save_text, reply_markup=save_keyboard, parse_mode='HTML')
     await state.set_state(OrderStates.waiting_save_address)
 
 
@@ -509,10 +510,6 @@ async def receive_wallet_qr(message: Message, state: FSMContext):
                                 f"QR address: <code>{qr_text}</code>\n\n" \
                                 "Choose an action:"
                 mismatch_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⚠️ استمر رغم عدم التطابق" if lang == 'ar' else "⚠️ Continue anyway",
-                        callback_data="qr_mismatch_force"
-                    )],
                     [InlineKeyboardButton(
                         text="🔄 إرسال QR آخر" if lang == 'ar' else "🔄 Send another QR",
                         callback_data="qr_mismatch_retry"
@@ -596,23 +593,6 @@ async def skip_wallet_qr_text(message: Message, state: FSMContext):
 
 
 # ───── QR Mismatch Handlers ─────
-
-
-@router.callback_query(F.data == "qr_mismatch_force")
-async def qr_mismatch_force(callback: CallbackQuery, state: FSMContext):
-    """User chose to continue despite QR mismatch."""
-    await callback.answer()
-    lang = await _get_user_lang(callback.from_user.id)
-    data = await state.get_data()
-    decoded = data.get('qr_mismatch_decoded', '')
-
-    # Update the stored address to the QR address if user is forcing through
-    # We still keep the original address the user entered
-    await callback.message.edit_text(
-        "⚠️ تم الاستمرار رغم عدم تطابق QR مع العنوان المدخل." if lang == 'ar'
-        else "⚠️ Continuing despite QR mismatch."
-    )
-    await _proceed_after_qr(callback, state, lang, data)
 
 
 @router.callback_query(F.data == "qr_mismatch_retry")
