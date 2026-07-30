@@ -815,7 +815,7 @@ async def complete_order(msg: Message, state: FSMContext, txid: str, screenshot_
 
 @router.callback_query(F.data.startswith("rate_"))
 async def handle_rating(callback: CallbackQuery):
-    """Handle customer rating."""
+    """Handle customer rating and notify admins."""
     parts = callback.data.split("_")
     if len(parts) != 3:
         await callback.answer()
@@ -830,12 +830,41 @@ async def handle_rating(callback: CallbackQuery):
             "UPDATE orders SET customer_rating = $1 WHERE id = $2",
             rating, order_id
         )
+        order = await conn.fetchrow(
+            "SELECT o.order_number, o.amount_usdt, o.network, u.full_name, u.telegram_id, u.username "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
 
     await callback.message.edit_text(
         f"🙏 شكراً لتقييمك ({'⭐' * rating})!",
         parse_mode='HTML'
     )
     await callback.answer("✅ تم حفظ التقييم!")
+
+    # Notify admins
+    if order:
+        from aiogram import Bot
+        bot = Bot(token=Config.BOT_TOKEN)
+        stars = "⭐" * rating
+        admin_msg = (
+            f"⭐ <b>تقييم جديد!</b>\n\n"
+            f"━━━ 👤 العميل ━━━\n"
+            f"👤 الاسم: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
+            f"🆔 المعرف: <code>{order['telegram_id']}</code>\n"
+            f"📱 المستخدم: @{order['username'] or 'N/A'}\n\n"
+            f"━━━ 📦 تفاصيل الطلب ━━━\n"
+            f"📦 رقم الطلب: #{order['order_number']}\n"
+            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+            f"🌐 الشبكة: {order['network']}\n\n"
+            f"━━━ 🏆 التقييم ━━━\n"
+            f"{stars} ({rating}/5)"
+        )
+        for admin_id in Config.ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, admin_msg, parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"Failed to send rating to admin {admin_id}: {e}")
 
 
 # ───── Admin Update Rate ─────
