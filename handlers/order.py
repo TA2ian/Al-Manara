@@ -299,8 +299,8 @@ async def use_saved_address_for_order(callback: CallbackQuery, state: FSMContext
     qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
     ])
-    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
     await state.set_state(OrderStates.waiting_wallet_qr)
+    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
     await callback.answer()
 
 
@@ -380,9 +380,8 @@ async def enter_wallet(message: Message, state: FSMContext):
     qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=skip_only_btn, callback_data="skip_wallet_qr")]
     ])
-    await message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
-
     await state.set_state(OrderStates.waiting_wallet_qr)
+    await message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
 
 
 @router.callback_query(OrderStates.waiting_wallet_qr, F.data == "skip_wallet_qr")
@@ -424,14 +423,18 @@ async def skip_wallet_qr(callback: CallbackQuery, state: FSMContext):
 @router.message(OrderStates.waiting_wallet_qr, F.photo)
 async def receive_wallet_qr(message: Message, state: FSMContext):
     """Receive wallet QR code photo from customer."""
-    lang = await _get_user_lang(message.from_user.id)
-    qr_photo_id = message.photo[-1].file_id
+    try:
+        lang = await _get_user_lang(message.from_user.id)
+        qr_photo_id = message.photo[-1].file_id
 
-    await state.update_data(wallet_qr_photo_id=qr_photo_id)
+        await state.update_data(wallet_qr_photo_id=qr_photo_id)
 
-    data = await state.get_data()
-    wallet = data.get('wallet_address', '')
-    network = data.get('network', '')
+        data = await state.get_data()
+        wallet = data.get('wallet_address', '')
+        network = data.get('network', '')
+    except Exception as e:
+        logging.getLogger(__name__).error(f"QR receive error: {e}")
+        return
 
     await message.answer(
         "✅ تم استلام رمز QR الخاص بمحفظتك!" if lang == 'ar' else "✅ Wallet QR code received!"
@@ -530,8 +533,8 @@ async def switch_to_network_corrected(callback: CallbackQuery, state: FSMContext
         qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
         ])
-        await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
         await state.set_state(OrderStates.waiting_wallet_qr)
+        await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
     else:
         # Wallet invalid on new network - go back to enter_wallet
         await callback.message.answer(
@@ -573,8 +576,8 @@ async def skip_network_switch(callback: CallbackQuery, state: FSMContext):
     qr_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏭️ تخطي" if lang == 'ar' else "⏭️ Skip", callback_data="skip_wallet_qr")]
     ])
-    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
     await state.set_state(OrderStates.waiting_wallet_qr)
+    await callback.message.answer(qr_prompt, reply_markup=qr_keyboard, parse_mode='HTML')
     await callback.answer()
 
 

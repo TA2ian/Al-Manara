@@ -110,7 +110,7 @@ async def back_to_wallet(callback: CallbackQuery, state: FSMContext):
         reply_markup=cancel_keyboard(lang),
         parse_mode='HTML'
     )
-    await state.set_state('OrderStates:waiting_wallet')
+    await state.set_state(OrderStates.waiting_wallet)
     await callback.answer()
 
 
@@ -272,7 +272,7 @@ async def quick_reorder(callback: CallbackQuery, state: FSMContext):
         locale_service.get('select_currency', lang),
         reply_markup=currency_selection_keyboard(lang)
     )
-    await state.set_state('OrderStates:waiting_currency')
+    await state.set_state(OrderStates.waiting_currency)
     await callback.answer()
 
 
