@@ -228,7 +228,7 @@ def order_admin_keyboard(order_id: int, status: str) -> InlineKeyboardMarkup:
 
     buttons.append([
         InlineKeyboardButton(text="📝 ملاحظة", callback_data=f"admin_note_{order_id}"),
-        InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_pending_orders")
+        InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
