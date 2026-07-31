@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from states import AdminStates
 
-from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, admin_verify_keyboard
+from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, admin_verify_keyboard, order_detail_keyboard, order_pagination_keyboard, auto_approve_keyboard
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
 from services.settings_service import SettingsService
@@ -35,121 +35,223 @@ async def admin_panel(message: Message):
     )
 
 
+async def _fetch_orders_page(list_type: str, page: int = 0, page_size: int = 5):
+    """Fetch a page of orders for paginated display."""
+    pool = await get_pool()
+    if list_type == 'pending':
+        status_filter = ["'pending'"]
+    else:
+        status_filter = ["'pending'", "'waiting_payment'", "'receipt_received'", "'payment_confirmed'"]
+
+    status_sql = ", ".join(status_filter)  # safe — hardcoded values
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM orders WHERE status IN ({status_sql})"
+        )
+        rows = await conn.fetch(
+            f"SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
+            f"JOIN users u ON o.user_id = u.id "
+            f"WHERE o.status IN ({status_sql}) "
+            f"ORDER BY o.created_at DESC LIMIT $1 OFFSET $2",
+            page_size, page * page_size
+        )
+    return rows, total
+
+
 @router.callback_query(F.data == "admin_pending_orders")
 async def pending_orders(callback: CallbackQuery):
-    """Show pending orders (new, not yet approved)."""
+    """Show pending orders (paginated)."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        orders = await conn.fetch(
-            "SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
-            "JOIN users u ON o.user_id = u.id "
-            "WHERE o.status = 'pending' ORDER BY o.created_at DESC"
-        )
-
-    if not orders:
+    rows, total = await _fetch_orders_page('pending', 0)
+    if not rows:
         await callback.message.edit_text("✅ لا توجد طلبات معلقة للموافقة")
         await callback.answer()
         return
 
+    page_size = 5
+    total_pages = (total + page_size - 1) // page_size
+    page = 0
     await callback.message.edit_text(
-        f"📦 <b>الطلبات المعلقة ({len(orders)})</b>",
+        f"📦 <b>الطلبات المعلقة</b> ({total}) | صفحة {page+1}/{total_pages}",
         parse_mode='HTML'
     )
 
-    for order in orders:
-        text = (
-            f"📦 <b>#{order['order_number']}</b>\n"
-            f"👤 {html.escape(order['full_name'] or 'N/A')} (<code>{order['user_tg']}</code>)\n"
-            f"💰 {order['amount_usdt']} USDT | 🌐 {order['network']}\n"
-            f"💱 {order['payment_currency']} | 💵 {order['total_amount']:.2f}\n"
-            f"📍 <code>{order['wallet_address'][:15]}...</code>\n"
-            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
-        )
+    for order in rows:
+        text = _format_order_compact(order)
         await callback.message.answer(
             text,
             reply_markup=order_admin_keyboard(order['id'], order['status']),
             parse_mode='HTML'
         )
 
+    await callback.message.answer(
+        "⬇️ استخدم الأزرار للتصفح:",
+        reply_markup=order_pagination_keyboard(page, total_pages, 'pending'),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pending_page_"))
+async def pending_orders_page(callback: CallbackQuery):
+    """Navigate pending orders pages."""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("⛔ Access denied", show_alert=True)
+    page = int(callback.data.replace("pending_page_", ""))
+    rows, total = await _fetch_orders_page('pending', page)
+    page_size = 5
+    total_pages = (total + page_size - 1) // page_size
+
+    for prev_msg_id in range(callback.message.message_id, callback.message.message_id + 10):
+        try:
+            await callback.bot.delete_message(callback.message.chat.id, prev_msg_id)
+        except Exception:
+            break
+
+    await callback.message.answer(
+        f"📦 <b>الطلبات المعلقة</b> ({total}) | صفحة {page+1}/{total_pages}",
+        parse_mode='HTML'
+    )
+    for order in rows:
+        text = _format_order_compact(order)
+        await callback.message.answer(
+            text,
+            reply_markup=order_admin_keyboard(order['id'], order['status']),
+            parse_mode='HTML'
+        )
+    await callback.message.answer(
+        "⬇️ استخدم الأزرار للتصفح:",
+        reply_markup=order_pagination_keyboard(page, total_pages, 'pending'),
+        parse_mode='HTML'
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data == "admin_active_orders")
 async def admin_active_orders(callback: CallbackQuery):
-    """Show ALL active orders that need admin action."""
+    """Show ALL active orders (paginated)."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        orders = await conn.fetch(
-            "SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
-            "JOIN users u ON o.user_id = u.id "
-            "WHERE o.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed') "
-            "ORDER BY o.created_at DESC"
-        )
-
-    if not orders:
+    rows, total = await _fetch_orders_page('active', 0)
+    if not rows:
         await callback.message.edit_text("✅ لا توجد طلبات نشطة حالياً")
         await callback.answer()
         return
 
+    page_size = 5
+    total_pages = (total + page_size - 1) // page_size
+    page = 0
     await callback.message.edit_text(
-        f"📋 <b>جميع الطلبات النشطة ({len(orders)})</b>\n"
-        f"⏳ في انتظار الموافقة • 💳 في انتظار الدفع\n"
-        f"📎 في انتظار مراجعة الإيصال • 🚀 في انتظار الإرسال",
+        f"📋 <b>جميع الطلبات النشطة</b> ({total}) | صفحة {page+1}/{total_pages}\n"
+        f"⏳ • 💳 • 📎 • 🚀",
         parse_mode='HTML'
     )
 
-    for order in orders:
-        status_icons = {
-            'pending': '⏳',
-            'waiting_payment': '💳',
-            'receipt_received': '📎',
-            'payment_confirmed': '🚀'
-        }
-        icon = status_icons.get(order['status'], '❓')
-        status_names = {
-            'pending': 'قيد الانتظار',
-            'waiting_payment': 'بانتظار الدفع',
-            'receipt_received': 'تم استلام الإيصال',
-            'payment_confirmed': 'تم تأكيد الدفع'
-        }
-
-        text = (
-            f"{icon} <b>#{order['order_number']}</b>\n"
-            f"━━━ 👤 العميل ━━━\n"
-            f"👤 الاسم: {html.escape(order['full_name'] or 'N/A')}\n"
-            f"🆔 المعرف: <code>{order['user_tg']}</code>\n"
-            f"━━━ 💳 الطلب ━━━\n"
-            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-            f"🌐 الشبكة: {order['network']}\n"
-            f"📊 الحالة: {status_names.get(order['status'], order['status'])}\n"
-            f"📅 التاريخ: {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
-        )
+    for order in rows:
+        text = _format_order_compact(order, show_detail=True)
         await callback.message.answer(
             text,
             reply_markup=order_admin_keyboard(order['id'], order['status']),
             parse_mode='HTML'
         )
-        # If order has a receipt and status is receipt_received, show the receipt image
         if order['status'] == 'receipt_received' and order.get('receipt_photo_id'):
             try:
                 await callback.message.answer_photo(
                     order['receipt_photo_id'],
-                    caption=f"📸 إيصال الدفع للطلب #{order['order_number']}"
+                    caption=f"📸 إيصال #{order['order_number']}"
                 )
-            except Exception as e:
-                logger.error(f"Failed to send receipt photo for order {order['id']}: {e}")
+            except Exception:
+                pass
 
+    await callback.message.answer(
+        "⬇️ استخدم الأزرار للتصفح:",
+        reply_markup=order_pagination_keyboard(page, total_pages, 'active'),
+        parse_mode='HTML'
+    )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("active_page_"))
+async def active_orders_page(callback: CallbackQuery):
+    """Navigate active orders pages."""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("⛔ Access denied", show_alert=True)
+    page = int(callback.data.replace("active_page_", ""))
+    rows, total = await _fetch_orders_page('active', page)
+    page_size = 5
+    total_pages = (total + page_size - 1) // page_size
+
+    for prev_msg_id in range(callback.message.message_id, callback.message.message_id + 10):
+        try:
+            await callback.bot.delete_message(callback.message.chat.id, prev_msg_id)
+        except Exception:
+            break
+
+    await callback.message.answer(
+        f"📋 <b>جميع الطلبات النشطة</b> ({total}) | صفحة {page+1}/{total_pages}\n"
+        f"⏳ • 💳 • 📎 • 🚀",
+        parse_mode='HTML'
+    )
+    for order in rows:
+        text = _format_order_compact(order, show_detail=True)
+        await callback.message.answer(
+            text,
+            reply_markup=order_admin_keyboard(order['id'], order['status']),
+            parse_mode='HTML'
+        )
+        if order['status'] == 'receipt_received' and order.get('receipt_photo_id'):
+            try:
+                await callback.message.answer_photo(
+                    order['receipt_photo_id'],
+                    caption=f"📸 إيصال #{order['order_number']}"
+                )
+            except Exception:
+                pass
+    await callback.message.answer(
+        "⬇️ استخدم الأزرار للتصفح:",
+        reply_markup=order_pagination_keyboard(page, total_pages, 'active'),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+def _format_order_compact(order, show_detail=False):
+    """Format a single order line for compact display."""
+    status_icons = {
+        'pending': '⏳', 'waiting_payment': '💳',
+        'receipt_received': '📎', 'payment_confirmed': '🚀',
+        'completed': '✅', 'rejected': '❌', 'expired': '⌛'
+    }
+    icon = status_icons.get(order['status'], '❓')
+    status_names = {
+        'pending': 'قيد الانتظار', 'waiting_payment': 'بانتظار الدفع',
+        'receipt_received': 'تم استلام الإيصال', 'payment_confirmed': 'تم تأكيد الدفع',
+        'completed': 'مكتمل', 'rejected': 'مرفوض', 'expired': 'منتهي'
+    }
+    name = html.escape(order['full_name'] or 'N/A')
+    wallet_short = order['wallet_address'][:10] + '...' if len(order['wallet_address']) > 10 else order['wallet_address']
+    if show_detail:
+        return (
+            f"{icon} <b>#{order['order_number']}</b>\n"
+            f"👤 {name} | 🆔 <code>{order['user_tg']}</code>\n"
+            f"💰 {order['amount_usdt']} USDT | 🌐 {order['network']}\n"
+            f"💱 {order['payment_currency']} | 💵 {order['total_amount']:.2f}\n"
+            f"📊 {status_names.get(order['status'], order['status'])}\n"
+            f"📍 <code>{wallet_short}</code>\n"
+            f"📅 {order['created_at'].strftime('%m-%d %H:%M')}"
+        )
+    return (
+        f"{icon} <b>#{order['order_number']}</b> | 👤 {name}\n"
+        f"💰 {order['amount_usdt']} USDT | 🌐 {order['network']}\n"
+        f"💱 {order['total_amount']:.2f} {order['payment_currency']}\n"
+        f"📍 <code>{wallet_short}</code>\n"
+        f"📅 {order['created_at'].strftime('%m-%d %H:%M')}"
+    )
 
 
 @router.callback_query(F.data.startswith("admin_approve_"))
@@ -334,7 +436,7 @@ async def reject_order(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_dashboard")
 async def admin_dashboard(callback: CallbackQuery):
-    """Show admin dashboard."""
+    """Show enhanced admin dashboard with multi-range stats."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -342,29 +444,65 @@ async def admin_dashboard(callback: CallbackQuery):
     pool = await get_pool()
 
     async with pool.acquire() as conn:
-        today_orders = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE"
+        # Today
+        today_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE")
+        today_completed = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'completed' AND completed_at >= CURRENT_DATE")
+        today_volume = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE created_at >= CURRENT_DATE")
+
+        # This week (last 7 days)
+        week_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'")
+        week_volume = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'")
+
+        # This month
+        month_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)")
+        month_volume = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)")
+
+        # Active counts
+        pending = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'pending'")
+        waiting_payment = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'waiting_payment'")
+        receipt_received = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'receipt_received'")
+        payment_confirmed = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status = 'payment_confirmed'")
+        active_total = pending + waiting_payment + receipt_received + payment_confirmed
+
+        # Customer metrics
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE terms_accepted = TRUE")
+        verified_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_verified = TRUE")
+        repeat_customers = await conn.fetchval(
+            "SELECT COUNT(DISTINCT user_id) FROM orders GROUP BY user_id HAVING COUNT(*) >= 2"
+        ) or 0
+
+        # Rating
+        avg_rating = await conn.fetchval(
+            "SELECT COALESCE(ROUND(AVG(customer_rating), 1), 0) FROM orders WHERE customer_rating IS NOT NULL"
         )
-        today_completed = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE status = 'completed' AND completed_at >= CURRENT_DATE"
-        )
-        pending = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
-        )
-        total_amount = await conn.fetchval(
-            "SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE created_at >= CURRENT_DATE"
+
+        # Expired today
+        expired_today = await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE status = 'expired' AND created_at >= CURRENT_DATE"
         )
 
     text = (
-        f"📊 <b>لوحة التحكم — اليوم</b>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 إجمالي الطلبات:     <b>{today_orders}</b>\n"
-        f"✅ المكتملة:           <b>{today_completed}</b>\n"
-        f"⏳ المعلقة:            <b>{pending}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 <b>إجمالي الحجم: {total_amount:.0f} USDT</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 استخدم الأزرار أدناه لإدارة الطلبات والإعدادات."
+        f"📊 <b>لوحة المعلومات</b>\n\n"
+
+        f"━━━ 📅 اليوم ━━━\n"
+        f"📦 الطلبات: <b>{today_orders}</b> | ✅ مكتمل: <b>{today_completed}</b>\n"
+        f"💰 الحجم: <b>{today_volume:.1f} USDT</b>\n\n"
+
+        f"━━━ 📅 آخر 7 أيام ━━━\n"
+        f"📦 الطلبات: <b>{week_orders}</b> | 💰 الحجم: <b>{week_volume:.1f} USDT</b>\n\n"
+
+        f"━━━ 📅 هذا الشهر ━━━\n"
+        f"📦 الطلبات: <b>{month_orders}</b> | 💰 الحجم: <b>{month_volume:.1f} USDT</b>\n\n"
+
+        f"━━━ 🟢 النشطة ({active_total}) ━━━\n"
+        f"⏳ معلقة: <b>{pending}</b> | 💳 انتظار الدفع: <b>{waiting_payment}</b>\n"
+        f"📎 مراجعة إيصال: <b>{receipt_received}</b> | 🚀 تأكيد: <b>{payment_confirmed}</b>\n"
+        f"⌛ منتهية اليوم: <b>{expired_today}</b>\n\n"
+
+        f"━━━ 👤 العملاء ━━━\n"
+        f"المجموع: <b>{total_users}</b> | موثق: <b>{verified_users}</b>\n"
+        f"🔄 متكرر (2+ طلبات): <b>{repeat_customers}</b>\n"
+        f"⭐ التقييم: <b>{avg_rating}/5</b>"
     )
 
     await callback.message.edit_text(text, parse_mode='HTML', reply_markup=admin_menu_keyboard())
@@ -1291,6 +1429,114 @@ async def admin_menu_back(callback: CallbackQuery):
         reply_markup=admin_menu_keyboard(),
         parse_mode='HTML'
     )
+    await callback.answer()
+
+
+# ───── Auto-approve for Trusted Customers ─────
+
+@router.callback_query(F.data == "admin_auto_approve")
+async def admin_auto_approve(callback: CallbackQuery):
+    """Show auto-approve settings."""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("⛔ Access denied", show_alert=True)
+    enabled = await SettingsService.get_bool('auto_approve', False)
+    await callback.message.edit_text(
+        f"⭐ <b>التوثيق التلقائي للعملاء الموثوقين</b>\n\n"
+        f"عند تفعيل هذه الخاصية، يتم اعتماد طلبات العملاء الذين "
+        f"أكملوا 3 طلبات أو أكثر سابقة تلقائياً دون انتظار موافقة المشرف.\n\n"
+        f"✅ الحالة: {'🟢 مفعل' if enabled else '🔴 معطل'}\n\n"
+        f"<i>ملاحظة: يتم التحقق من سجل العميل قبل الاعتماد التلقائي.</i>",
+        reply_markup=auto_approve_keyboard(enabled),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_auto_approve_toggle")
+async def admin_auto_approve_toggle(callback: CallbackQuery):
+    """Toggle auto-approve setting."""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("⛔ Access denied", show_alert=True)
+    currently = await SettingsService.get_bool('auto_approve', False)
+    await SettingsService.set_bool('auto_approve', not currently)
+    await callback.message.edit_text(
+        f"✅ {'تم تفعيل' if not currently else 'تم إيقاف'} التوثيق التلقائي!\n\n"
+        f"{'سيتم اعتماد طلبات العملاء الموثوقين تلقائياً.' if not currently else 'سيحتاج جميع العملاء إلى موافقة يدوية.'}",
+        parse_mode='HTML'
+    )
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.answer(
+        "⚙️ <b>لوحة التحكم</b>",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+# ───── Order Timeline ─────
+
+@router.callback_query(F.data.startswith("admin_timeline_"))
+async def admin_order_timeline(callback: CallbackQuery):
+    """Show the full status timeline for an order."""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("⛔ Access denied", show_alert=True)
+    order_id = int(callback.data.replace("admin_timeline_", ""))
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT o.*, u.full_name, u.telegram_id AS user_tg FROM orders o "
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id
+        )
+        if not order:
+            return await callback.answer("❌ الطلب غير موجود", show_alert=True)
+
+        # Fetch audit logs for this order
+        logs = await conn.fetch(
+            "SELECT action, details, timestamp FROM audit_logs "
+            "WHERE details LIKE $1 ORDER BY timestamp ASC",
+            f"%{order['order_number']}%"
+        )
+
+    status_icons = {
+        'pending': '🔄', 'waiting_payment': '💳', 'receipt_received': '📎',
+        'payment_confirmed': '✅', 'completed': '🎉', 'rejected': '❌', 'expired': '⌛'
+    }
+    status_names = {
+        'pending': 'تم إنشاء الطلب', 'waiting_payment': 'بانتظار الدفع',
+        'receipt_received': 'تم استلام الإيصال', 'payment_confirmed': 'تم تأكيد الدفع',
+        'completed': 'مكتمل', 'rejected': 'مرفوض', 'expired': 'منتهي'
+    }
+
+    timeline = []
+    # Always include creation
+    timeline.append(f"🆕 <b>تم إنشاء الطلب</b> — {order['created_at'].strftime('%Y-%m-%d %H:%M')}")
+
+    # Add from audit logs
+    for log in logs:
+        ts = log['timestamp'].strftime('%Y-%m-%d %H:%M') if log['timestamp'] else ''
+        action_icon = {'approve': '✅', 'reject': '❌', 'confirm_payment': '💸',
+                       'send_usdt': '🚀', 'note': '📝', 'expire': '⌛'}.get(log['action'], '📌')
+        timeline.append(f"{action_icon} <b>{log['action'].replace('_', ' ').title()}</b> — {ts}")
+
+    # Add current status
+    current_icon = status_icons.get(order['status'], '❓')
+    current_name = status_names.get(order['status'], order['status'])
+    timeline.append(f"{current_icon} <b>الحالية: {current_name}</b>")
+
+    if order['completed_at']:
+        timeline.append(f"🎉 <b>مكتمل</b> — {order['completed_at'].strftime('%Y-%m-%d %H:%M')}")
+
+    text = (
+        f"📋 <b>سجل الطلب #{order['order_number']}</b>\n"
+        f"━━━━━━━━━━━━━━\n" +
+        "\n".join(timeline) +
+        f"\n━━━━━━━━━━━━━━\n"
+        f"📍 <code>{order['wallet_address'][:15]}...</code>"
+    )
+
+    await callback.message.edit_text(text, reply_markup=order_detail_keyboard(order_id), parse_mode='HTML')
     await callback.answer()
 
 

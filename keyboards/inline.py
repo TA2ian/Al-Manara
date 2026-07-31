@@ -177,30 +177,27 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
     """Admin menu keyboard."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📦 الطلبات المعلقة", callback_data="admin_pending_orders"),
-            InlineKeyboardButton(text="📋 جميع النشطة", callback_data="admin_active_orders")
+            InlineKeyboardButton(text="📦 المعلقة", callback_data="admin_pending_orders"),
+            InlineKeyboardButton(text="📋 جميع النشطة", callback_data="admin_active_orders"),
+            InlineKeyboardButton(text="🔍 تفاصيل طلب", callback_data="admin_search_order")
         ],
         [
-            InlineKeyboardButton(text="📊 لوحة التحكم", callback_data="admin_dashboard"),
-            InlineKeyboardButton(text="💱 تحديث السعر", callback_data="admin_update_rate")
+            InlineKeyboardButton(text="📊 الإحصائيات", callback_data="admin_dashboard"),
+            InlineKeyboardButton(text="📈 التحليلات", callback_data="admin_analytics"),
+            InlineKeyboardButton(text="📍 العملاء", callback_data="admin_list_users")
         ],
         [
             InlineKeyboardButton(text="⚙️ الإعدادات", callback_data="admin_settings"),
-            InlineKeyboardButton(text="📨 إشعار جماعي", callback_data="admin_broadcast")
+            InlineKeyboardButton(text="💱 السعر", callback_data="admin_update_rate"),
+            InlineKeyboardButton(text="📨 إشعار", callback_data="admin_broadcast")
         ],
         [
-            InlineKeyboardButton(text="🔍 بحث عن عميل", callback_data="admin_search_user"),
-            InlineKeyboardButton(text="🔍 بحث عن طلب", callback_data="admin_search_order")
+            InlineKeyboardButton(text="🔍 بحث عميل", callback_data="admin_search_user"),
+            InlineKeyboardButton(text="📝 السجلات", callback_data="admin_logs"),
+            InlineKeyboardButton(text="📋 نسخ احتياطي", callback_data="admin_backups")
         ],
         [
-            InlineKeyboardButton(text="📈 التحليلات", callback_data="admin_analytics"),
-            InlineKeyboardButton(text="📍 قائمة العملاء", callback_data="admin_list_users")
-        ],
-        [
-            InlineKeyboardButton(text="📝 سجل العمليات", callback_data="admin_logs"),
-            InlineKeyboardButton(text="📋 النسخ الاحتياطية", callback_data="admin_backups")
-        ],
-        [
+            InlineKeyboardButton(text="⭐ توثيق تلقائي", callback_data="admin_auto_approve"),
             InlineKeyboardButton(text="🛑 صيانة", callback_data="admin_maintenance")
         ]
     ])
@@ -235,6 +232,44 @@ def order_admin_keyboard(order_id: int, status: str) -> InlineKeyboardMarkup:
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def order_detail_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    """Full detail view keyboard for an order."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📋 سجل الحالة", callback_data=f"admin_timeline_{order_id}"),
+            InlineKeyboardButton(text="📝 ملاحظة", callback_data=f"admin_note_{order_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="admin_menu")
+        ]
+    ])
+
+
+def order_pagination_keyboard(page: int, total_pages: int, list_type: str) -> InlineKeyboardMarkup:
+    """Pagination for order lists."""
+    buttons = []
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{list_type}_page_{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="admin_noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{list_type}_page_{page+1}"))
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def auto_approve_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+    """Auto-approve settings keyboard."""
+    toggle_text = "✅ مفعل" if enabled else "❌ معطل"
+    toggle_data = "admin_auto_approve_toggle"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{'⏸' if enabled else '▶️'} {'إيقاف' if enabled else 'تفعيل'} التوثيق التلقائي", callback_data=toggle_data)],
+        [InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")]
+    ])
 
 
 def settings_keyboard() -> InlineKeyboardMarkup:

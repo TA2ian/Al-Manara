@@ -22,6 +22,7 @@ from services.locale_service import locale_service
 from services.wallet_validator import WalletValidator
 from services.exchange_service import ExchangeService
 from services.notification_service import NotificationService
+from services.settings_service import SettingsService
 from config import Config
 from database import get_pool
 from keyboards.inline import start_verification_keyboard
@@ -892,7 +893,24 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
         )
         order_id = row['id']
 
-    # Notify admins with full customer info and delivery address
+        # ── Auto-approve for trusted customers ──
+        auto_approve_enabled = await SettingsService.get_bool('auto_approve', False)
+        auto_approved = False
+        if auto_approve_enabled:
+            completed_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
+                user['id']
+            )
+            if completed_count >= 3:
+                # Auto-approve: set status to waiting_payment
+                from datetime import datetime as dt, timedelta as td
+                deadline = dt.now() + td(minutes=Config.PAYMENT_TIMEOUT)
+                await conn.execute(
+                    "UPDATE orders SET status = 'waiting_payment', approved_at = NOW(), payment_deadline = $1 WHERE id = $2",
+                    deadline, order_id
+                )
+                auto_approved = True
+
     from aiogram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
 
@@ -903,8 +921,35 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
         )
     customer_name = user_row['full_name'] if user_row else 'N/A'
 
+    if auto_approved:
+        # Auto-approved: send payment instructions directly
+        async with pool.acquire() as conn:
+            order_data = await conn.fetchrow(
+                "SELECT * FROM orders WHERE id = $1", order_id
+            )
+        deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)
+        notification = NotificationService(bot, Config.ADMIN_IDS)
+        await notification.notify_order_approved(
+            callback.from_user.id, dict(order_data), lang=lang
+        )
+        from keyboards.inline import receipt_upload_keyboard
+        upload_text = locale_service.get('upload_receipt_prompt', lang,
+            order_number=order_number, timeout=Config.PAYMENT_TIMEOUT)
+        await bot.send_message(
+            callback.from_user.id, upload_text,
+            reply_markup=receipt_upload_keyboard(order_id, lang),
+            parse_mode='HTML'
+        )
+        # Notify admins with auto-approve badge
+        admin_status = 'waiting_payment'
+        admin_notify_suffix = " ⚡ (توثيق تلقائي)"
+    else:
+        admin_status = 'pending'
+        admin_notify_suffix = ""
+
+    # Notify admins
     admin_text = (
-        f"📦 <b>طلب جديد!</b>\n\n"
+        f"📦 <b>طلب جديد!</b>{admin_notify_suffix}\n\n"
         f"📋 الرقم: #{order_number}\n"
         f"👤 الاسم: {customer_name}\n"
         f"🆔 المعرف: <code>{callback.from_user.id}</code>\n"
@@ -920,7 +965,7 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
             await bot.send_message(
                 admin_id,
                 admin_text,
-                reply_markup=order_admin_keyboard(order_id, 'pending'),
+                reply_markup=order_admin_keyboard(order_id, admin_status),
                 parse_mode='HTML'
             )
         except Exception as e:
