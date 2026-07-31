@@ -331,9 +331,9 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
     if image_bytes:
         # Determine which admin account to use based on payment currency
         admin_account = (
-            Config.SHAMCASH_SYP_ACCOUNT
+            Config.get_shamcash_syp()
             if order['payment_currency'] == 'SYP'
-            else Config.SHAMCASH_USD_ACCOUNT
+            else Config.get_shamcash_usd()
         )
 
         verification_result = await ReceiptVerifier.verify_shamcash_receipt(
@@ -341,7 +341,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
             order_date=order['created_at'],
             customer_name=order['full_name'] or '',
             customer_shamcash_account=order['shamcash_account'] or '',
-            admin_name=Config.SHAMCASH_NAME,
+            admin_name=Config.get_shamcash_name(),
             admin_shamcash_account=admin_account,
             expected_amount=float(order['total_amount']),
             payment_currency=order['payment_currency'],

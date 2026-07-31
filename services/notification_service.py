@@ -60,8 +60,8 @@ class NotificationService:
             lang,
             order_number=order['order_number'],
             timeout=Config.PAYMENT_TIMEOUT,
-            account=Config.SHAMCASH_SYP_ACCOUNT if order['payment_currency'] == 'SYP' else Config.SHAMCASH_USD_ACCOUNT,
-            name=Config.SHAMCASH_NAME,
+            account=Config.get_shamcash_syp() if order['payment_currency'] == 'SYP' else Config.get_shamcash_usd(),
+            name=Config.get_shamcash_name(),
             amount=amount,
             currency=currency
         ) + new_syr_line

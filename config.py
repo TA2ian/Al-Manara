@@ -71,6 +71,41 @@ class Config:
         """Set in-memory cache. Call persist_maintenance_mode() to save to DB."""
         cls._maintenance_override = value
 
+    # ShamCash settings — can be overridden at runtime from DB
+    _shamcash_name_override: str | None = None
+    _shamcash_usd_override: str | None = None
+    _shamcash_syp_override: str | None = None
+
+    @classmethod
+    def get_shamcash_name(cls) -> str:
+        if cls._shamcash_name_override is not None:
+            return cls._shamcash_name_override
+        return cls.SHAMCASH_NAME
+
+    @classmethod
+    def get_shamcash_usd(cls) -> str:
+        if cls._shamcash_usd_override is not None:
+            return cls._shamcash_usd_override
+        return cls.SHAMCASH_USD_ACCOUNT
+
+    @classmethod
+    def get_shamcash_syp(cls) -> str:
+        if cls._shamcash_syp_override is not None:
+            return cls._shamcash_syp_override
+        return cls.SHAMCASH_SYP_ACCOUNT
+
+    @classmethod
+    def set_shamcash_name(cls, value: str):
+        cls._shamcash_name_override = value
+
+    @classmethod
+    def set_shamcash_usd(cls, value: str):
+        cls._shamcash_usd_override = value
+
+    @classmethod
+    def set_shamcash_syp(cls, value: str):
+        cls._shamcash_syp_override = value
+
     @classmethod
     def validate(cls) -> list:
         """Validate required configuration."""

@@ -1158,7 +1158,7 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"⚙️ <b>الرسوم الحالية</b>\n\n"
         f"📊 نسبة (%) : {Config.SERVICE_FEE_PERCENT}%\n"
-        f"💵 ثابت : {Config.SERVICE_FEE_FIXED} {Config.SHAMCASH_SYP_ACCOUNT and 'SYP' or 'USD'}\n\n"
+        f"💵 ثابت : {Config.SERVICE_FEE_FIXED} {Config.get_shamcash_syp() and 'SYP' or 'USD'}\n\n"
         f"أرسل النسبة المئوية للرسوم (مثال: 0.5):",
         parse_mode='HTML'
     )
@@ -1250,7 +1250,7 @@ async def setting_shamcash_usd(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await callback.message.edit_text(
-        f"📱 <b>حساب شام كاش USD الحالي:</b>\n<code>{Config.SHAMCASH_USD_ACCOUNT}</code>\n\n"
+        f"📱 <b>حساب شام كاش USD الحالي:</b>\n<code>{Config.get_shamcash_usd()}</code>\n\n"
         f"أرسل رقم حساب USD الجديد:",
         parse_mode='HTML'
     )
@@ -1267,6 +1267,8 @@ async def admin_set_shamcash_usd(message: Message, state: FSMContext):
         return
     account = message.text.strip()
     Config.SHAMCASH_USD_ACCOUNT = account
+    Config.set_shamcash_usd(account)
+    await SettingsService.set('shamcash_usd', account)
     await message.answer(f"✅ تم تحديث حساب شام كاش USD:\n<code>{account}</code>", parse_mode='HTML')
     await state.clear()
 
@@ -1278,7 +1280,7 @@ async def setting_shamcash_syp(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await callback.message.edit_text(
-        f"📱 <b>حساب شام كاش SYP الحالي:</b>\n<code>{Config.SHAMCASH_SYP_ACCOUNT}</code>\n\n"
+        f"📱 <b>حساب شام كاش SYP الحالي:</b>\n<code>{Config.get_shamcash_syp()}</code>\n\n"
         f"أرسل رقم حساب SYP الجديد:",
         parse_mode='HTML'
     )
@@ -1295,6 +1297,8 @@ async def admin_set_shamcash_syp(message: Message, state: FSMContext):
         return
     account = message.text.strip()
     Config.SHAMCASH_SYP_ACCOUNT = account
+    Config.set_shamcash_syp(account)
+    await SettingsService.set('shamcash_syp', account)
     await message.answer(f"✅ تم تحديث حساب شام كاش SYP:\n<code>{account}</code>", parse_mode='HTML')
     await state.clear()
 
@@ -1306,7 +1310,7 @@ async def setting_shamcash_name(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await callback.message.edit_text(
-        f"👤 <b>اسم حساب شام كاش الحالي:</b>\n{Config.SHAMCASH_NAME or 'N/A'}\n\n"
+        f"👤 <b>اسم حساب شام كاش الحالي:</b>\n{Config.get_shamcash_name() or 'N/A'}\n\n"
         f"أرسل الاسم الجديد لحساب شام كاش:",
         parse_mode='HTML'
     )
@@ -1323,6 +1327,8 @@ async def admin_set_shamcash_name(message: Message, state: FSMContext):
         return
     name = message.text.strip()
     Config.SHAMCASH_NAME = name
+    Config.set_shamcash_name(name)
+    await SettingsService.set('shamcash_name', name)
     await message.answer(f"✅ تم تحديث اسم حساب شام كاش:\n{name}")
     await state.clear()
 

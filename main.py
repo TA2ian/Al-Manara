@@ -124,12 +124,26 @@ async def on_startup(bot: Bot):
     # Initialize database
     await init_db()
 
-    # Load persistent settings from DB (e.g. maintenance mode)
+    # Load persistent settings from DB (maintenance mode, ShamCash, etc.)
     await SettingsService.init()
     maintenance_active = await SettingsService.get_bool('maintenance_mode', False)
     Config.set_maintenance_mode_sync(maintenance_active)
     if maintenance_active:
         logger.info("Maintenance mode is ACTIVE (from DB)")
+
+    # Load ShamCash settings from DB (overrides env vars)
+    shamcash_name = await SettingsService.get('shamcash_name', '')
+    if shamcash_name:
+        Config.set_shamcash_name(shamcash_name)
+        logger.info("ShamCash name loaded from DB")
+    shamcash_usd = await SettingsService.get('shamcash_usd', '')
+    if shamcash_usd:
+        Config.set_shamcash_usd(shamcash_usd)
+        logger.info("ShamCash USD account loaded from DB")
+    shamcash_syp = await SettingsService.get('shamcash_syp', '')
+    if shamcash_syp:
+        Config.set_shamcash_syp(shamcash_syp)
+        logger.info("ShamCash SYP account loaded from DB")
 
     # Set webhook if configured
     if Config.WEBHOOK_URL:
