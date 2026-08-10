@@ -18,14 +18,17 @@ def create_dispatcher() -> Dispatcher:
     )
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
+    from middleware.ownership import OwnershipMiddleware
 
     dp = Dispatcher()
 
-    # Register middlewares
+    # Register middlewares. Ownership runs before user-facing callbacks so
+    # resource IDs cannot be used to access another customer's data.
     dp.message.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
+    dp.callback_query.middleware(OwnershipMiddleware())
 
     # Register routers. Specialized entry points must run before broad legacy
     # handlers that use the same callback/message filters.
