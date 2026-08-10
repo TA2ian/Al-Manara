@@ -2,6 +2,7 @@
 import uuid
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -122,7 +123,7 @@ async def _get_user_lang(telegram_id: int) -> str:
 @router.callback_query(OrderStates.waiting_amount, F.data.startswith("amount_preset_"))
 async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
     """Handle preset amount selection."""
-    amount = float(callback.data.replace("amount_preset_", ""))
+    amount = Decimal(callback.data.replace("amount_preset_", ""))
     lang = await _get_user_lang(callback.from_user.id)
 
     allowed, _ = global_rate_limiter.check(callback.from_user.id, 'order_amount')
@@ -260,7 +261,8 @@ async def enter_amount(message: Message, state: FSMContext):
 
     try:
         # Strip commas and whitespace before parsing
-        amount = float(message.text.strip().replace(',', ''))
+        amount_text = message.text.strip().replace(',', '')
+        amount = Decimal(amount_text)
 
         if amount < Config.MIN_ORDER or amount > Config.MAX_ORDER:
             await message.answer(
@@ -270,7 +272,7 @@ async def enter_amount(message: Message, state: FSMContext):
 
         await _process_valid_amount(message, state, lang, amount)
 
-    except ValueError:
+    except (InvalidOperation, ValueError):
         await message.answer(
             locale_service.get('invalid_amount', lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER)
         )
@@ -812,10 +814,10 @@ async def select_currency(callback: CallbackQuery, state: FSMContext):
     new_syr_line = ""
     new_syr_fee_line = ""
     new_syr_total_line = ""
-    if currency == 'SYP':
-        new_syr_line = f"🇸🇾 بما يعادل: <b>{calculation['new_syr_amount']:,.2f} ل.ج.س</b> (ليرة جديدة سورية)\n"
-        new_syr_fee_line = f"🇸🇾 بما يعادل: <b>{calculation['new_syr_fee']:,.2f} ل.ج.س</b>\n"
-        new_syr_total_line = f"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['new_syr_total']:,.2f} ل.ج.س</b>\n"
+    if currency == 'NEW.SYP':
+        new_syr_line = f"🇸🇾 بما يعادل: <b>{calculation['base_amount']:,.2f} ل.ج.س</b> (ليرة سورية جديدة)\n"
+        new_syr_fee_line = f"🇸🇾 رسوم الخدمة: <b>{calculation['fee_amount']:,.2f} ل.ج.س</b>\n"
+        new_syr_total_line = f"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['total_amount']:,.2f} ل.ج.س</b>\n"
 
     # Map network to display name with symbol
     network_display = data['network']
