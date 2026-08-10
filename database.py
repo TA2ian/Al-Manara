@@ -171,13 +171,17 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
 
-        # Atomic protection against two concurrent active orders for one user.
+        # Atomic protection against two concurrent transitions into an active order.
+        # Historical duplicate active rows are not modified by this migration; they can
+        # still be closed by an admin because the trigger only checks on INSERT or
+        # transition from an inactive status to an active status.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
             RETURNS TRIGGER AS $$
             BEGIN
                 IF NEW.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
-                   AND NEW.user_id IS NOT NULL THEN
+                   AND NEW.user_id IS NOT NULL
+                   AND (TG_OP = 'INSERT' OR OLD.status NOT IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')) THEN
                     PERFORM pg_advisory_xact_lock(2147483000, NEW.user_id);
                     IF EXISTS (
                         SELECT 1 FROM orders
