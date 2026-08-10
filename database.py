@@ -162,7 +162,7 @@ async def init_db():
             "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
         )
         await conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_blocked_users_telegram_id ON blocked_users (telegram_id)"
+            "CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)"
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)"
@@ -172,6 +172,9 @@ async def init_db():
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)"
         )
 
         # Insert default exchange rate if empty.
