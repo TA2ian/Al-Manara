@@ -155,7 +155,6 @@ async def init_db():
             )
         """)
 
-        # Additive compatibility columns.
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
@@ -173,17 +172,16 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(24,8) USING total_amount::NUMERIC")
         await conn.execute("ALTER TABLE exchange_rates ALTER COLUMN rate TYPE NUMERIC(24,8) USING rate::NUMERIC")
 
-        # One-time migration of the live exchange-rate table from the legacy
-        # SYP-per-USD convention to the canonical NEW.SYP-per-USD convention.
+        # One-time migration from the legacy SYP-per-USD convention to NEW.SYP-per-USD.
+        # Only legacy-sized rates are converted, while already-normalized rates are untouched.
         migrated = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'currency_migration_new_syp_v1'"
         )
         if migrated is None:
             await conn.execute(
                 "UPDATE exchange_rates SET rate = rate / 100, rate_currency = 'NEW.SYP' "
-                "WHERE rate_currency IS NULL OR rate_currency <> 'NEW.SYP'"
+                "WHERE rate > 1000"
             )
-            # Existing payment methods labelled SYP are now NEW.SYP payment methods.
             await conn.execute(
                 "UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() "
                 "WHERE currency = 'SYP'"
@@ -192,11 +190,70 @@ async def init_db():
                 "INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v1', 'done')"
             )
 
+        # Ensure the two supported payment methods exist. The QR/account values
+        # remain admin-managed and are never hard-coded into order records.
+        await conn.execute(
+            """INSERT INTO payment_methods
+               (code, provider, currency, display_name, account_identifier, enabled)
+               VALUES ('shamcash_usd', 'ShamCash', 'USD', 'ShamCash USD', $1, TRUE)
+               ON CONFLICT (code) DO NOTHING""",
+            Config.get_shamcash_usd(),
+        )
+        await conn.execute(
+            """INSERT INTO payment_methods
+               (code, provider, currency, display_name, account_identifier, enabled)
+               VALUES ('shamcash_new_syp', 'ShamCash', 'NEW.SYP', 'ShamCash NEW.SYP', $1, TRUE)
+               ON CONFLICT (code) DO NOTHING""",
+            Config.get_shamcash_syp(),
+        )
+
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
+
+        # Snapshot the active payment method at INSERT time. This also normalizes
+        # the old SYP callback alias to NEW.SYP so new orders can never use SYP as
+        # an actual payment currency.
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION snapshot_order_payment_method()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                method_row RECORD;
+            BEGIN
+                IF NEW.payment_currency = 'SYP' THEN
+                    NEW.payment_currency := 'NEW.SYP';
+                END IF;
+
+                IF NEW.payment_currency IN ('USD', 'NEW.SYP')
+                   AND NEW.payment_method_code IS NULL THEN
+                    SELECT code, account_identifier, qr_photo_id
+                    INTO method_row
+                    FROM payment_methods
+                    WHERE provider = 'ShamCash'
+                      AND currency = NEW.payment_currency
+                      AND enabled = TRUE
+                    ORDER BY id ASC
+                    LIMIT 1;
+
+                    IF FOUND THEN
+                        NEW.payment_method_code := method_row.code;
+                        NEW.payment_account_snapshot := method_row.account_identifier;
+                        NEW.payment_qr_photo_id := method_row.qr_photo_id;
+                    END IF;
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_payment_method ON orders")
+        await conn.execute("""
+            CREATE TRIGGER trg_snapshot_order_payment_method
+            BEFORE INSERT ON orders
+            FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()
+        """)
 
         # Prevent concurrent creation of multiple active orders for one user.
         await conn.execute("""
@@ -228,8 +285,7 @@ async def init_db():
             FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()
         """)
 
-        # Enforce the order state machine at the database boundary so no handler,
-        # admin action, retry, or future integration can bypass it.
+        # Enforce the order state machine at the database boundary.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_order_state_transition()
             RETURNS TRIGGER AS $$
