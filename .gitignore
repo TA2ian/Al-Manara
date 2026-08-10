@@ -1,0 +1,45 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Runtime data
+logs/
+backups/
+data/
+*.log
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Replit/local artifacts
+.replit
+replit.nix
+
+# Archives and generated assets
+*.zip
+*.tar
+*.tar.gz
