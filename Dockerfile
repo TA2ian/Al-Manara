@@ -2,23 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Runtime dependencies for QR decoding and OCR.
 RUN apt-get update && apt-get install -y \
     libzbar0 \
     libzbar-dev \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-ara \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Install Python dependencies first for better Docker layer caching.
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
+# Copy application.
 COPY . .
 
-# Create directories
+# Runtime directories (ignored by Git).
 RUN mkdir -p logs backups data
 
-# Run
 CMD ["python", "main.py"]
