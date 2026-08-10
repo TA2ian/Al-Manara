@@ -157,7 +157,6 @@ async def init_db():
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
 
         # Financial values must never use binary floating-point storage.
-        # PostgreSQL NUMERIC preserves exact decimal values during all later reads/writes.
         await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
@@ -171,13 +170,6 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
-
-        # Prevent duplicate active orders for the same customer at the database level.
-        await conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_one_active_per_user
-            ON orders (user_id)
-            WHERE status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
-        """)
 
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
