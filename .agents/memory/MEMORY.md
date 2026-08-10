@@ -1,3 +1,0 @@
-- [Order life cycle & keyboard](order-lifecycle.md) — `order_admin_keyboard` must cover every status (`pending`, `waiting_payment`, `receipt_received`, `payment_confirmed`); missing a status makes admin actions invisible.
-- [complete_order Bot import](complete-order-bot-import.md) — `complete_order` uses `Bot(token=Config.BOT_TOKEN)` but `from aiogram import Bot` must be inside the function; missing it causes silent `NameError` with no customer notification.
-- [ShamCash receipt verification](shamcash-receipt-verification.md) — full OCR verification (date, sender, recipient, amount) with confidence scoring and retry flow
