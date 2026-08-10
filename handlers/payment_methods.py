@@ -16,9 +16,10 @@ class PaymentMethodStates(StatesGroup):
     waiting_qr = State()
 
 
+# NEW.SYP is the only Syrian payment currency. Legacy SYP is display-only.
 CURRENCY_META = {
     "USD": ("USD", "الدولار الأمريكي"),
-    "SYP": ("SYP", "الليرة السورية"),
+    "NEW.SYP": ("NEW.SYP", "الليرة السورية الجديدة"),
 }
 
 
@@ -35,13 +36,19 @@ def enhanced_admin_menu_keyboard() -> InlineKeyboardMarkup:
 
 async def ensure_default_methods(conn):
     for currency, label in CURRENCY_META.values():
+        account = Config.get_shamcash_usd() if currency == "USD" else Config.get_shamcash_syp()
         await conn.execute(
             """INSERT INTO payment_methods
                (code, provider, currency, display_name, account_identifier, enabled)
                VALUES ($1, 'ShamCash', $2, $3, $4, TRUE)
-               ON CONFLICT (code) DO NOTHING""",
-            f"shamcash_{currency.lower()}", currency, f"ShamCash {label}",
-            Config.get_shamcash_syp() if currency == "SYP" else Config.get_shamcash_usd(),
+               ON CONFLICT (code) DO UPDATE
+               SET currency = EXCLUDED.currency,
+                   display_name = EXCLUDED.display_name,
+                   updated_at = NOW()""",
+            f"shamcash_{currency.lower().replace('.', '_')}",
+            currency,
+            f"ShamCash {label}",
+            account,
         )
 
 
@@ -89,14 +96,15 @@ async def _show_payment_methods(target, edit: bool = False):
     text = "💳 <b>وسائل الدفع — ShamCash</b>\n\n"
     for method in methods:
         status = "🟢 فعال" if method["enabled"] else "🔴 معطل"
-        qr = "موجود" if method["qr_photo_id"] else "غير محفوظ"
+        qr = "محفوظ" if method["qr_photo_id"] else "غير محفوظ"
         account = method["account_identifier"] or "غير مضبوط"
+        label = "الدولار الأمريكي" if method["currency"] == "USD" else "الليرة السورية الجديدة"
         text += (
-            f"<b>{method['currency']}</b> — {status}\n"
+            f"<b>{method['currency']}</b> — {label} — {status}\n"
             f"الحساب: <code>{account}</code>\n"
             f"QR: {qr}\n\n"
         )
-    text += "اختر العملة لإدارة الحساب ورمز QR المحفوظ."
+    text += "اختر وسيلة الدفع لإدارة الحساب ورمز QR المحفوظ."
 
     if edit:
         await target.edit_text(text, reply_markup=payment_methods_keyboard(methods), parse_mode="HTML")
@@ -122,8 +130,9 @@ async def payment_method_view(callback: CallbackQuery):
 
     status = "🟢 فعال" if method["enabled"] else "🔴 معطل"
     qr = "محفوظ" if method["qr_photo_id"] else "غير محفوظ"
+    label = "الدولار الأمريكي" if method["currency"] == "USD" else "الليرة السورية الجديدة"
     text = (
-        f"💳 <b>ShamCash {method['currency']}</b>\n\n"
+        f"💳 <b>ShamCash {method['currency']} — {label}</b>\n\n"
         f"الحالة: {status}\n"
         f"الحساب: <code>{method['account_identifier'] or 'غير مضبوط'}</code>\n"
         f"QR: {qr}"
