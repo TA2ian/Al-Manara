@@ -1,4 +1,4 @@
-"""Database initialization."""
+"""Database initialization and compatibility migrations for Al-Manara."""
 import asyncpg
 import logging
 from config import Config
@@ -8,17 +8,19 @@ _pool = None
 
 
 async def init_db():
-    """Initialize database connection pool."""
+    """Initialize database connection pool and apply additive schema changes."""
     global _pool
+    if not Config.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is required")
+
     _pool = await asyncpg.create_pool(
         Config.DATABASE_URL,
         min_size=5,
         max_size=20,
-        command_timeout=60
+        command_timeout=60,
     )
     logger.info("Database pool created")
 
-    # Create tables
     async with _pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -119,7 +121,25 @@ async def init_db():
                 address TEXT NOT NULL,
                 network TEXT NOT NULL,
                 label TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT NOW()
+                qr_photo_id TEXT,
+                is_default BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payment_methods (
+                id SERIAL PRIMARY KEY,
+                code TEXT UNIQUE NOT NULL,
+                provider TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                account_identifier TEXT NOT NULL DEFAULT '',
+                qr_photo_id TEXT,
+                enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
             )
         """)
 
@@ -131,12 +151,36 @@ async def init_db():
             )
         """)
 
-        # Insert default exchange rate if empty
+        # Additive compatibility migrations for databases created by older versions.
+        await conn.execute(
+            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE"
+        )
+        await conn.execute(
+            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
+        )
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_blocked_users_telegram_id ON blocked_users (telegram_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)"
+        )
+
+        # Insert default exchange rate if empty.
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
             await conn.execute(
                 "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
-                15000.0, 0
+                15000.0,
+                0,
             )
 
 
@@ -147,6 +191,8 @@ async def get_pool():
 
 async def close_db():
     """Close database pool."""
+    global _pool
     if _pool:
         await _pool.close()
+        _pool = None
         logger.info("Database pool closed")
