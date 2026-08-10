@@ -4,7 +4,17 @@ from aiogram import Dispatcher
 
 def create_dispatcher() -> Dispatcher:
     """Create dispatcher with all handlers."""
-    from handlers import start, order, profile, my_orders, feedback, admin, verification, menu
+    from handlers import (
+        start,
+        saved_wallets,
+        order,
+        profile,
+        my_orders,
+        feedback,
+        admin,
+        verification,
+        menu,
+    )
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
 
@@ -16,8 +26,10 @@ def create_dispatcher() -> Dispatcher:
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
 
-    # Register routers
+    # Register routers. Saved-wallet callbacks must run before the legacy order
+    # handlers so a stored wallet QR is reused without another upload prompt.
     dp.include_router(start.router)
+    dp.include_router(saved_wallets.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
     dp.include_router(my_orders.router)
