@@ -71,12 +71,12 @@ def network_selection_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
 
 
 def currency_selection_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
-    """Currency selection keyboard."""
+    """Select the actual payment currency: USD or the current Syrian pound (NEW.SYP)."""
     if lang == 'ar':
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="🇺🇸 الدولار الأمريكي (USD)", callback_data="currency_USD"),
-                InlineKeyboardButton(text="🇸🇾 الليرة السورية (SYP)", callback_data="currency_SYP")
+                InlineKeyboardButton(text="🇸🇾 الليرة السورية الجديدة (NEW.SYP)", callback_data="currency_NEW.SYP")
             ],
             [
                 InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_wallet")
@@ -86,7 +86,7 @@ def currency_selection_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="🇺🇸 US Dollar (USD)", callback_data="currency_USD"),
-                InlineKeyboardButton(text="🇸🇾 Syrian Pound (SYP)", callback_data="currency_SYP")
+                InlineKeyboardButton(text="🇸🇾 Syrian Pound (NEW.SYP)", callback_data="currency_NEW.SYP")
             ],
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="back_to_wallet")
@@ -281,7 +281,7 @@ def settings_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📱 شام كاش USD", callback_data="setting_shamcash_usd"),
-            InlineKeyboardButton(text="📱 شام كاش SYP", callback_data="setting_shamcash_syp")
+            InlineKeyboardButton(text="📱 شام كاش NEW.SYP", callback_data="setting_shamcash_new_syp")
         ],
         [
             InlineKeyboardButton(text="👤 اسم شام كاش", callback_data="setting_shamcash_name"),
@@ -296,16 +296,13 @@ def settings_keyboard() -> InlineKeyboardMarkup:
 
 def preset_amounts_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
     """Preset USDT amount selection keyboard."""
-    # Common preset amounts - adjust as needed
     amounts = [50, 100, 200, 500, 1000]
     rows = []
-    # Two per row
     for i in range(0, len(amounts), 2):
         row = []
         for amt in amounts[i:i+2]:
             row.append(InlineKeyboardButton(text=f"{amt} USDT", callback_data=f"amount_preset_{amt}"))
         rows.append(row)
-    # Custom amount at the bottom
     custom_text = "✏️ مبلغ آخر" if lang == 'ar' else "✏️ Other Amount"
     rows.append([InlineKeyboardButton(text=custom_text, callback_data="amount_custom")])
     rows.append([
@@ -319,7 +316,6 @@ def language_select_keyboard() -> InlineKeyboardMarkup:
     Uses Unicode direction marks for proper RTL/LTR display:
     Arabic gets RLM (right-to-left) suffix, English gets LRM (left-to-right) suffix.
     """
-    # \u200F = Right-to-Left Mark (RLM), \u200E = Left-to-Right Mark (LRM)
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🇸🇦 العربية\u200F", callback_data="lang_ar"),
