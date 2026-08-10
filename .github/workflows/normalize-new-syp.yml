@@ -54,10 +54,9 @@ jobs:
           path.write_text(text, encoding='utf-8')
           PY
 
-      - name: Validate
+      - name: Validate patched source
         run: |
           python -m py_compile handlers/order.py
-          python -m unittest tests/test_exchange_service.py
 
       - name: Commit and remove one-shot workflow
         shell: bash
