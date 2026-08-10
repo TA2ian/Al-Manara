@@ -46,13 +46,13 @@ async def init_db():
                 order_number TEXT UNIQUE NOT NULL,
                 user_id INTEGER REFERENCES users(id),
                 network TEXT NOT NULL,
-                amount_usdt REAL NOT NULL,
-                exchange_rate REAL NOT NULL,
+                amount_usdt NUMERIC(24,8) NOT NULL,
+                exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL,
-                base_amount REAL NOT NULL,
-                fee_percent REAL DEFAULT 0,
-                fee_amount REAL DEFAULT 0,
-                total_amount REAL NOT NULL,
+                base_amount NUMERIC(24,8) NOT NULL,
+                fee_percent NUMERIC(12,6) DEFAULT 0,
+                fee_amount NUMERIC(24,8) DEFAULT 0,
+                total_amount NUMERIC(24,8) NOT NULL,
                 wallet_address TEXT NOT NULL,
                 wallet_qr_photo_id TEXT,
                 status TEXT DEFAULT 'pending',
@@ -72,7 +72,7 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS exchange_rates (
                 id SERIAL PRIMARY KEY,
-                rate REAL NOT NULL,
+                rate NUMERIC(24,8) NOT NULL,
                 updated_by BIGINT,
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -152,37 +152,38 @@ async def init_db():
         """)
 
         # Additive compatibility migrations for databases created by older versions.
-        await conn.execute(
-            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT"
-        )
-        await conn.execute(
-            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE"
-        )
-        await conn.execute(
-            "ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)"
-        )
+        await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT")
+        await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
+        await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
 
-        # Insert default exchange rate if empty.
+        # Financial values must never use binary floating-point storage.
+        # PostgreSQL NUMERIC preserves exact decimal values during all later reads/writes.
+        await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN fee_amount TYPE NUMERIC(24,8) USING fee_amount::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(24,8) USING total_amount::NUMERIC")
+        await conn.execute("ALTER TABLE exchange_rates ALTER COLUMN rate TYPE NUMERIC(24,8) USING rate::NUMERIC")
+
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
+
+        # Prevent duplicate active orders for the same customer at the database level.
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_one_active_per_user
+            ON orders (user_id)
+            WHERE status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
+        """)
+
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
             await conn.execute(
                 "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
-                15000.0,
+                "15000.00",
                 0,
             )
 
