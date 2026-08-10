@@ -11,6 +11,7 @@ def create_dispatcher() -> Dispatcher:
         profile,
         my_orders,
         feedback,
+        admin_entry,
         admin,
         verification,
         menu,
@@ -26,14 +27,15 @@ def create_dispatcher() -> Dispatcher:
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
 
-    # Register routers. Saved-wallet callbacks must run before the legacy order
-    # handlers so a stored wallet QR is reused without another upload prompt.
+    # Register routers. Specialized entry points must run before broad legacy
+    # handlers that use the same callback/message filters.
     dp.include_router(start.router)
     dp.include_router(saved_wallets.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
+    dp.include_router(admin_entry.router)
     dp.include_router(admin.router)
     dp.include_router(verification.router)
     dp.include_router(menu.router)
