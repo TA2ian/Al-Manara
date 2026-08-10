@@ -37,6 +37,9 @@ def enhanced_admin_menu_keyboard() -> InlineKeyboardMarkup:
 async def ensure_default_methods(conn):
     for currency, label in CURRENCY_META.values():
         account = Config.get_shamcash_usd() if currency == "USD" else Config.get_shamcash_syp()
+        # Keep the legacy internal code for compatibility with an existing DB;
+        # the user-facing and financial currency is NEW.SYP.
+        code = "shamcash_usd" if currency == "USD" else "shamcash_syp"
         await conn.execute(
             """INSERT INTO payment_methods
                (code, provider, currency, display_name, account_identifier, enabled)
@@ -45,7 +48,7 @@ async def ensure_default_methods(conn):
                SET currency = EXCLUDED.currency,
                    display_name = EXCLUDED.display_name,
                    updated_at = NOW()""",
-            f"shamcash_{currency.lower().replace('.', '_')}",
+            code,
             currency,
             f"ShamCash {label}",
             account,
@@ -90,7 +93,8 @@ async def _show_payment_methods(target, edit: bool = False):
         await ensure_default_methods(conn)
         methods = await conn.fetch(
             "SELECT code, currency, display_name, account_identifier, qr_photo_id, enabled "
-            "FROM payment_methods WHERE provider = 'ShamCash' ORDER BY currency"
+            "FROM payment_methods WHERE provider = 'ShamCash' AND currency IN ('USD', 'NEW.SYP') "
+            "ORDER BY currency"
         )
 
     text = "💳 <b>وسائل الدفع — ShamCash</b>\n\n"
