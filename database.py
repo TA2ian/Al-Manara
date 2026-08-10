@@ -55,6 +55,9 @@ async def init_db():
                 total_amount NUMERIC(24,8) NOT NULL,
                 wallet_address TEXT NOT NULL,
                 wallet_qr_photo_id TEXT,
+                payment_method_code TEXT,
+                payment_account_snapshot TEXT,
+                payment_qr_photo_id TEXT,
                 status TEXT DEFAULT 'pending',
                 receipt_photo_id TEXT,
                 receipt_upload_count INTEGER DEFAULT 0,
@@ -73,6 +76,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS exchange_rates (
                 id SERIAL PRIMARY KEY,
                 rate NUMERIC(24,8) NOT NULL,
+                rate_currency TEXT NOT NULL DEFAULT 'NEW.SYP',
                 updated_by BIGINT,
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -151,9 +155,14 @@ async def init_db():
             )
         """)
 
+        # Additive compatibility columns.
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method_code TEXT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
+        await conn.execute("ALTER TABLE exchange_rates ADD COLUMN IF NOT EXISTS rate_currency TEXT DEFAULT 'NEW.SYP'")
 
         # All financial values use exact PostgreSQL NUMERIC storage.
         await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
@@ -163,6 +172,25 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_amount TYPE NUMERIC(24,8) USING fee_amount::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(24,8) USING total_amount::NUMERIC")
         await conn.execute("ALTER TABLE exchange_rates ALTER COLUMN rate TYPE NUMERIC(24,8) USING rate::NUMERIC")
+
+        # One-time migration of the live exchange-rate table from the legacy
+        # SYP-per-USD convention to the canonical NEW.SYP-per-USD convention.
+        migrated = await conn.fetchval(
+            "SELECT value FROM bot_settings WHERE key = 'currency_migration_new_syp_v1'"
+        )
+        if migrated is None:
+            await conn.execute(
+                "UPDATE exchange_rates SET rate = rate / 100, rate_currency = 'NEW.SYP' "
+                "WHERE rate_currency IS NULL OR rate_currency <> 'NEW.SYP'"
+            )
+            # Existing payment methods labelled SYP are now NEW.SYP payment methods.
+            await conn.execute(
+                "UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() "
+                "WHERE currency = 'SYP'"
+            )
+            await conn.execute(
+                "INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v1', 'done')"
+            )
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
@@ -211,7 +239,7 @@ async def init_db():
                         (OLD.status = 'pending' AND NEW.status IN ('waiting_payment', 'rejected', 'expired')) OR
                         (OLD.status = 'waiting_payment' AND NEW.status IN ('receipt_received', 'expired')) OR
                         (OLD.status = 'receipt_received' AND NEW.status IN ('waiting_payment', 'payment_confirmed')) OR
-                        (OLD.status = 'payment_confirmed' AND NEW.status = 'completed')
+                        (OLD.status = 'payment_confirmed' AND NEW.status IN ('completed', 'expired'))
                     ) THEN
                         RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status
                             USING ERRCODE = 'P0001';
@@ -238,8 +266,8 @@ async def init_db():
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
             await conn.execute(
-                "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
-                "15000.00",
+                "INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)",
+                "150.00",
                 0,
             )
 
