@@ -31,7 +31,12 @@ class ExchangeService:
         self._cache_time = None
 
     async def get_current_rate(self) -> Optional[Decimal]:
-        """Get current USD/NEW.SYP rate as Decimal."""
+        """Get the current USD/NEW.SYP rate as Decimal.
+
+        Older development databases may still contain the legacy SYP-per-USD
+        value (for example 15000). Such values are normalized in memory to
+        NEW.SYP (150) so an upgrade cannot silently quote a 100x wrong amount.
+        """
         if self._cache_time and (datetime.now() - self._cache_time).total_seconds() < 3600:
             return self._cache.get("rate")
 
@@ -41,9 +46,14 @@ class ExchangeService:
             )
 
             if row:
-                self._cache["rate"] = to_decimal(row["rate"])
+                rate = to_decimal(row["rate"])
+                if rate > Decimal("1000"):
+                    rate = (rate / OLD_SYP_PER_NEW_SYP).quantize(
+                        RATE_QUANT, rounding=ROUND_HALF_UP
+                    )
+                self._cache["rate"] = rate
                 self._cache_time = datetime.now()
-                return self._cache["rate"]
+                return rate
 
             return Decimal("150.00")
 
@@ -56,7 +66,7 @@ class ExchangeService:
             value = value.quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
             async with self._db.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
+                    "INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)",
                     value,
                     admin_id,
                 )
@@ -82,6 +92,11 @@ class ExchangeService:
         during confirmation/payment. Changing the live rate later must not
         recalculate an existing quote.
         """
+        # SYP is retained only as a backward-compatible callback alias while
+        # the canonical payment currency is NEW.SYP.
+        if currency == "SYP":
+            currency = "NEW.SYP"
+
         amount = to_decimal(amount_usdt)
         if amount <= 0:
             raise ValueError("amount_usdt must be positive")
