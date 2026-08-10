@@ -1,0 +1,70 @@
+name: one-shot-order-transition-hardening
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.event.head_commit.message != 'security: route admin order transitions through atomic service'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Patch admin order transitions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('handlers/admin.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "from services.settings_service import SettingsService\nfrom database import get_pool\n"
+          new_import = "from services.settings_service import SettingsService\nfrom services.order_state_service import transition_order, InvalidOrderTransition\nfrom database import get_pool\n"
+          if old_import not in text:
+              raise SystemExit('admin import anchor not found')
+          text = text.replace(old_import, new_import, 1)
+
+          old_approve = '''        # Update order status\n        from datetime import datetime, timedelta\n        deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)\n\n        await conn.execute(\n            "UPDATE orders SET status = 'waiting_payment', approved_at = NOW(), payment_deadline = $1 WHERE id = $2",\n            deadline, order_id\n        )\n'''
+          new_approve = '''        # Transition atomically so stale/double-clicked admin actions cannot bypass the state machine.\n        from datetime import datetime, timedelta\n        deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)\n        try:\n            order = await transition_order(\n                conn,\n                order_id,\n                'waiting_payment',\n                admin_id=callback.from_user.id,\n                updates={\n                    'approved_at': datetime.now(),\n                    'payment_deadline': deadline,\n                },\n            )\n        except InvalidOrderTransition:\n            await callback.answer('⚠️ الطلب لم يعد في حالة قابلة للموافقة', show_alert=True)\n            return\n'''
+          if old_approve not in text:
+              raise SystemExit('approve transition anchor not found')
+          text = text.replace(old_approve, new_approve, 1)
+
+          old_reject = '''        await conn.execute(\n            "UPDATE orders SET status = 'rejected', wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $1",\n            order_id\n        )\n'''
+          new_reject = '''        try:\n            await transition_order(\n                conn,\n                order_id,\n                'rejected',\n                admin_id=callback.from_user.id,\n                updates={\n                    'wallet_qr_photo_id': None,\n                    'receipt_photo_id': None,\n                },\n            )\n        except InvalidOrderTransition:\n            await callback.answer('⚠️ الطلب لم يعد في حالة قابلة للرفض', show_alert=True)\n            return\n'''
+          if old_reject not in text:
+              raise SystemExit('reject transition anchor not found')
+          text = text.replace(old_reject, new_reject, 1)
+
+          path.write_text(text, encoding='utf-8')
+          print('Patched admin approve/reject transitions.')
+          PY
+
+      - name: Validate syntax and tests
+        run: |
+          python -m compileall -q handlers services tests
+          pytest -q
+
+      - name: Commit and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add handlers/admin.py .github/workflows/one-shot-order-transition-hardening.yml
+          git diff --cached --check
+          git commit -m "security: route admin order transitions through atomic service"
+          git push origin HEAD:main
