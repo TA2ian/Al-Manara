@@ -1,0 +1,70 @@
+name: Normalize NEW.SYP order flow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch order handler
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('handlers/order.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'from datetime import datetime, timedelta\n',
+                  'from datetime import datetime, timedelta\nfrom decimal import Decimal, InvalidOperation\n',
+              ),
+              (
+                  'amount = float(callback.data.replace("amount_preset_", ""))',
+                  'amount = Decimal(callback.data.replace("amount_preset_", ""))',
+              ),
+              (
+                  'amount = float(message.text.strip().replace(\',\', \'\'))',
+                  'amount_text = message.text.strip().replace(\',\', \'\')\n        amount = Decimal(amount_text)',
+              ),
+              (
+                  '    except ValueError:\n',
+                  '    except (InvalidOperation, ValueError):\n',
+              ),
+              (
+                  "    if currency == 'SYP':\n        new_syr_line = f\"🇸🇾 بما يعادل: <b>{calculation['new_syr_amount']:,.2f} ل.ج.س</b> (ليرة جديدة سورية)\\n\"\n        new_syr_fee_line = f\"🇸🇾 بما يعادل: <b>{calculation['new_syr_fee']:,.2f} ل.ج.س</b>\\n\"\n        new_syr_total_line = f\"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['new_syr_total']:,.2f} ل.ج.س</b>\\n\"",
+                  "    if currency == 'NEW.SYP':\n        new_syr_line = f\"🇸🇾 بما يعادل: <b>{calculation['base_amount']:,.2f} ل.ج.س</b> (ليرة سورية جديدة)\\n\"\n        new_syr_fee_line = f\"🇸🇾 رسوم الخدمة: <b>{calculation['fee_amount']:,.2f} ل.ج.س</b>\\n\"\n        new_syr_total_line = f\"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['total_amount']:,.2f} ل.ج.س</b>\\n\"",
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Missing expected source fragment: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate
+        run: |
+          python -m py_compile handlers/order.py
+          python -m unittest tests/test_exchange_service.py
+
+      - name: Commit and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/normalize-new-syp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add handlers/order.py .github/workflows/normalize-new-syp.yml
+          git commit -m "fix: complete NEW.SYP order input flow" || exit 0
+          git push
