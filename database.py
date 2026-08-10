@@ -151,7 +151,6 @@ async def init_db():
             )
         """)
 
-        # Additive compatibility migrations for databases created by older versions.
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
@@ -170,6 +169,37 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
+
+        # Atomic protection against two concurrent active orders for one user.
+        # Advisory locking makes the check serialize concurrent transactions while
+        # leaving historical duplicate active rows untouched until they are resolved.
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
+                   AND NEW.user_id IS NOT NULL THEN
+                    PERFORM pg_advisory_xact_lock(2147483000, NEW.user_id);
+                    IF EXISTS (
+                        SELECT 1 FROM orders
+                        WHERE user_id = NEW.user_id
+                          AND status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed')
+                          AND id <> COALESCE(NEW.id, -1)
+                    ) THEN
+                        RAISE EXCEPTION 'active order already exists for user %', NEW.user_id
+                            USING ERRCODE = '23514';
+                    END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        await conn.execute("DROP TRIGGER IF EXISTS trg_prevent_multiple_active_orders ON orders")
+        await conn.execute("""
+            CREATE TRIGGER trg_prevent_multiple_active_orders
+            BEFORE INSERT OR UPDATE OF user_id, status ON orders
+            FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()
+        """)
 
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
