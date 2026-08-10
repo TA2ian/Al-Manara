@@ -46,7 +46,7 @@ async def init_db():
                 order_number TEXT UNIQUE NOT NULL,
                 user_id INTEGER REFERENCES users(id),
                 network TEXT NOT NULL,
-                amount_usdt REAL NOT NULL,
+                amount_usdt NUMERIC(24,8) NOT NULL,
                 exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL,
                 base_amount NUMERIC(24,8) NOT NULL,
@@ -155,9 +155,8 @@ async def init_db():
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
 
-        # Financial values that participate in currency/fee arithmetic use exact NUMERIC.
-        # amount_usdt remains REAL temporarily for compatibility with legacy daily-limit code;
-        # ExchangeService converts incoming values to Decimal before financial calculations.
+        # All financial values use exact PostgreSQL NUMERIC storage.
+        await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
@@ -171,10 +170,7 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
 
-        # Atomic protection against two concurrent transitions into an active order.
-        # Historical duplicate active rows are not modified by this migration; they can
-        # still be closed by an admin because the trigger only checks on INSERT or
-        # transition from an inactive status to an active status.
+        # Prevent concurrent creation of multiple active orders for one user.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
             RETURNS TRIGGER AS $$
@@ -202,6 +198,41 @@ async def init_db():
             CREATE TRIGGER trg_prevent_multiple_active_orders
             BEFORE INSERT OR UPDATE OF user_id, status ON orders
             FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()
+        """)
+
+        # Enforce the order state machine at the database boundary so no handler,
+        # admin action, retry, or future integration can bypass it.
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION enforce_order_state_transition()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.status IS DISTINCT FROM OLD.status THEN
+                    IF NOT (
+                        (OLD.status = 'pending' AND NEW.status IN ('waiting_payment', 'rejected', 'expired')) OR
+                        (OLD.status = 'waiting_payment' AND NEW.status IN ('receipt_received', 'expired')) OR
+                        (OLD.status = 'receipt_received' AND NEW.status IN ('waiting_payment', 'payment_confirmed')) OR
+                        (OLD.status = 'payment_confirmed' AND NEW.status = 'completed')
+                    ) THEN
+                        RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status
+                            USING ERRCODE = 'P0001';
+                    END IF;
+
+                    INSERT INTO audit_logs
+                        (user_id, admin_id, action, details, previous_value, new_value, severity)
+                    VALUES
+                        (NEW.user_id, NULL, 'order_status_transition',
+                         'order_id=' || NEW.id,
+                         OLD.status, NEW.status, 'info');
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_order_state_transition ON orders")
+        await conn.execute("""
+            CREATE TRIGGER trg_enforce_order_state_transition
+            BEFORE UPDATE OF status ON orders
+            FOR EACH ROW EXECUTE FUNCTION enforce_order_state_transition()
         """)
 
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
