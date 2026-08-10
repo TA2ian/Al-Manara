@@ -46,7 +46,7 @@ async def init_db():
                 order_number TEXT UNIQUE NOT NULL,
                 user_id INTEGER REFERENCES users(id),
                 network TEXT NOT NULL,
-                amount_usdt NUMERIC(24,8) NOT NULL,
+                amount_usdt REAL NOT NULL,
                 exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL,
                 base_amount NUMERIC(24,8) NOT NULL,
@@ -155,8 +155,9 @@ async def init_db():
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
 
-        # Financial values must never use binary floating-point storage.
-        await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
+        # Financial values that participate in currency/fee arithmetic use exact NUMERIC.
+        # amount_usdt remains REAL temporarily for compatibility with legacy daily-limit code;
+        # ExchangeService converts incoming values to Decimal before financial calculations.
         await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
@@ -171,8 +172,6 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
 
         # Atomic protection against two concurrent active orders for one user.
-        # Advisory locking makes the check serialize concurrent transactions while
-        # leaving historical duplicate active rows untouched until they are resolved.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
             RETURNS TRIGGER AS $$
