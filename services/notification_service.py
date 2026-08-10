@@ -43,30 +43,74 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = 'ar'):
-        """Notify user that order is approved."""
+        """Notify user that order is approved, using the persistent DB payment method."""
         from services.locale_service import locale_service
         from config import Config
+        from database import get_pool
 
         amount = order['total_amount']
         currency = order['payment_currency']
+        account = Config.get_shamcash_syp() if currency == 'SYP' else Config.get_shamcash_usd()
+        name = Config.get_shamcash_name()
+        qr_photo_id = None
+
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                method = await conn.fetchrow(
+                    """SELECT display_name, account_identifier, qr_photo_id
+                       FROM payment_methods
+                       WHERE provider = 'ShamCash' AND currency = $1 AND enabled = TRUE
+                       ORDER BY id ASC LIMIT 1""",
+                    currency,
+                )
+            if method:
+                name = method['display_name'] or name
+                account = method['account_identifier'] or account
+                qr_photo_id = method['qr_photo_id']
+
         new_syr_line = ""
         if currency == 'SYP':
             new_syr_amount = amount / 100
-            note_key = 'syp_equivalent' if lang == 'en' else 'syp_equivalent'
-            new_syr_line = f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>" if lang == 'ar' else f"\n🇸🇾 Equivalent: <b>{new_syr_amount:,.2f} SYP</b>"
+            new_syr_line = (
+                f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>"
+                if lang == 'ar'
+                else f"\n🇸🇾 Equivalent: <b>{new_syr_amount:,.2f} SYP</b>"
+            )
 
         text = locale_service.get(
             'order_approved',
             lang,
             order_number=order['order_number'],
             timeout=Config.PAYMENT_TIMEOUT,
-            account=Config.get_shamcash_syp() if order['payment_currency'] == 'SYP' else Config.get_shamcash_usd(),
-            name=Config.get_shamcash_name(),
+            account=account,
+            name=name,
             amount=amount,
-            currency=currency
+            currency=currency,
         ) + new_syr_line
 
         await self.notify_user(user_id, text)
+
+        # The QR belongs to the payment account (ShamCash), not to the customer's wallet.
+        # It is persisted in payment_methods and is reused for every subsequent order.
+        if qr_photo_id:
+            caption = (
+                f"💳 <b>بيانات الدفع — {name}</b>\n"
+                f"العملة: <b>{currency}</b>\n"
+                f"الحساب: <code>{account}</code>\n\n"
+                f"📱 استخدم رمز QR أعلاه للدفع.\n"
+                f"📦 الطلب: <b>#{order['order_number']}</b>"
+            ) if lang == 'ar' else (
+                f"💳 <b>Payment details — {name}</b>\n"
+                f"Currency: <b>{currency}</b>\n"
+                f"Account: <code>{account}</code>\n\n"
+                f"📱 Use the QR code above to pay.\n"
+                f"📦 Order: <b>#{order['order_number']}</b>"
+            )
+            try:
+                await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"Failed to send payment QR for order {order['order_number']}: {e}")
 
     async def notify_feedback(self, user: dict, message: str):
         """Notify admins of new feedback."""
