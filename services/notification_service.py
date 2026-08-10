@@ -43,40 +43,38 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = 'ar'):
-        """Notify user that order is approved, using the persistent DB payment method."""
+        """Notify user using the payment snapshot stored on the order."""
         from services.locale_service import locale_service
         from config import Config
-        from database import get_pool
 
         amount = order['total_amount']
-        currency = order['payment_currency']
-        account = Config.get_shamcash_syp() if currency == 'SYP' else Config.get_shamcash_usd()
+        currency = 'NEW.SYP' if order['payment_currency'] == 'SYP' else order['payment_currency']
+        account = order.get('payment_account_snapshot') or (
+            Config.get_shamcash_syp() if currency == 'NEW.SYP' else Config.get_shamcash_usd()
+        )
         name = Config.get_shamcash_name()
-        qr_photo_id = None
+        qr_photo_id = order.get('payment_qr_photo_id')
 
-        pool = await get_pool()
-        if pool:
-            async with pool.acquire() as conn:
-                method = await conn.fetchrow(
-                    """SELECT display_name, account_identifier, qr_photo_id
-                       FROM payment_methods
-                       WHERE provider = 'ShamCash' AND currency = $1 AND enabled = TRUE
-                       ORDER BY id ASC LIMIT 1""",
-                    currency,
-                )
-            if method:
-                name = method['display_name'] or name
-                account = method['account_identifier'] or account
-                qr_photo_id = method['qr_photo_id']
-
-        new_syr_line = ""
-        if currency == 'SYP':
-            new_syr_amount = amount / 100
-            new_syr_line = (
-                f"\n🇸🇾 بما يعادل: <b>{new_syr_amount:,.2f} ل.ج.س</b>"
-                if lang == 'ar'
-                else f"\n🇸🇾 Equivalent: <b>{new_syr_amount:,.2f} SYP</b>"
-            )
+        # The payment method is snapshotted on the order. This prevents a later
+        # admin change from altering the payment instructions of an existing order.
+        payment_method_code = order.get('payment_method_code')
+        if not account or not qr_photo_id:
+            # Compatibility fallback for orders created before snapshots existed.
+            from database import get_pool
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    method = await conn.fetchrow(
+                        """SELECT display_name, account_identifier, qr_photo_id
+                           FROM payment_methods
+                           WHERE provider = 'ShamCash' AND currency = $1 AND enabled = TRUE
+                           ORDER BY id ASC LIMIT 1""",
+                        currency,
+                    )
+                if method:
+                    name = method['display_name'] or name
+                    account = method['account_identifier'] or account
+                    qr_photo_id = method['qr_photo_id'] or qr_photo_id
 
         text = locale_service.get(
             'order_approved',
@@ -87,12 +85,24 @@ class NotificationService:
             name=name,
             amount=amount,
             currency=currency,
-        ) + new_syr_line
+        )
 
         await self.notify_user(user_id, text)
 
+        # Legacy SYP is display-only. NEW.SYP is the actual payment currency.
+        if currency == 'NEW.SYP':
+            old_syp_amount = order.get('old_syp_total')
+            if old_syp_amount is None:
+                from services.exchange_service import ExchangeService
+                old_syp_amount = ExchangeService.old_syp_equivalent(amount)
+            equivalent_line = (
+                f"\nℹ️ يعادل <b>{old_syp_amount:,.2f}</b> ليرة سورية قديمة"
+                if lang == 'ar'
+                else f"\nℹ️ Equivalent to <b>{old_syp_amount:,.2f}</b> legacy Syrian pounds"
+            )
+            await self.notify_user(user_id, equivalent_line)
+
         # The QR belongs to the payment account (ShamCash), not to the customer's wallet.
-        # It is persisted in payment_methods and is reused for every subsequent order.
         if qr_photo_id:
             caption = (
                 f"💳 <b>بيانات الدفع — {name}</b>\n"
