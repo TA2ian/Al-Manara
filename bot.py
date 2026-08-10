@@ -13,6 +13,7 @@ def create_dispatcher() -> Dispatcher:
         feedback,
         admin_entry,
         admin,
+        payment_methods,
         verification,
         menu,
     )
@@ -39,6 +40,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin_entry.router)
+    dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     dp.include_router(verification.router)
     dp.include_router(menu.router)
