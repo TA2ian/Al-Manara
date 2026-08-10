@@ -6,7 +6,7 @@ to upload the same QR again.
 """
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from database import get_pool
 from states import OrderStates
@@ -92,26 +92,24 @@ async def use_saved_wallet(callback: CallbackQuery, state: FSMContext):
     else:
         # Preserve the legacy first-time QR prompt for wallets created before
         # persistent QR support was added.
-        await callback.message.answer(
-            (
-                "📸 <b>أرسل رمز QR لهذه المحفظة</b>\n\n"
-                "سيتم حفظه مع العنوان لاستخدامه تلقائياً في الطلبات القادمة."
-            )
+        qr_prompt = (
+            "📸 <b>أرسل رمز QR لهذه المحفظة</b>\n\n"
+            "سيتم حفظه مع العنوان لاستخدامه تلقائياً في الطلبات القادمة."
             if lang == "ar"
             else (
                 "📸 <b>Send a QR code for this wallet</b>\n\n"
                 "It will be saved with the address and reused automatically later."
             )
         )
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         await callback.message.answer(
-            "",
+            qr_prompt,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="⏭️ تخطي" if lang == "ar" else "⏭️ Skip",
                     callback_data="skip_wallet_qr",
                 )]
             ]),
+            parse_mode="HTML",
         )
         await state.set_state(OrderStates.waiting_wallet_qr)
 
@@ -137,7 +135,6 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Avoid creating an identical saved wallet repeatedly.
         existing = await conn.fetchrow(
             """
             SELECT id FROM saved_addresses
