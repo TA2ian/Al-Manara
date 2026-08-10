@@ -4,7 +4,7 @@ from aiogram.types import Message
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard
+from handlers.payment_methods import enhanced_admin_menu_keyboard
 
 router = Router()
 
@@ -39,4 +39,4 @@ async def open_admin_from_settings(message: Message):
             "You can now open the panel from ⚙️ without typing /admin."
         )
 
-    await message.answer(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await message.answer(text, reply_markup=enhanced_admin_menu_keyboard(), parse_mode="HTML")
