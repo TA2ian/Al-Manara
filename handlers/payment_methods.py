@@ -2,11 +2,11 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import Config
 from database import get_pool
-from keyboards.inline import payment_methods_keyboard, payment_method_actions
+from keyboards.inline import payment_methods_keyboard, payment_method_actions, admin_menu_keyboard
 
 router = Router()
 
@@ -24,6 +24,13 @@ CURRENCY_META = {
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
+
+
+def enhanced_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    """Existing admin menu plus the persistent payment-method shortcut."""
+    rows = [list(row) for row in admin_menu_keyboard().inline_keyboard]
+    rows.insert(3, [InlineKeyboardButton(text="💳 وسائل الدفع", callback_data="admin_payment_methods")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def ensure_default_methods(conn):
@@ -45,6 +52,20 @@ async def payment_methods_command(message: Message):
         await message.answer("⛔ Access denied")
         return
     await _show_payment_methods(message)
+
+
+@router.callback_query(F.data == "admin_menu")
+async def enhanced_admin_menu(callback: CallbackQuery):
+    """Return to the admin dashboard with the payment-method shortcut visible."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
+        reply_markup=enhanced_admin_menu_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_payment_methods")
