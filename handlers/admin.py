@@ -1091,6 +1091,8 @@ async def admin_update_rate_save(message: Message, state: FSMContext):
         )
 
     await message.answer(f"✅ تم تحديث سعر الصرف: 1 USDT = {new_rate:,.0f} SYP")
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1220,6 +1222,8 @@ async def admin_set_fee_percent(message: Message, state: FSMContext):
                          f"⚠️ ملاحظة: هذا التغيير مؤقت. غيّر SERVICE_FEE_PERCENT في المتغيرات البيئية للتبيت.")
     # We'll update Config at runtime (instance variable)
     Config.SERVICE_FEE_PERCENT = pct
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1240,6 +1244,8 @@ async def admin_set_fee_fixed(message: Message, state: FSMContext):
     Config.SERVICE_FEE_FIXED = fixed
     await message.answer(f"✅ تم تعيين الرسوم الثابتة: {fixed}\n"
                          f"⚠️ هذا التغيير مؤقت.")
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1270,6 +1276,8 @@ async def admin_set_shamcash_usd(message: Message, state: FSMContext):
     Config.set_shamcash_usd(account)
     await SettingsService.set('shamcash_usd', account)
     await message.answer(f"✅ تم تحديث حساب شام كاش USD:\n<code>{account}</code>", parse_mode='HTML')
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1300,6 +1308,8 @@ async def admin_set_shamcash_syp(message: Message, state: FSMContext):
     Config.set_shamcash_syp(account)
     await SettingsService.set('shamcash_syp', account)
     await message.answer(f"✅ تم تحديث حساب شام كاش SYP:\n<code>{account}</code>", parse_mode='HTML')
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1330,6 +1340,8 @@ async def admin_set_shamcash_name(message: Message, state: FSMContext):
     Config.set_shamcash_name(name)
     await SettingsService.set('shamcash_name', name)
     await message.answer(f"✅ تم تحديث اسم حساب شام كاش:\n{name}")
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1364,6 +1376,8 @@ async def admin_set_timeout(message: Message, state: FSMContext):
         return
     Config.PAYMENT_TIMEOUT = timeout
     await message.answer(f"✅ تم تحديث مهلة الدفع: {timeout} دقيقة\n⚠️ هذا التغيير مؤقت.")
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
@@ -1420,6 +1434,8 @@ async def admin_set_max_order(message: Message, state: FSMContext):
         return
     Config.MAX_ORDER = val
     await message.answer(f"✅ تم تعيين الحد الأقصى: {val} USDT\n⚠️ هذا التغيير مؤقت.")
+    from keyboards.inline import admin_menu_keyboard
+    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode='HTML')
     await state.clear()
 
 
