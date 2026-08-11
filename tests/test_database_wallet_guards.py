@@ -1,7 +1,7 @@
 """Integration tests for the PostgreSQL wallet/order security boundary.
 
 These tests are intentionally skipped unless TEST_DATABASE_URL is configured.
-The CI environment can enable them with a disposable PostgreSQL service.
+The CI environment enables them with a disposable PostgreSQL service.
 """
 import os
 import unittest
@@ -9,14 +9,16 @@ import unittest
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not configured")
 class DatabaseWalletGuardTests(unittest.IsolatedAsyncioTestCase):
+    SCHEMA = "almanara_guard_test"
+
     async def asyncSetUp(self):
         import asyncpg
 
         self.pool = await asyncpg.create_pool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2)
         async with self.pool.acquire() as conn:
-            await conn.execute("DROP SCHEMA IF EXISTS almanara_guard_test CASCADE")
-            await conn.execute("CREATE SCHEMA almanara_guard_test")
-            await conn.execute("SET search_path TO almanara_guard_test")
+            await conn.execute(f"DROP SCHEMA IF EXISTS {self.SCHEMA} CASCADE")
+            await conn.execute(f"CREATE SCHEMA {self.SCHEMA}")
+            await conn.execute(f"SET search_path TO {self.SCHEMA}")
             await conn.execute("""
                 CREATE TABLE users (
                     id SERIAL PRIMARY KEY,
@@ -99,34 +101,43 @@ class DatabaseWalletGuardTests(unittest.IsolatedAsyncioTestCase):
                 VALUES (1,'0xGOOD','BEP20','qr-good','verified')""")
 
     async def asyncTearDown(self):
-        async with self.pool.acquire() as conn:
-            await conn.execute("DROP SCHEMA IF EXISTS almanara_guard_test CASCADE")
         await self.pool.close()
+        import asyncpg
+        conn = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+        try:
+            await conn.execute(f"DROP SCHEMA IF EXISTS {self.SCHEMA} CASCADE")
+        finally:
+            await conn.close()
+
+    async def _execute(self, sql, *args):
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {self.SCHEMA}")
+            return await conn.execute(sql, *args)
 
     async def _insert_order(self, **kwargs):
         defaults = dict(user_id=1, wallet_address="0xGOOD", network="BEP20", wallet_qr_photo_id="qr-good")
         defaults.update(kwargs)
-        async with self.pool.acquire() as conn:
-            await conn.execute("""INSERT INTO orders
+        await self._execute(
+            """INSERT INTO orders
                 (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES ($1,$2,$3,$4)""", defaults["user_id"], defaults["wallet_address"], defaults["network"], defaults["wallet_qr_photo_id"])
+                VALUES ($1,$2,$3,$4)""",
+            defaults["user_id"], defaults["wallet_address"], defaults["network"], defaults["wallet_qr_photo_id"]
+        )
 
     async def test_verified_wallet_with_matching_qr_is_accepted(self):
         await self._insert_order()
 
     async def test_pending_wallet_is_rejected(self):
-        async with self.pool.acquire() as conn:
-            await conn.execute("""INSERT INTO saved_addresses
-                (user_id,address,network,qr_photo_id,verification_status)
-                VALUES (1,'0xPENDING','BEP20','qr-pending','pending')""")
+        await self._execute("""INSERT INTO saved_addresses
+            (user_id,address,network,qr_photo_id,verification_status)
+            VALUES (1,'0xPENDING','BEP20','qr-pending','pending')""")
         with self.assertRaises(Exception):
             await self._insert_order(wallet_address="0xPENDING", wallet_qr_photo_id="qr-pending")
 
     async def test_missing_qr_is_rejected(self):
-        async with self.pool.acquire() as conn:
-            await conn.execute("""INSERT INTO saved_addresses
-                (user_id,address,network,qr_photo_id,verification_status)
-                VALUES (1,'0xNOQR','TRC20',NULL,'verified')""")
+        await self._execute("""INSERT INTO saved_addresses
+            (user_id,address,network,qr_photo_id,verification_status)
+            VALUES (1,'0xNOQR','TRC20',NULL,'verified')""")
         with self.assertRaises(Exception):
             await self._insert_order(wallet_address="0xNOQR", network="TRC20", wallet_qr_photo_id=None)
 
@@ -140,26 +151,21 @@ class DatabaseWalletGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verified_wallet_cannot_be_modified(self):
         with self.assertRaises(Exception):
-            async with self.pool.acquire() as conn:
-                await conn.execute("UPDATE saved_addresses SET address='0xCHANGED' WHERE id=1")
+            await self._execute("UPDATE saved_addresses SET address='0xCHANGED' WHERE id=1")
 
     async def test_verified_wallet_qr_cannot_be_modified(self):
         with self.assertRaises(Exception):
-            async with self.pool.acquire() as conn:
-                await conn.execute("UPDATE saved_addresses SET qr_photo_id='qr-changed' WHERE id=1")
+            await self._execute("UPDATE saved_addresses SET qr_photo_id='qr-changed' WHERE id=1")
 
     async def test_verified_wallet_cannot_be_deleted_while_order_is_active(self):
         await self._insert_order()
         with self.assertRaises(Exception):
-            async with self.pool.acquire() as conn:
-                await conn.execute("DELETE FROM saved_addresses WHERE id=1")
+            await self._execute("DELETE FROM saved_addresses WHERE id=1")
 
     async def test_verified_wallet_can_be_deleted_when_not_linked_to_active_order(self):
-        async with self.pool.acquire() as conn:
-            await conn.execute("DELETE FROM saved_addresses WHERE id=1")
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id FROM saved_addresses WHERE id=1")
-        self.assertIsNone(row)
+        await self._execute("DELETE FROM saved_addresses WHERE id=1")
+        row = await self._execute("SELECT id FROM saved_addresses WHERE id=1")
+        self.assertEqual(row, "SELECT 0")
 
 
 if __name__ == "__main__":
