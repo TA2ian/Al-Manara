@@ -8,6 +8,7 @@ def create_dispatcher() -> Dispatcher:
         start,
         saved_wallets,
         wallets,
+        order_wallet_policy,
         order,
         profile,
         my_orders,
@@ -32,6 +33,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(start.router)
     dp.include_router(saved_wallets.router)
     dp.include_router(wallets.router)
+    # Must run before the legacy order wallet handlers so a wallet QR is
+    # collected once during registration and reused for future orders.
+    dp.include_router(order_wallet_policy.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
     dp.include_router(my_orders.router)
