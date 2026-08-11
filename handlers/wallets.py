@@ -39,12 +39,12 @@ async def show_wallets(callback: CallbackQuery, state: FSMContext):
         rows = await conn.fetch("""
             SELECT id, address, network, label, is_default, verification_status
             FROM saved_addresses
-            WHERE user_id = $1 AND deleted_at IS NULL
+            WHERE user_id = $1 AND deleted_at IS NULL AND verification_status = 'verified'
             ORDER BY network, is_default DESC, created_at DESC
         """, user["id"])
 
     if not rows:
-        text = "👛 <b>محافظي</b>\n\nلا توجد عناوين محفوظة بعد." if lang == "ar" else "👛 <b>My Wallets</b>\n\nNo saved addresses yet."
+        text = "👛 <b>محافظي</b>\n\nلا توجد عناوين موثقة بعد." if lang == "ar" else "👛 <b>My Wallets</b>\n\nNo verified addresses yet."
         await callback.message.edit_text(text, reply_markup=_menu(lang), parse_mode="HTML")
         await callback.answer()
         return
@@ -54,9 +54,8 @@ async def show_wallets(callback: CallbackQuery, state: FSMContext):
     for row in rows:
         label = row["label"] or ("بدون اسم" if lang == "ar" else "Unnamed")
         icon = "🟡" if row["network"] == "BEP20" else "🔷"
-        status = "🟢 موثق" if row["verification_status"] == "verified" else "🟡 يحتاج إعادة تحقق"
         star = " ⭐" if row["is_default"] else ""
-        lines.append(f"{icon} <b>{label}</b>{star}\n{row['network']} · <code>{row['address']}</code>\n{status}\n")
+        lines.append(f"{icon} <b>{label}</b>{star}\n{row['network']} · <code>{row['address']}</code>\n🟢 موثق\n")
         buttons.append([InlineKeyboardButton(text=f"🗑 حذف {label}", callback_data=f"wallet_delete_{row['id']}")])
     buttons.extend(_menu(lang).inline_keyboard)
     await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
@@ -95,7 +94,7 @@ async def wallet_qr(message: Message, state: FSMContext):
     user = await _user(message.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
     data = await state.get_data()
-    address, network = data["wallet_address"], data["network"]
+    address = data["wallet_address"]
     raw = io.BytesIO()
     await message.bot.download(file=message.photo[-1].file_id, destination=raw)
     raw.seek(0)
@@ -143,8 +142,7 @@ async def wallet_label(message: Message, state: FSMContext):
             await message.answer("❌ هذا العنوان موجود بالفعل. لا يمكن تعديله؛ احذف العنوان الحالي ثم أضفه من جديد." if lang == "ar" else "❌ This address already exists. It cannot be edited; delete it first and add it again.")
             return
         await conn.execute("""
-            INSERT INTO saved_addresses
-                (user_id, address, network, label, qr_photo_id, is_default, verification_status, verified_at)
+            INSERT INTO saved_addresses (user_id, address, network, label, qr_photo_id, is_default, verification_status, verified_at)
             VALUES ($1,$2,$3,$4,$5,FALSE,'verified',NOW())
         """, user["id"], data["wallet_address"], data["network"], label, data["wallet_qr_photo_id"])
     await state.clear()
@@ -165,7 +163,7 @@ async def wallet_delete(callback: CallbackQuery):
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT id,address,network,label FROM saved_addresses WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL", wallet_id, user["id"])
+        row = await conn.fetchrow("SELECT id,address,network,label FROM saved_addresses WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND verification_status='verified'", wallet_id, user["id"])
         if not row:
             await callback.answer("❌ العنوان غير موجود", show_alert=True)
             return
@@ -176,13 +174,7 @@ async def wallet_delete(callback: CallbackQuery):
             return
         await conn.execute("DELETE FROM saved_addresses WHERE id=$1 AND user_id=$2", wallet_id, user["id"])
     await callback.answer("تم حذف العنوان" if lang == "ar" else "Address deleted")
-    await show_wallets(callback, await _dummy_state(callback))
-
-
-async def _dummy_state(callback):
-    class DummyState:
-        async def clear(self): pass
-    return DummyState()
+    await callback.message.edit_text("👛 <b>محافظي</b>\n\nتم حذف العنوان. استخدم إضافة عنوان جديد لإضافة بديل." if lang == "ar" else "👛 <b>My Wallets</b>\n\nAddress deleted. Use Add new address to add a replacement.", reply_markup=_menu(lang), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "wallet_back")
