@@ -2,6 +2,7 @@
 import asyncpg
 import logging
 from config import Config
+from database_wallet_guards import install_order_wallet_guard
 
 logger = logging.getLogger(__name__)
 _pool = None
@@ -198,6 +199,8 @@ async def init_db():
         await conn.execute("""CREATE TRIGGER trg_prevent_multiple_active_orders
             BEFORE INSERT OR UPDATE OF user_id, status ON orders
             FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()""")
+
+        await install_order_wallet_guard(conn)
 
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_order_state_transition()
