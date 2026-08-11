@@ -7,6 +7,7 @@ def create_dispatcher() -> Dispatcher:
     from handlers import (
         start,
         saved_wallets,
+        wallets,
         order,
         profile,
         my_orders,
@@ -22,19 +23,15 @@ def create_dispatcher() -> Dispatcher:
     from middleware.ownership import OwnershipMiddleware
 
     dp = Dispatcher()
-
-    # Register middlewares. Ownership runs before user-facing callbacks so
-    # resource IDs cannot be used to access another customer's data.
     dp.message.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(OwnershipMiddleware())
 
-    # Register routers. Specialized entry points must run before broad legacy
-    # handlers that use the same callback/message filters.
     dp.include_router(start.router)
     dp.include_router(saved_wallets.router)
+    dp.include_router(wallets.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
     dp.include_router(my_orders.router)
