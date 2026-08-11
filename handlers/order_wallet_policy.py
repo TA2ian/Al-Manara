@@ -152,6 +152,62 @@ async def redirect_manual_wallet_message_to_registry(message: Message, state: FS
     )
 
 
+@router.message(WalletStates.waiting_label)
+async def finish_wallet_registration_for_order(message: Message, state: FSMContext):
+    """Persist the label and, when registration started from an order, resume it."""
+    data = await state.get_data()
+    if not data.get("return_to_order"):
+        return
+
+    user_id = None
+    lang = await _lang(message.from_user.id)
+    label = (message.text or "").strip()[:64]
+    if not label:
+        await message.answer("❌ الاسم مطلوب." if lang == "ar" else "❌ A label is required.")
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id FROM users WHERE telegram_id = $1", message.from_user.id)
+        if not user:
+            await message.answer("❌ المستخدم غير موجود." if lang == "ar" else "❌ User not found.")
+            return
+        user_id = user["id"]
+        existing = await conn.fetchrow(
+            """SELECT id FROM saved_addresses
+               WHERE user_id=$1 AND address=$2 AND network=$3 AND deleted_at IS NULL""",
+            user_id, data["wallet_address"], data["network"]
+        )
+        if existing:
+            await message.answer(
+                "❌ هذا العنوان موجود بالفعل. استخدم المحفظة المحفوظة من الطلبات القادمة."
+                if lang == "ar" else
+                "❌ This wallet already exists. Use the saved wallet for future orders."
+            )
+            return
+        row = await conn.fetchrow(
+            """INSERT INTO saved_addresses
+                (user_id, address, network, label, qr_photo_id, is_default, verification_status, verified_at)
+               VALUES ($1,$2,$3,$4,$5,FALSE,'verified',NOW())
+               RETURNING id, address, network, qr_photo_id""",
+            user_id, data["wallet_address"], data["network"], label, data["wallet_qr_photo_id"]
+        )
+
+    await state.update_data(
+        wallet_address=row["address"],
+        network=row["network"],
+        wallet_qr_photo_id=row["qr_photo_id"],
+        wallet_id=row["id"],
+        address_from_saved=True,
+    )
+    await message.answer(
+        "✅ تم حفظ المحفظة وQR وتوثيقهما. سيتم استخدامهما تلقائياً في الطلبات القادمة."
+        if lang == "ar" else
+        "✅ The wallet and QR were saved and verified. They will be reused automatically for future orders."
+    )
+    await _continue_to_currency(message, state, lang)
+
+
 @router.callback_query(F.data == "save_address_skip")
 async def block_legacy_wallet_skip(callback: CallbackQuery, state: FSMContext):
     """Legacy safety net: a wallet cannot be saved without its QR."""
