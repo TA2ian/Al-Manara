@@ -114,6 +114,11 @@ class DatabaseWalletGuardTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute(f"SET search_path TO {self.SCHEMA}")
             return await conn.execute(sql, *args)
 
+    async def _fetchval(self, sql, *args):
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {self.SCHEMA}")
+            return await conn.fetchval(sql, *args)
+
     async def _insert_order(self, **kwargs):
         defaults = dict(user_id=1, wallet_address="0xGOOD", network="BEP20", wallet_qr_photo_id="qr-good")
         defaults.update(kwargs)
@@ -164,8 +169,8 @@ class DatabaseWalletGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verified_wallet_can_be_deleted_when_not_linked_to_active_order(self):
         await self._execute("DELETE FROM saved_addresses WHERE id=1")
-        row = await self._execute("SELECT id FROM saved_addresses WHERE id=1")
-        self.assertEqual(row, "SELECT 0")
+        remaining = await self._fetchval("SELECT COUNT(*) FROM saved_addresses WHERE id=1")
+        self.assertEqual(remaining, 0)
 
 
 if __name__ == "__main__":
