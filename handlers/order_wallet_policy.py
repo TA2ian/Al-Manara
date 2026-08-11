@@ -153,15 +153,41 @@ async def redirect_manual_wallet_message_to_registry(message: Message, state: FS
 
 
 @router.callback_query(F.data == "save_address_skip")
+@router.callback_query(F.data == "skip_wallet_qr")
 async def block_legacy_wallet_skip(callback: CallbackQuery, state: FSMContext):
-    """Legacy safety net: a wallet cannot be saved without its QR."""
+    """Legacy safety net: per-order QR upload/skip is no longer supported."""
     lang = await _lang(callback.from_user.id)
     await state.update_data(return_to_order=True)
     await state.set_state(WalletStates.waiting_address)
     await callback.message.edit_text(
-        "❌ لا يمكن تخطي QR. أضف المحفظة من محافظي مع QR مطابق وسيتم حفظه للطلبات القادمة."
+        "❌ لا يمكن تخطي أو إرفاق QR داخل الطلب. سجّل المحفظة مرة واحدة مع QR مطابق؛ سيُحفظ ويُستخدم تلقائياً في الطلبات القادمة."
         if lang == "ar" else
-        "❌ QR cannot be skipped. Add the wallet from My Wallets with a matching QR; it will be stored for future orders.",
+        "❌ Wallet QR cannot be skipped or uploaded inside an order. Register the wallet once with a matching QR; it will be stored and reused automatically.",
         reply_markup=_wallet_registration_keyboard(lang),
     )
     await callback.answer()
+
+
+@router.message(OrderStates.waiting_wallet_qr, F.photo)
+async def block_legacy_wallet_qr_upload(message: Message, state: FSMContext):
+    """Prevent stale FSM sessions from accepting a QR per order."""
+    lang = await _lang(message.from_user.id)
+    await state.update_data(return_to_order=True)
+    await state.set_state(WalletStates.waiting_address)
+    await message.answer(
+        "❌ هذا الطلب لا يقبل QR منفصلاً. أضف/وثّق المحفظة مرة واحدة من محافظي؛ سيتم حفظ QR وإعادة استخدامه تلقائياً."
+        if lang == "ar" else
+        "❌ This order does not accept a separate QR. Register/verify the wallet once from My Wallets; its QR will be stored and reused automatically.",
+        reply_markup=_wallet_registration_keyboard(lang),
+    )
+
+
+@router.message(OrderStates.waiting_wallet_qr)
+async def block_legacy_wallet_qr_message(message: Message):
+    """Prevent stale FSM sessions from falling through to legacy QR handlers."""
+    lang = await _lang(message.from_user.id)
+    await message.answer(
+        "❌ لا يتم رفع QR مع كل طلب. استخدم محفظة موثقة محفوظة أو أضف محفظة جديدة مرة واحدة."
+        if lang == "ar" else
+        "❌ QR is not uploaded with every order. Use a saved verified wallet or register a new wallet once."
+    )
