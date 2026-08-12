@@ -87,6 +87,15 @@ class OrderCustomerGateTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await self._insert_order()
 
+    async def test_wallet_qr_survives_payment_confirmation_cleanup(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE users SET is_verified=TRUE, phone_verified=TRUE, phone_number='+10000000000', terms_accepted=TRUE WHERE id=1")
+        await self._insert_order()
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE orders SET status='payment_confirmed', wallet_qr_photo_id=NULL WHERE id=1")
+            qr = await conn.fetchval("SELECT wallet_qr_photo_id FROM orders WHERE id=1")
+        self.assertEqual(qr, "walletqr")
+
 
 if __name__ == '__main__':
     unittest.main()
