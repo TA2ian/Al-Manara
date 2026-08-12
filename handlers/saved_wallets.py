@@ -6,10 +6,11 @@ that could bypass the verified-wallet policy.
 """
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery
 
 from database import get_pool
 from states import OrderStates
+from keyboards.inline import currency_selection_keyboard
 from services.locale_service import locale_service
 
 router = Router()
@@ -36,11 +37,10 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
     address = data.get("wallet_address", "").strip()
     network = data.get("network", "").strip()
     qr_photo_id = data.get("wallet_qr_photo_id")
+    lang = user["language"] or "ar"
 
-    # New policy: a wallet cannot become a reusable saved wallet without a
-    # matching QR. The registry is the authoritative source for verification.
+    # New policy: a wallet cannot become reusable without a matching QR.
     if not address or network not in {"TRC20", "BEP20"} or not qr_photo_id:
-        lang = user["language"] or "ar"
         await callback.answer(
             "❌ يجب توثيق المحفظة عبر العنوان وQR المطابق من محافظي."
             if lang == "ar" else
@@ -58,17 +58,13 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
               AND deleted_at IS NULL
             ORDER BY id DESC LIMIT 1
             """,
-            user["id"],
-            address,
-            network,
+            user["id"], address, network,
         )
 
         if existing:
-            # Do not downgrade or overwrite verification state here. The
-            # dedicated wallet registry owns verified wallet records.
             await callback.answer(
                 "❌ المحفظة موجودة بالفعل. استخدم المحفظة الموثقة من محافظي."
-                if (user["language"] or "ar") == "ar" else
+                if lang == "ar" else
                 "❌ This wallet already exists. Use the verified wallet from My Wallets.",
                 show_alert=True,
             )
@@ -81,21 +77,15 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
                  verification_status, verified_at)
             VALUES ($1, $2, $3, $4, FALSE, 'verified', NOW())
             """,
-            user["id"],
-            address,
-            network,
-            qr_photo_id,
+            user["id"], address, network, qr_photo_id,
         )
 
-    lang = user["language"] or "ar"
     await callback.message.edit_text(
         (
             "💾 <b>تم حفظ المحفظة بنجاح</b>\n\n"
             f"🌐 الشبكة: {network}\n"
             "📸 QR: تم حفظه ✓"
-        )
-        if lang == "ar"
-        else (
+        ) if lang == "ar" else (
             "💾 <b>Wallet saved successfully</b>\n\n"
             f"🌐 Network: {network}\n"
             "📸 QR: Saved ✓"
@@ -103,10 +93,10 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
 
-    # Resume at currency selection. The stored wallet/QR remain in FSM data.
+    # Resume at currency selection; the verified wallet/QR remain in FSM data.
     await callback.message.answer(
         locale_service.get("select_currency", lang),
-        reply_markup=__import__("keyboards.inline", fromlist=["currency_selection_keyboard"]).currency_selection_keyboard(lang),
+        reply_markup=currency_selection_keyboard(lang),
     )
     await state.set_state(OrderStates.waiting_currency)
     await callback.answer()
