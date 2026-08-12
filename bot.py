@@ -14,6 +14,7 @@ def create_dispatcher() -> Dispatcher:
         my_orders,
         feedback,
         admin_entry,
+        verification_admin_policy,
         admin,
         payment_methods,
         verification,
@@ -41,6 +42,8 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin_entry.router)
+    # Authoritative KYC approval/rejection must run before legacy admin handlers.
+    dp.include_router(verification_admin_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     dp.include_router(verification.router)
