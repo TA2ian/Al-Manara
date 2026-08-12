@@ -7,6 +7,7 @@ class TermsStates(StatesGroup):
 
 
 class VerificationStates(StatesGroup):
+    waiting_phone = State()
     waiting_full_name = State()
     waiting_shamcash_account = State()
     waiting_shamcash_qr = State()
