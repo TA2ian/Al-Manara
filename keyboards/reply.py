@@ -28,3 +28,14 @@ def compact_reply_keyboard(lang: str = 'ar') -> ReplyKeyboardMarkup:
             resize_keyboard=True,
             is_persistent=True
         )
+
+
+def phone_share_keyboard(lang: str = 'ar') -> ReplyKeyboardMarkup:
+    """One-time mandatory Telegram contact sharing keyboard."""
+    text = "📱 مشاركة رقم الهاتف" if lang == 'ar' else "📱 Share phone number"
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=text, request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="اضغط لمشاركة رقم الهاتف" if lang == 'ar' else "Tap to share your phone",
+    )
