@@ -9,9 +9,9 @@ async def install_order_wallet_guard(conn):
         DECLARE wallet_row RECORD; customer_row RECORD;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                -- Legacy completion code may attempt to clear the QR after it has
+                -- Legacy payment/completion code may clear the QR after it has
                 -- been sent to the admin. Preserve the historical snapshot.
-                IF NEW.status = 'completed'
+                IF NEW.status IN ('payment_confirmed', 'completed')
                    AND OLD.wallet_qr_photo_id IS NOT NULL
                    AND NEW.wallet_qr_photo_id IS NULL
                    AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id
