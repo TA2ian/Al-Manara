@@ -4,7 +4,6 @@ Telegram username is mutable and is never required for identity or approval.
 The stable identity is telegram_id; phone ownership, ShamCash account data,
 and the submitted ShamCash QR are the review requirements.
 """
-import html
 import logging
 
 from aiogram import Router, F, Bot
@@ -12,7 +11,7 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard
+from keyboards.inline import main_menu_inline
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -50,10 +49,7 @@ async def approve_verification(callback: CallbackQuery):
             await callback.answer("⚠️ طلب التوثيق ليس في حالة انتظار", show_alert=True)
             return
 
-        await conn.execute(
-            "UPDATE users SET is_verified=TRUE, verification_status='approved' WHERE telegram_id=$1",
-            telegram_id,
-        )
+        await conn.execute("UPDATE users SET is_verified=TRUE, verification_status='approved' WHERE telegram_id=$1", telegram_id)
         await conn.execute(
             """INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
                VALUES ($1,$2,'verification_approved',$3,'info')""",
@@ -70,7 +66,7 @@ async def approve_verification(callback: CallbackQuery):
             if lang == "ar" else
             "🎉 <b>Your account has been verified!</b>\n\nYou can now create USDT purchase orders.",
             parse_mode="HTML",
-            reply_markup=admin_menu_keyboard(),
+            reply_markup=main_menu_inline(lang),
         )
     except Exception as exc:
         logger.error("Failed to notify verified user %s: %s", telegram_id, exc)
@@ -92,17 +88,11 @@ async def reject_verification(callback: CallbackQuery):
     telegram_id = int(callback.data.replace("verify_reject_", ""))
     pool = await get_pool()
     async with pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT id, language, verification_status FROM users WHERE telegram_id=$1",
-            telegram_id,
-        )
+        user = await conn.fetchrow("SELECT id, language, verification_status FROM users WHERE telegram_id=$1", telegram_id)
         if not user:
             await callback.answer("المستخدم غير موجود", show_alert=True)
             return
-        await conn.execute(
-            "UPDATE users SET is_verified=FALSE, verification_status='rejected' WHERE telegram_id=$1",
-            telegram_id,
-        )
+        await conn.execute("UPDATE users SET is_verified=FALSE, verification_status='rejected' WHERE telegram_id=$1", telegram_id)
         await conn.execute(
             """INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
                VALUES ($1,$2,'verification_rejected','manual ShamCash verification review rejected','warning')""",
@@ -122,8 +112,5 @@ async def reject_verification(callback: CallbackQuery):
     except Exception as exc:
         logger.error("Failed to notify rejected user %s: %s", telegram_id, exc)
 
-    await callback.message.edit_text(
-        f"❌ تم رفض توثيق المستخدم <code>{telegram_id}</code>.",
-        parse_mode="HTML",
-    )
+    await callback.message.edit_text(f"❌ تم رفض توثيق المستخدم <code>{telegram_id}</code>.", parse_mode="HTML")
     await callback.answer("❌ تم الرفض!")
