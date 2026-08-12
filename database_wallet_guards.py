@@ -2,12 +2,29 @@
 
 
 async def install_order_wallet_guard(conn):
-    """Protect order wallet and payment snapshots at the database boundary."""
+    """Protect order wallet, customer verification, and payment snapshots."""
     await conn.execute("""
         CREATE OR REPLACE FUNCTION enforce_order_wallet_snapshot()
         RETURNS TRIGGER AS $$
-        DECLARE wallet_row RECORD;
+        DECLARE wallet_row RECORD; user_row RECORD;
         BEGIN
+            SELECT id, is_verified, phone_verified, phone_number, terms_accepted
+              INTO user_row
+              FROM users WHERE id = NEW.user_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
+            END IF;
+            IF COALESCE(user_row.terms_accepted, FALSE) IS NOT TRUE THEN
+                RAISE EXCEPTION 'customer must accept terms before ordering' USING ERRCODE='23514';
+            END IF;
+            IF COALESCE(user_row.is_verified, FALSE) IS NOT TRUE THEN
+                RAISE EXCEPTION 'customer account is not verified' USING ERRCODE='23514';
+            END IF;
+            IF COALESCE(user_row.phone_verified, FALSE) IS NOT TRUE
+               OR user_row.phone_number IS NULL OR btrim(user_row.phone_number) = '' THEN
+                RAISE EXCEPTION 'customer phone is not verified' USING ERRCODE='23514';
+            END IF;
+
             IF TG_OP = 'UPDATE' THEN
                 -- Legacy completion code may attempt to clear the QR after it has
                 -- been sent to the admin. Preserve the historical snapshot instead
