@@ -2,18 +2,27 @@
 
 
 async def install_order_wallet_guard(conn):
-    """Prevent new orders from using an unverified/mismatched saved wallet.
+    """Protect order wallet snapshots at the database boundary.
 
-    The application layer selects a verified wallet and stores its address/network/QR
-    in the order. This trigger is defense-in-depth: direct SQL or a future handler
-    cannot create a new order with a wallet that is not owned by the user, verified,
-    non-deleted, and backed by the exact stored QR.
+    A new order must reference a verified, non-deleted wallet with the exact
+    stored QR. Once the order exists, its wallet snapshot cannot be changed.
+    This protects historical orders even if the saved wallet is later deleted.
     """
     await conn.execute("""
         CREATE OR REPLACE FUNCTION enforce_order_wallet_snapshot()
         RETURNS TRIGGER AS $$
         DECLARE wallet_row RECORD;
         BEGIN
+            IF TG_OP = 'UPDATE' THEN
+                IF NEW.user_id IS DISTINCT FROM OLD.user_id
+                   OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
+                   OR NEW.network IS DISTINCT FROM OLD.network
+                   OR NEW.wallet_qr_photo_id IS DISTINCT FROM OLD.wallet_qr_photo_id THEN
+                    RAISE EXCEPTION 'order wallet snapshot is immutable' USING ERRCODE='23514';
+                END IF;
+                RETURN NEW;
+            END IF;
+
             IF NEW.user_id IS NULL THEN
                 RAISE EXCEPTION 'order user_id is required for wallet validation' USING ERRCODE='23514';
             END IF;
@@ -51,6 +60,6 @@ async def install_order_wallet_guard(conn):
     await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_order_wallet_snapshot ON orders")
     await conn.execute("""
         CREATE TRIGGER trg_enforce_order_wallet_snapshot
-        BEFORE INSERT ON orders
+        BEFORE INSERT OR UPDATE OF user_id, wallet_address, network, wallet_qr_photo_id ON orders
         FOR EACH ROW EXECUTE FUNCTION enforce_order_wallet_snapshot()
     """)
