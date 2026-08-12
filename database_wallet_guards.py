@@ -1,4 +1,4 @@
-"""Database-level guards for immutable, verified customer wallet snapshots."""
+"""Database-level guards for immutable customer wallet and payment snapshots."""
 
 
 async def install_order_wallet_guard(conn):
@@ -62,4 +62,77 @@ async def install_order_wallet_guard(conn):
         CREATE TRIGGER trg_enforce_order_wallet_snapshot
         BEFORE INSERT OR UPDATE OF user_id, wallet_address, network, wallet_qr_photo_id ON orders
         FOR EACH ROW EXECUTE FUNCTION enforce_order_wallet_snapshot()
+    """)
+
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION snapshot_order_payment_method()
+        RETURNS TRIGGER AS $$
+        DECLARE method_row RECORD;
+        BEGIN
+            IF NEW.payment_currency = 'SYP' THEN
+                NEW.payment_currency := 'NEW.SYP';
+            END IF;
+
+            IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN
+                RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514';
+            END IF;
+
+            IF NEW.payment_method_code IS NULL THEN
+                SELECT code, account_identifier, qr_photo_id
+                  INTO method_row
+                  FROM payment_methods
+                 WHERE provider = 'ShamCash'
+                   AND currency = NEW.payment_currency
+                   AND enabled = TRUE
+                 ORDER BY id ASC
+                 LIMIT 1;
+            ELSE
+                SELECT code, account_identifier, qr_photo_id
+                  INTO method_row
+                  FROM payment_methods
+                 WHERE code = NEW.payment_method_code
+                   AND provider = 'ShamCash'
+                   AND currency = NEW.payment_currency
+                 LIMIT 1;
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION 'invalid payment method for order currency' USING ERRCODE='23514';
+                END IF;
+            END IF;
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'no valid enabled ShamCash payment method for order currency' USING ERRCODE='23514';
+            END IF;
+
+            NEW.payment_method_code := method_row.code;
+            NEW.payment_account_snapshot := method_row.account_identifier;
+            NEW.payment_qr_photo_id := method_row.qr_photo_id;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_payment_method ON orders")
+    await conn.execute("""
+        CREATE TRIGGER trg_snapshot_order_payment_method
+        BEFORE INSERT ON orders
+        FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()
+    """)
+
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION protect_order_payment_snapshot()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF NEW.payment_method_code IS DISTINCT FROM OLD.payment_method_code
+               OR NEW.payment_account_snapshot IS DISTINCT FROM OLD.payment_account_snapshot
+               OR NEW.payment_qr_photo_id IS DISTINCT FROM OLD.payment_qr_photo_id THEN
+                RAISE EXCEPTION 'order payment snapshot is immutable' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    await conn.execute("DROP TRIGGER IF EXISTS trg_protect_order_payment_snapshot ON orders")
+    await conn.execute("""
+        CREATE TRIGGER trg_protect_order_payment_snapshot
+        BEFORE UPDATE OF payment_method_code, payment_account_snapshot, payment_qr_photo_id ON orders
+        FOR EACH ROW EXECUTE FUNCTION protect_order_payment_snapshot()
     """)
