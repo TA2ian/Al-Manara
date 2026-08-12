@@ -17,7 +17,11 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute("DROP SCHEMA IF EXISTS payment_guard_test CASCADE")
             await conn.execute("CREATE SCHEMA payment_guard_test")
             await conn.execute("SET search_path TO payment_guard_test")
-            await conn.execute("CREATE TABLE users (id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL)")
+            await conn.execute("""CREATE TABLE users (
+                id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL,
+                is_verified BOOLEAN DEFAULT FALSE, phone_verified BOOLEAN DEFAULT FALSE,
+                phone_number TEXT, terms_accepted BOOLEAN DEFAULT FALSE
+            )""")
             await conn.execute("""CREATE TABLE saved_addresses (
                 id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), address TEXT NOT NULL,
                 network TEXT NOT NULL, qr_photo_id TEXT, verification_status TEXT DEFAULT 'pending', deleted_at TIMESTAMP)""")
@@ -28,7 +32,9 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
                 id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), wallet_address TEXT NOT NULL,
                 network TEXT NOT NULL, wallet_qr_photo_id TEXT, payment_currency TEXT NOT NULL,
                 payment_method_code TEXT, payment_account_snapshot TEXT, payment_qr_photo_id TEXT, status TEXT DEFAULT 'pending')""")
-            await conn.execute("INSERT INTO users (telegram_id) VALUES (2001)")
+            await conn.execute("""INSERT INTO users
+                (telegram_id,is_verified,phone_verified,phone_number,terms_accepted)
+                VALUES (2001,TRUE,TRUE,'+10000000000',TRUE)""")
             await conn.execute("""INSERT INTO saved_addresses
                 (user_id,address,network,qr_photo_id,verification_status)
                 VALUES (1,'0xPAY','BEP20','wallet-qr','verified')""")
@@ -71,7 +77,8 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_explicit_payment_method_is_rejected(self):
         async with self.pool.acquire() as conn:
             await conn.execute("UPDATE payment_methods SET enabled=FALSE WHERE code='shamcash_new_syp'")
-        with self.assertRaises(Exception): await self._insert_order()
+        with self.assertRaises(Exception):
+            await self._insert_order()
 
     async def test_legacy_syp_is_normalized_to_new_syp(self):
         row = await self._insert_order()
@@ -80,4 +87,5 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current, "NEW.SYP")
 
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()
