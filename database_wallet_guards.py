@@ -2,12 +2,7 @@
 
 
 async def install_order_wallet_guard(conn):
-    """Protect order wallet snapshots at the database boundary.
-
-    A new order must reference a verified, non-deleted wallet with the exact
-    stored QR. Once the order exists, its wallet snapshot cannot be changed.
-    This protects historical orders even if the saved wallet is later deleted.
-    """
+    """Protect order wallet and payment snapshots at the database boundary."""
     await conn.execute("""
         CREATE OR REPLACE FUNCTION enforce_order_wallet_snapshot()
         RETURNS TRIGGER AS $$
@@ -40,19 +35,15 @@ async def install_order_wallet_guard(conn):
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'order wallet is not registered for this user' USING ERRCODE='23514';
             END IF;
-
             IF wallet_row.verification_status <> 'verified' THEN
                 RAISE EXCEPTION 'order wallet is not verified' USING ERRCODE='23514';
             END IF;
-
             IF wallet_row.qr_photo_id IS NULL OR btrim(wallet_row.qr_photo_id) = '' THEN
                 RAISE EXCEPTION 'verified order wallet must have a stored QR' USING ERRCODE='23514';
             END IF;
-
             IF NEW.wallet_qr_photo_id IS DISTINCT FROM wallet_row.qr_photo_id THEN
                 RAISE EXCEPTION 'order wallet QR does not match the verified saved wallet' USING ERRCODE='23514';
             END IF;
-
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -72,7 +63,6 @@ async def install_order_wallet_guard(conn):
             IF NEW.payment_currency = 'SYP' THEN
                 NEW.payment_currency := 'NEW.SYP';
             END IF;
-
             IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN
                 RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514';
             END IF;
@@ -84,8 +74,7 @@ async def install_order_wallet_guard(conn):
                  WHERE provider = 'ShamCash'
                    AND currency = NEW.payment_currency
                    AND enabled = TRUE
-                 ORDER BY id ASC
-                 LIMIT 1;
+                 ORDER BY id ASC LIMIT 1;
             ELSE
                 SELECT code, account_identifier, qr_photo_id
                   INTO method_row
@@ -93,14 +82,15 @@ async def install_order_wallet_guard(conn):
                  WHERE code = NEW.payment_method_code
                    AND provider = 'ShamCash'
                    AND currency = NEW.payment_currency
+                   AND enabled = TRUE
                  LIMIT 1;
                 IF NOT FOUND THEN
-                    RAISE EXCEPTION 'invalid payment method for order currency' USING ERRCODE='23514';
+                    RAISE EXCEPTION 'invalid or disabled payment method for order currency' USING ERRCODE='23514';
                 END IF;
             END IF;
 
             IF NOT FOUND THEN
-                RAISE EXCEPTION 'no valid enabled ShamCash payment method for order currency' USING ERRCODE='23514';
+                RAISE EXCEPTION 'no enabled ShamCash payment method for order currency' USING ERRCODE='23514';
             END IF;
 
             NEW.payment_method_code := method_row.code;
