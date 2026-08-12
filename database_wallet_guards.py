@@ -9,6 +9,19 @@ async def install_order_wallet_guard(conn):
         DECLARE wallet_row RECORD;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
+                -- Legacy completion code may attempt to clear the QR after it has
+                -- been sent to the admin. Preserve the historical snapshot instead
+                -- of allowing it to be erased or failing the completion transaction.
+                IF NEW.status = 'completed'
+                   AND OLD.wallet_qr_photo_id IS NOT NULL
+                   AND NEW.wallet_qr_photo_id IS NULL
+                   AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id
+                   AND NEW.wallet_address IS NOT DISTINCT FROM OLD.wallet_address
+                   AND NEW.network IS NOT DISTINCT FROM OLD.network THEN
+                    NEW.wallet_qr_photo_id := OLD.wallet_qr_photo_id;
+                    RETURN NEW;
+                END IF;
+
                 IF NEW.user_id IS DISTINCT FROM OLD.user_id
                    OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
                    OR NEW.network IS DISTINCT FROM OLD.network
@@ -60,39 +73,25 @@ async def install_order_wallet_guard(conn):
         RETURNS TRIGGER AS $$
         DECLARE method_row RECORD;
         BEGIN
-            IF NEW.payment_currency = 'SYP' THEN
-                NEW.payment_currency := 'NEW.SYP';
-            END IF;
+            IF NEW.payment_currency = 'SYP' THEN NEW.payment_currency := 'NEW.SYP'; END IF;
             IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN
                 RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514';
             END IF;
-
             IF NEW.payment_method_code IS NULL THEN
-                SELECT code, account_identifier, qr_photo_id
-                  INTO method_row
-                  FROM payment_methods
-                 WHERE provider = 'ShamCash'
-                   AND currency = NEW.payment_currency
-                   AND enabled = TRUE
-                 ORDER BY id ASC LIMIT 1;
+                SELECT code, account_identifier, qr_photo_id INTO method_row
+                FROM payment_methods WHERE provider='ShamCash' AND currency=NEW.payment_currency
+                  AND enabled=TRUE ORDER BY id ASC LIMIT 1;
             ELSE
-                SELECT code, account_identifier, qr_photo_id
-                  INTO method_row
-                  FROM payment_methods
-                 WHERE code = NEW.payment_method_code
-                   AND provider = 'ShamCash'
-                   AND currency = NEW.payment_currency
-                   AND enabled = TRUE
-                 LIMIT 1;
+                SELECT code, account_identifier, qr_photo_id INTO method_row
+                FROM payment_methods WHERE code=NEW.payment_method_code AND provider='ShamCash'
+                  AND currency=NEW.payment_currency AND enabled=TRUE LIMIT 1;
                 IF NOT FOUND THEN
                     RAISE EXCEPTION 'invalid or disabled payment method for order currency' USING ERRCODE='23514';
                 END IF;
             END IF;
-
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'no enabled ShamCash payment method for order currency' USING ERRCODE='23514';
             END IF;
-
             NEW.payment_method_code := method_row.code;
             NEW.payment_account_snapshot := method_row.account_identifier;
             NEW.payment_qr_photo_id := method_row.qr_photo_id;
@@ -101,11 +100,8 @@ async def install_order_wallet_guard(conn):
         $$ LANGUAGE plpgsql;
     """)
     await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_payment_method ON orders")
-    await conn.execute("""
-        CREATE TRIGGER trg_snapshot_order_payment_method
-        BEFORE INSERT ON orders
-        FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()
-    """)
+    await conn.execute("""CREATE TRIGGER trg_snapshot_order_payment_method
+        BEFORE INSERT ON orders FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()""")
 
     await conn.execute("""
         CREATE OR REPLACE FUNCTION protect_order_payment_snapshot()
@@ -121,8 +117,6 @@ async def install_order_wallet_guard(conn):
         $$ LANGUAGE plpgsql;
     """)
     await conn.execute("DROP TRIGGER IF EXISTS trg_protect_order_payment_snapshot ON orders")
-    await conn.execute("""
-        CREATE TRIGGER trg_protect_order_payment_snapshot
-        BEFORE UPDATE OF payment_method_code, payment_account_snapshot, payment_qr_photo_id ON orders
-        FOR EACH ROW EXECUTE FUNCTION protect_order_payment_snapshot()
-    """)
+    await conn.execute("""CREATE TRIGGER trg_protect_order_payment_snapshot
+        BEFORE UPDATE OF payment_method_code, payment_account_snapshot, payment_qr_photo_id
+        ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_snapshot()""")
