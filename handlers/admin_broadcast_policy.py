@@ -1,5 +1,6 @@
 """Authoritative admin broadcast flow with preview, confirmation and cancellation."""
 import asyncio
+import html
 import logging
 
 from aiogram import F, Router
@@ -77,7 +78,7 @@ async def capture_broadcast(message: Message, state: FSMContext):
     await message.answer(
         "👁 <b>معاينة الإشعار</b>\n\n"
         "━━━━━━━━━━━━━━\n"
-        f"{text}\n"
+        f"{html.escape(text)}\n"
         "━━━━━━━━━━━━━━\n\n"
         "⚠️ لم يتم الإرسال بعد. اختر إجراءً:",
         parse_mode="HTML",
