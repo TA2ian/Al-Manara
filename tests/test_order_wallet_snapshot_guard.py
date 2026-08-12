@@ -8,29 +8,24 @@ class OrderWalletSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import asyncpg
 
-        self.pool = await asyncpg.create_pool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2)
+        self.pool = await asyncpg.create_pool(
+            os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2,
+            server_settings={"search_path": "order_snapshot_guard_test"},
+        )
         async with self.pool.acquire() as conn:
             await conn.execute("DROP SCHEMA IF EXISTS order_snapshot_guard_test CASCADE")
             await conn.execute("CREATE SCHEMA order_snapshot_guard_test")
             await conn.execute("SET search_path TO order_snapshot_guard_test")
             await conn.execute("""
                 CREATE TABLE saved_addresses (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    address TEXT NOT NULL,
-                    network TEXT NOT NULL,
-                    qr_photo_id TEXT,
-                    verification_status TEXT NOT NULL DEFAULT 'pending',
-                    deleted_at TIMESTAMP
+                    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, address TEXT NOT NULL,
+                    network TEXT NOT NULL, qr_photo_id TEXT, verification_status TEXT NOT NULL DEFAULT 'pending', deleted_at TIMESTAMP
                 )
             """)
             await conn.execute("""
                 CREATE TABLE orders (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    wallet_address TEXT NOT NULL,
-                    network TEXT NOT NULL,
-                    wallet_qr_photo_id TEXT
+                    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, wallet_address TEXT NOT NULL,
+                    network TEXT NOT NULL, wallet_qr_photo_id TEXT
                 )
             """)
             await conn.execute("""
@@ -39,28 +34,17 @@ class OrderWalletSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
                 DECLARE wallet_row RECORD;
                 BEGIN
                     IF TG_OP = 'UPDATE' THEN
-                        IF NEW.user_id IS DISTINCT FROM OLD.user_id
-                           OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
-                           OR NEW.network IS DISTINCT FROM OLD.network
-                           OR NEW.wallet_qr_photo_id IS DISTINCT FROM OLD.wallet_qr_photo_id THEN
+                        IF NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
+                           OR NEW.network IS DISTINCT FROM OLD.network OR NEW.wallet_qr_photo_id IS DISTINCT FROM OLD.wallet_qr_photo_id THEN
                             RAISE EXCEPTION 'order wallet snapshot is immutable';
                         END IF;
                         RETURN NEW;
                     END IF;
-
-                    SELECT id, address, network, qr_photo_id, verification_status, deleted_at
-                      INTO wallet_row
-                      FROM saved_addresses
-                     WHERE user_id = NEW.user_id
-                       AND address = NEW.wallet_address
-                       AND network = NEW.network
-                       AND deleted_at IS NULL
-                     LIMIT 1;
-
-                    IF NOT FOUND OR wallet_row.verification_status <> 'verified'
-                       OR wallet_row.qr_photo_id IS NULL
-                       OR btrim(wallet_row.qr_photo_id) = ''
-                       OR NEW.wallet_qr_photo_id IS DISTINCT FROM wallet_row.qr_photo_id THEN
+                    SELECT id, address, network, qr_photo_id, verification_status, deleted_at INTO wallet_row
+                    FROM saved_addresses WHERE user_id = NEW.user_id AND address = NEW.wallet_address
+                      AND network = NEW.network AND deleted_at IS NULL LIMIT 1;
+                    IF NOT FOUND OR wallet_row.verification_status <> 'verified' OR wallet_row.qr_photo_id IS NULL
+                       OR btrim(wallet_row.qr_photo_id) = '' OR NEW.wallet_qr_photo_id IS DISTINCT FROM wallet_row.qr_photo_id THEN
                         RAISE EXCEPTION 'invalid order wallet snapshot';
                     END IF;
                     RETURN NEW;
@@ -81,38 +65,28 @@ class OrderWalletSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_valid_snapshot_is_accepted(self):
         async with self.pool.acquire() as conn:
-            await conn.execute("""INSERT INTO orders
-                (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES (1,'0xGOOD','BEP20','qr-good')""")
+            await conn.execute("INSERT INTO orders (user_id,wallet_address,network,wallet_qr_photo_id) VALUES (1,'0xGOOD','BEP20','qr-good')")
 
     async def test_address_cannot_change_after_creation(self):
         async with self.pool.acquire() as conn:
-            order_id = await conn.fetchval("""INSERT INTO orders
-                (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id""")
-            with self.assertRaises(Exception):
-                await conn.execute("UPDATE orders SET wallet_address='0xOTHER' WHERE id=$1", order_id)
+            order_id = await conn.fetchval("INSERT INTO orders (user_id,wallet_address,network,wallet_qr_photo_id) VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id")
+            with self.assertRaises(Exception): await conn.execute("UPDATE orders SET wallet_address='0xOTHER' WHERE id=$1", order_id)
 
     async def test_network_cannot_change_after_creation(self):
         async with self.pool.acquire() as conn:
-            order_id = await conn.fetchval("""INSERT INTO orders
-                (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id""")
-            with self.assertRaises(Exception):
-                await conn.execute("UPDATE orders SET network='TRC20' WHERE id=$1", order_id)
+            order_id = await conn.fetchval("INSERT INTO orders (user_id,wallet_address,network,wallet_qr_photo_id) VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id")
+            with self.assertRaises(Exception): await conn.execute("UPDATE orders SET network='TRC20' WHERE id=$1", order_id)
 
     async def test_qr_cannot_change_after_creation(self):
         async with self.pool.acquire() as conn:
-            order_id = await conn.fetchval("""INSERT INTO orders
-                (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id""")
-            with self.assertRaises(Exception):
-                await conn.execute("UPDATE orders SET wallet_qr_photo_id='qr-other' WHERE id=$1", order_id)
+            order_id = await conn.fetchval("INSERT INTO orders (user_id,wallet_address,network,wallet_qr_photo_id) VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id")
+            with self.assertRaises(Exception): await conn.execute("UPDATE orders SET wallet_qr_photo_id='qr-other' WHERE id=$1", order_id)
 
     async def test_non_wallet_order_updates_remain_possible(self):
         async with self.pool.acquire() as conn:
             await conn.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'")
-            order_id = await conn.fetchval("""INSERT INTO orders
-                (user_id,wallet_address,network,wallet_qr_photo_id)
-                VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id""")
+            order_id = await conn.fetchval("INSERT INTO orders (user_id,wallet_address,network,wallet_qr_photo_id) VALUES (1,'0xGOOD','BEP20','qr-good') RETURNING id")
             await conn.execute("UPDATE orders SET status='waiting_payment' WHERE id=$1", order_id)
+
+
+if __name__ == "__main__": unittest.main()
