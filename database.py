@@ -21,6 +21,7 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL, username TEXT,
+                phone_number TEXT, phone_verified BOOLEAN DEFAULT FALSE,
                 full_name TEXT, shamcash_account TEXT, shamcash_qr_photo_id TEXT,
                 language TEXT DEFAULT 'ar', terms_accepted BOOLEAN DEFAULT FALSE,
                 terms_accepted_at TIMESTAMP, is_verified BOOLEAN DEFAULT FALSE,
@@ -87,6 +88,8 @@ async def init_db():
             )
         """)
 
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS qr_photo_id TEXT")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
@@ -126,6 +129,7 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders (status, payment_deadline)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone_verified ON users (phone_verified)")
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_addresses_active ON saved_addresses (user_id, address, network) WHERE deleted_at IS NULL")
 
         await conn.execute("""
