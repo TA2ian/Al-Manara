@@ -38,6 +38,18 @@ def broadcast_start_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+async def _show_admin_menu(callback: CallbackQuery, state: FSMContext, notice: str | None = None):
+    """Return to the admin menu and always terminate the broadcast FSM."""
+    await state.clear()
+    from keyboards.inline import admin_menu_keyboard
+    await callback.message.edit_text(
+        notice or "⚙️ <b>لوحة التحكم</b>",
+        parse_mode="HTML",
+        reply_markup=admin_menu_keyboard(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_broadcast")
 async def start_broadcast(callback: CallbackQuery, state: FSMContext):
     """Start broadcast composition without sending anything."""
@@ -100,18 +112,28 @@ async def edit_broadcast(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(AdminStates.waiting_broadcast, F.data == "admin_menu")
+async def back_from_broadcast_composer(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await _show_admin_menu(callback, state)
+
+
+@router.callback_query(AdminStates.waiting_broadcast_preview, F.data == "admin_menu")
+async def back_from_broadcast_preview(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    await _show_admin_menu(callback, state)
+
+
 @router.callback_query(F.data == "admin_broadcast_cancel")
 async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    await state.clear()
-    from keyboards.inline import admin_menu_keyboard
-    await callback.message.edit_text(
-        "❌ تم إلغاء الإشعار. لم يتم إرسال أي رسالة.",
-        reply_markup=admin_menu_keyboard(),
-    )
-    await callback.answer()
+    await _show_admin_menu(callback, state, "❌ تم إلغاء الإشعار. لم يتم إرسال أي رسالة.")
 
 
 @router.callback_query(AdminStates.waiting_broadcast_preview, F.data == "admin_broadcast_send")
@@ -164,13 +186,11 @@ async def send_broadcast(callback: CallbackQuery, state: FSMContext):
             "info" if failed == 0 else "warning",
         )
 
-    await state.clear()
-    from keyboards.inline import admin_menu_keyboard
-    await callback.message.edit_text(
+    await _show_admin_menu(
+        callback,
+        state,
         "✅ <b>اكتمل الإرسال</b>\n\n"
         f"👥 المستهدفون: <b>{len(users)}</b>\n"
         f"📤 تم الإرسال: <b>{sent}</b>\n"
         f"⚠️ فشل: <b>{failed}</b>",
-        parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
     )
