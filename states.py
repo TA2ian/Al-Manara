@@ -45,6 +45,7 @@ class AdminStates(StatesGroup):
     waiting_typing_txid = State()
     waiting_transfer_screenshot = State()
     waiting_broadcast = State()
+    waiting_broadcast_preview = State()
     waiting_shamcash_usd = State()
     waiting_shamcash_syp = State()
     waiting_min_order = State()
