@@ -1,15 +1,15 @@
-"""Saved wallet handlers that sit before the legacy order QR prompts.
+"""Saved wallet selection for order creation.
 
-This module keeps the existing order flow intact while making a saved wallet
-carry its QR photo ID. A saved wallet with a stored QR never asks the customer
-to upload the same QR again.
+Verified wallets are reusable only when their address and QR were both
+verified and stored during one-time wallet registration. Per-order QR upload
+or skipping QR is intentionally not supported.
 """
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery
 
 from database import get_pool
-from states import OrderStates
+from states import OrderStates, WalletStates
 from keyboards.inline import currency_selection_keyboard
 from services.locale_service import locale_service
 
@@ -27,7 +27,7 @@ async def _get_user(telegram_id: int):
 
 @router.callback_query(F.data.startswith("order_use_saved_"))
 async def use_saved_wallet(callback: CallbackQuery, state: FSMContext):
-    """Select a saved wallet and reuse its stored QR when available."""
+    """Select a verified saved wallet and reuse its stored QR."""
     try:
         address_id = int(callback.data.removeprefix("order_use_saved_"))
     except ValueError:
@@ -45,23 +45,33 @@ async def use_saved_wallet(callback: CallbackQuery, state: FSMContext):
             """
             SELECT id, address, network, label, qr_photo_id
             FROM saved_addresses
-            WHERE id = $1 AND user_id = $2
+            WHERE id = $1
+              AND user_id = $2
+              AND deleted_at IS NULL
+              AND verification_status = 'verified'
+              AND qr_photo_id IS NOT NULL
             """,
             address_id,
             user["id"],
         )
 
+    lang = user["language"] or "ar"
     if not wallet:
-        await callback.answer("❌ المحفظة غير موجودة", show_alert=True)
+        await callback.answer(
+            "❌ هذه المحفظة غير موثقة أو لا تحتوي على QR محفوظ. استخدم محافظي لإضافة/توثيق محفظة جديدة."
+            if lang == "ar" else
+            "❌ This wallet is not verified or has no stored QR. Use My Wallets to register a new verified wallet.",
+            show_alert=True,
+        )
         return
 
-    lang = user["language"] or "ar"
     await state.update_data(
         wallet_address=wallet["address"],
         network=wallet["network"],
         wallet_qr_photo_id=wallet["qr_photo_id"],
         address_from_saved=True,
         saved_address_id=wallet["id"],
+        wallet_id=wallet["id"],
     )
 
     label = wallet["label"] or ("محفظة محفوظة" if lang == "ar" else "Saved wallet")
@@ -70,67 +80,46 @@ async def use_saved_wallet(callback: CallbackQuery, state: FSMContext):
             f"✅ <b>{label}</b>\n\n"
             f"📍 <code>{wallet['address']}</code>\n"
             f"🌐 {wallet['network']}\n"
-            f"📸 رمز QR: {'محفوظ ✓' if wallet['qr_photo_id'] else 'غير محفوظ'}"
+            "📸 QR: محفوظ وموثق ✓\n\n"
+            "🔒 لن يُطلب QR مرة أخرى لهذا العنوان."
         )
         if lang == "ar"
         else (
             f"✅ <b>{label}</b>\n\n"
             f"📍 <code>{wallet['address']}</code>\n"
             f"🌐 {wallet['network']}\n"
-            f"📸 QR: {'Saved ✓' if wallet['qr_photo_id'] else 'Not saved'}"
+            "📸 QR: Stored and verified ✓\n\n"
+            "🔒 The QR will not be requested again for this address."
         ),
         parse_mode="HTML",
     )
-
-    # A saved QR is already attached to the wallet; do not ask for it again.
-    if wallet["qr_photo_id"]:
-        await callback.message.answer(
-            locale_service.get("select_currency", lang),
-            reply_markup=currency_selection_keyboard(lang),
-        )
-        await state.set_state(OrderStates.waiting_currency)
-    else:
-        # Preserve the legacy first-time QR prompt for wallets created before
-        # persistent QR support was added.
-        qr_prompt = (
-            "📸 <b>أرسل رمز QR لهذه المحفظة</b>\n\n"
-            "سيتم حفظه مع العنوان لاستخدامه تلقائياً في الطلبات القادمة."
-            if lang == "ar"
-            else (
-                "📸 <b>Send a QR code for this wallet</b>\n\n"
-                "It will be saved with the address and reused automatically later."
-            )
-        )
-        await callback.message.answer(
-            qr_prompt,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⏭️ تخطي" if lang == "ar" else "⏭️ Skip",
-                    callback_data="skip_wallet_qr",
-                )]
-            ]),
-            parse_mode="HTML",
-        )
-        await state.set_state(OrderStates.waiting_wallet_qr)
-
+    await callback.message.answer(
+        locale_service.get("select_currency", lang),
+        reply_markup=currency_selection_keyboard(lang),
+    )
+    await state.set_state(OrderStates.waiting_currency)
     await callback.answer()
 
 
 @router.callback_query(OrderStates.waiting_save_address, F.data == "save_address_yes")
 async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
-    """Save the current wallet together with its QR photo ID, if supplied."""
+    """Save a wallet only when its QR was supplied and verified."""
     user = await _get_user(callback.from_user.id)
     if not user:
         await callback.answer("❌ User not found", show_alert=True)
         return
 
     data = await state.get_data()
-    address = data.get("wallet_address", "").strip()
-    network = data.get("network", "").strip()
+    address = (data.get("wallet_address") or "").strip()
+    network = (data.get("network") or "").strip()
     qr_photo_id = data.get("wallet_qr_photo_id")
 
-    if not address or network not in {"TRC20", "BEP20"}:
-        await callback.answer("❌ بيانات المحفظة غير صالحة", show_alert=True)
+    if not address or network not in {"TRC20", "BEP20"} or not qr_photo_id:
+        await callback.answer(
+            "❌ لا يمكن حفظ المحفظة بدون QR مطابق وموثق." if (user["language"] or "ar") == "ar" else
+            "❌ A wallet cannot be saved without a matching verified QR.",
+            show_alert=True,
+        )
         return
 
     pool = await get_pool()
@@ -138,7 +127,7 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
         existing = await conn.fetchrow(
             """
             SELECT id FROM saved_addresses
-            WHERE user_id = $1 AND address = $2 AND network = $3
+            WHERE user_id = $1 AND address = $2 AND network = $3 AND deleted_at IS NULL
             ORDER BY id DESC LIMIT 1
             """,
             user["id"],
@@ -150,7 +139,10 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
             await conn.execute(
                 """
                 UPDATE saved_addresses
-                SET qr_photo_id = COALESCE($1, qr_photo_id), updated_at = NOW()
+                SET qr_photo_id = $1,
+                    verification_status = 'verified',
+                    verified_at = COALESCE(verified_at, NOW()),
+                    updated_at = NOW()
                 WHERE id = $2 AND user_id = $3
                 """,
                 qr_photo_id,
@@ -161,8 +153,8 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
             await conn.execute(
                 """
                 INSERT INTO saved_addresses
-                    (user_id, address, network, qr_photo_id, is_default)
-                VALUES ($1, $2, $3, $4, FALSE)
+                    (user_id, address, network, qr_photo_id, is_default, verification_status, verified_at)
+                VALUES ($1, $2, $3, $4, FALSE, 'verified', NOW())
                 """,
                 user["id"],
                 address,
@@ -173,15 +165,17 @@ async def save_wallet_with_qr(callback: CallbackQuery, state: FSMContext):
     lang = user["language"] or "ar"
     await callback.message.edit_text(
         (
-            "💾 <b>تم حفظ المحفظة بنجاح</b>\n\n"
+            "💾 <b>تم حفظ المحفظة وتوثيق QR</b>\n\n"
             f"🌐 الشبكة: {network}\n"
-            f"📸 QR: {'تم حفظه ✓' if qr_photo_id else 'لم يتم إرفاقه'}"
+            "📸 QR: محفوظ وموثق ✓\n\n"
+            "🔒 سيُستخدم تلقائياً في الطلبات القادمة."
         )
         if lang == "ar"
         else (
-            "💾 <b>Wallet saved successfully</b>\n\n"
+            "💾 <b>Wallet and QR verified and saved</b>\n\n"
             f"🌐 Network: {network}\n"
-            f"📸 QR: {'Saved ✓' if qr_photo_id else 'Not provided'}"
+            "📸 QR: Stored and verified ✓\n\n"
+            "🔒 It will be reused automatically in future orders."
         ),
         parse_mode="HTML",
     )
