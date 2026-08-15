@@ -1,5 +1,4 @@
 """Start and terms handlers."""
-from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -27,16 +26,27 @@ WELCOME_TEXT_AR = """🎉 <b>أهلاً وسهلاً يا {name}!</b>
 
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    """Handle /start command."""
+    """Handle /start and keep the Telegram username current.
+
+    Telegram's numeric user ID is the stable identity key. The username is
+    treated only as mutable profile data and is refreshed whenever the user
+    starts the bot.
+    """
     pool = await get_pool()
+    username = message.from_user.username or ''
 
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT * FROM users WHERE telegram_id = $1",
             message.from_user.id
         )
+        if user:
+            await conn.execute(
+                "UPDATE users SET username=$1 WHERE telegram_id=$2",
+                username,
+                message.from_user.id,
+            )
 
-    # If user exists and accepted terms
     if user and user['terms_accepted']:
         lang = user['language'] or 'ar'
         await message.answer(
@@ -50,18 +60,14 @@ async def cmd_start(message: Message, state: FSMContext):
         )
         return
 
-    # Show bot intro before language selection
     await message.answer(
         locale_service.get('bot_intro', 'ar'),
         parse_mode='HTML'
     )
-
-    # Show language selection
     await message.answer(
         locale_service.get('select_language', 'ar'),
         reply_markup=language_select_keyboard()
     )
-
     await state.set_state(TermsStates.waiting_acceptance)
 
 
@@ -69,7 +75,6 @@ async def cmd_start(message: Message, state: FSMContext):
 async def select_start_language(callback: CallbackQuery, state: FSMContext):
     """Handle language selection at start."""
     lang = callback.data.replace("lang_", "")
-
     await callback.message.edit_text(
         locale_service.get('terms_text', lang,
                           min_order=Config.MIN_ORDER,
@@ -78,7 +83,6 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
         reply_markup=terms_keyboard(lang),
         parse_mode='HTML'
     )
-
     await state.update_data(language=lang)
     await callback.answer()
 
@@ -88,33 +92,26 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
     """Handle terms acceptance."""
     data = await state.get_data()
     lang = data.get('language', 'ar')
-
     pool = await get_pool()
+    username = callback.from_user.username or ''
 
     async with pool.acquire() as conn:
-        username = callback.from_user.username or ''
         await conn.execute("""
             INSERT INTO users (telegram_id, username, language, terms_accepted, terms_accepted_at)
             VALUES ($1, $2, $3, TRUE, NOW())
             ON CONFLICT (telegram_id) DO UPDATE SET
+                username = EXCLUDED.username,
                 terms_accepted = TRUE,
                 terms_accepted_at = NOW()
         """, callback.from_user.id, username, lang)
 
-    # Send welcome message
     await callback.message.delete()
-
     await callback.message.answer(
         locale_service.get('welcome', lang, name=callback.from_user.first_name),
         reply_markup=main_menu_inline(lang),
         parse_mode='HTML'
     )
-
-    await callback.message.answer(
-        "👇",
-        reply_markup=compact_reply_keyboard(lang)
-    )
-
+    await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang))
     await state.clear()
     await callback.answer()
 
@@ -124,11 +121,9 @@ async def decline_terms(callback: CallbackQuery, state: FSMContext):
     """Handle terms decline."""
     data = await state.get_data()
     lang = data.get('language', 'ar')
-
     await callback.message.edit_text(
         locale_service.get('declined_message', lang),
         parse_mode='HTML'
     )
-
     await state.clear()
     await callback.answer()
