@@ -8,6 +8,7 @@ def create_dispatcher() -> Dispatcher:
         start,
         saved_wallets,
         order_wallet_policy,
+        legacy_wallet_guard,
         wallets,
         order,
         profile,
@@ -34,9 +35,10 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(start.router)
     dp.include_router(saved_wallets.router)
-    # Wallet policy must precede both the wallet registry and legacy order
-    # handlers so order-created wallet registration can resume correctly.
+    # Wallet policy and the legacy-state guard must precede the wallet registry
+    # and legacy order handlers.
     dp.include_router(order_wallet_policy.router)
+    dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
