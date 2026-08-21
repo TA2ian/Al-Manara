@@ -24,8 +24,12 @@ class Config:
     # Database: fail closed instead of silently using fake localhost credentials.
     DATABASE_URL = os.getenv("DATABASE_URL")
 
-    # Webhook
-    WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "").rstrip("/")
+    # Webhook. Render provides RENDER_EXTERNAL_URL automatically for web services;
+    # WEBHOOK_HOST remains an explicit override for custom domains/other hosts.
+    WEBHOOK_HOST = (
+        os.getenv("WEBHOOK_HOST", "").rstrip("/")
+        or os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+    )
     WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
     WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
 
