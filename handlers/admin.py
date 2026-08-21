@@ -468,7 +468,7 @@ async def admin_dashboard(callback: CallbackQuery):
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE terms_accepted = TRUE")
         verified_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_verified = TRUE")
         repeat_customers = await conn.fetchval(
-            "SELECT COUNT(DISTINCT user_id) FROM orders GROUP BY user_id HAVING COUNT(*) >= 2"
+            "SELECT COUNT(*) FROM (SELECT user_id FROM orders GROUP BY user_id HAVING COUNT(*) >= 2) AS repeat_users"
         ) or 0
 
         # Rating
