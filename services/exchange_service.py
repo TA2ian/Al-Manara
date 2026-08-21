@@ -31,12 +31,7 @@ class ExchangeService:
         self._cache_time = None
 
     async def get_current_rate(self) -> Optional[Decimal]:
-        """Get the current USD/NEW.SYP rate as Decimal.
-
-        Older development databases may still contain the legacy SYP-per-USD
-        value (for example 15000). Such values are normalized in memory to
-        NEW.SYP (150) so an upgrade cannot silently quote a 100x wrong amount.
-        """
+        """Get the current USD/NEW.SYP rate as Decimal."""
         if self._cache_time and (datetime.now() - self._cache_time).total_seconds() < 3600:
             return self._cache.get("rate")
 
@@ -86,14 +81,7 @@ class ExchangeService:
         )
 
     async def calculate_order(self, amount_usdt, currency: str) -> dict:
-        """Create a quote using the current rate exactly once.
-
-        The returned quote is intended to be stored with the order and reused
-        during confirmation/payment. Changing the live rate later must not
-        recalculate an existing quote.
-        """
-        # SYP is retained only as a backward-compatible callback alias while
-        # the canonical payment currency is NEW.SYP.
+        """Create a quote using the current rate exactly once."""
         if currency == "SYP":
             currency = "NEW.SYP"
 
@@ -113,7 +101,20 @@ class ExchangeService:
             base_amount = (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
         from config import Config
-        fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
+        # The DB-backed setting is authoritative after an admin changes fees;
+        # Config remains the fallback for first boot/backward compatibility.
+        try:
+            from services.settings_service import SettingsService
+            stored_fee = await SettingsService.get(
+                "service_fee_percent", str(Config.SERVICE_FEE_PERCENT)
+            )
+            fee_percent = to_decimal(stored_fee, str(Config.SERVICE_FEE_PERCENT))
+        except Exception:
+            fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
+
+        if fee_percent < 0 or fee_percent > 100:
+            fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
+
         fee_amount = (
             base_amount * fee_percent / Decimal("100")
         ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
