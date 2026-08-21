@@ -8,6 +8,7 @@ def create_dispatcher() -> Dispatcher:
         start,
         saved_wallets,
         order_wallet_policy,
+        payment_currency_policy,
         legacy_wallet_guard,
         wallets,
         order,
@@ -38,6 +39,10 @@ def create_dispatcher() -> Dispatcher:
     # Wallet policy and the stale-session guard must precede the wallet
     # registry and legacy order handlers.
     dp.include_router(order_wallet_policy.router)
+    # Payment currency selection must acknowledge callbacks and handle
+    # calculation failures before the legacy order router can leave Telegram
+    # buttons spinning.
+    dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
     dp.include_router(order.router)
