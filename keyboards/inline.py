@@ -64,7 +64,7 @@ def start_verification_keyboard(lang: str = 'ar') -> InlineKeyboardMarkup:
 
 
 def admin_verify_keyboard(user_telegram_id: int, full_name: str, shamcash_account: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ توثيق", callback_data=f"verify_approve_{user_telegram_id}"), InlineKeyboardButton(text="❌ رفض", callback_data=f"verify_reject_{user_telegram_id}")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ توثيق", callback_data=f"verify_approve_{user_telegram_id}"), InlineKeyboardButton(text="❌ رفض", callback_data=f"verify_reject_{user_telegram_id}")], [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")]])
 
 
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
