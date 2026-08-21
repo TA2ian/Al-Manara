@@ -18,6 +18,7 @@ def create_dispatcher() -> Dispatcher:
         admin_entry,
         admin_broadcast_policy,
         verification_admin_policy,
+        admin_navigation_policy,
         admin,
         payment_methods,
         verification,
@@ -50,10 +51,12 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin_entry.router)
-    # Broadcast policy must run before legacy admin broadcast handlers.
+    # Broadcast and verification policies must run before legacy admin handlers.
     dp.include_router(admin_broadcast_policy.router)
-    # Authoritative KYC approval/rejection must run before legacy admin handlers.
     dp.include_router(verification_admin_policy.router)
+    # Authoritative admin navigation/search/financial analytics policy must run
+    # before the legacy admin router so stale FSM states cannot swallow input.
+    dp.include_router(admin_navigation_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     dp.include_router(verification.router)
