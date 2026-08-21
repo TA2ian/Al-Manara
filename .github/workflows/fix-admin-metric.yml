@@ -1,0 +1,45 @@
+name: Fix admin metric
+
+on:
+  push:
+    branches:
+      - development/al-manara-finalization
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix repeat customer metric
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('handlers/admin.py')
+          s = p.read_text()
+          old = '''repeat_customers = await conn.fetchval(\n            "SELECT COUNT(DISTINCT user_id) FROM orders GROUP BY user_id HAVING COUNT(*) >= 2"\n        ) or 0'''
+          new = '''repeat_customers = await conn.fetchval(\n            "SELECT COUNT(*) FROM (SELECT user_id FROM orders GROUP BY user_id HAVING COUNT(*) >= 2) AS repeat_users"\n        ) or 0'''
+          if old not in s:
+              if new in s:
+                  print('Already fixed')
+              else:
+                  raise SystemExit('Target metric query not found')
+          else:
+              p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add handlers/admin.py
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'fix: correct repeat customer dashboard metric'
+            git push
+          fi
