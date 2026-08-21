@@ -28,18 +28,30 @@ def is_admin(user_id: int) -> bool:
 
 
 def enhanced_admin_menu_keyboard() -> InlineKeyboardMarkup:
-    """Existing admin menu plus the persistent payment-method shortcut."""
-    rows = [list(row) for row in admin_menu_keyboard().inline_keyboard]
+    """Admin menu with financial-only analytics wording and payment shortcut."""
+    rows = []
+    for row in admin_menu_keyboard().inline_keyboard:
+        new_row = []
+        for button in row:
+            if button.callback_data == "admin_analytics":
+                new_row.append(InlineKeyboardButton(text="📈 التحليل المالي", callback_data="admin_analytics"))
+            else:
+                new_row.append(button)
+        rows.append(new_row)
     rows.insert(3, [InlineKeyboardButton(text="💳 وسائل الدفع", callback_data="admin_payment_methods")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def ensure_default_methods(conn):
+    """Ensure exactly one canonical ShamCash method exists per currency.
+
+    Older builds used the code ``shamcash_syp`` while the canonical NEW.SYP
+    method is ``shamcash_new_syp``. Merge the legacy record into the canonical
+    record before rendering the list so old deployments cannot show duplicates.
+    """
     for currency, label in CURRENCY_META.values():
         account = Config.get_shamcash_usd() if currency == "USD" else Config.get_shamcash_syp()
-        # Keep the legacy internal code for compatibility with an existing DB;
-        # the user-facing and financial currency is NEW.SYP.
-        code = "shamcash_usd" if currency == "USD" else "shamcash_syp"
+        code = "shamcash_usd" if currency == "USD" else "shamcash_new_syp"
         await conn.execute(
             """INSERT INTO payment_methods
                (code, provider, currency, display_name, account_identifier, enabled)
@@ -54,6 +66,30 @@ async def ensure_default_methods(conn):
             account,
         )
 
+    # One-time cleanup of the old SYP code. Preserve its account/QR first if
+    # the canonical record is still empty.
+    legacy = await conn.fetchrow(
+        "SELECT account_identifier, qr_photo_id, enabled FROM payment_methods WHERE code = 'shamcash_syp' AND provider = 'ShamCash'"
+    )
+    canonical = await conn.fetchrow(
+        "SELECT account_identifier, qr_photo_id FROM payment_methods WHERE code = 'shamcash_new_syp' AND provider = 'ShamCash'"
+    )
+    if legacy:
+        if canonical:
+            if (not canonical["account_identifier"]) and legacy["account_identifier"]:
+                await conn.execute(
+                    "UPDATE payment_methods SET account_identifier = $1 WHERE code = 'shamcash_new_syp'",
+                    legacy["account_identifier"],
+                )
+            if (not canonical["qr_photo_id"]) and legacy["qr_photo_id"]:
+                await conn.execute(
+                    "UPDATE payment_methods SET qr_photo_id = $1 WHERE code = 'shamcash_new_syp'",
+                    legacy["qr_photo_id"],
+                )
+        await conn.execute(
+            "DELETE FROM payment_methods WHERE code = 'shamcash_syp' AND provider = 'ShamCash'"
+        )
+
 
 @router.message(F.text == "/payment_methods")
 async def payment_methods_command(message: Message):
@@ -65,11 +101,12 @@ async def payment_methods_command(message: Message):
 
 
 @router.callback_query(F.data == "admin_menu")
-async def enhanced_admin_menu(callback: CallbackQuery):
-    """Return to the admin dashboard with the payment-method shortcut visible."""
+async def enhanced_admin_menu(callback: CallbackQuery, state: FSMContext):
+    """Return to the admin dashboard and clear any unfinished input state."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
+    await state.clear()
     await callback.message.edit_text(
         "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
         reply_markup=enhanced_admin_menu_keyboard(),
@@ -93,8 +130,9 @@ async def _show_payment_methods(target, edit: bool = False):
         await ensure_default_methods(conn)
         methods = await conn.fetch(
             "SELECT code, currency, display_name, account_identifier, qr_photo_id, enabled "
-            "FROM payment_methods WHERE provider = 'ShamCash' AND currency IN ('USD', 'NEW.SYP') "
-            "ORDER BY currency"
+            "FROM payment_methods WHERE provider = 'ShamCash' "
+            "AND code IN ('shamcash_usd', 'shamcash_new_syp') "
+            "ORDER BY CASE currency WHEN 'USD' THEN 1 ELSE 2 END"
         )
 
     text = "💳 <b>وسائل الدفع — ShamCash</b>\n\n"
@@ -157,7 +195,11 @@ async def payment_method_account_start(callback: CallbackQuery, state: FSMContex
     code = callback.data.removeprefix("admin_pm_account_")
     await state.update_data(payment_method_code=code)
     await state.set_state(PaymentMethodStates.waiting_account)
-    await callback.message.answer("💳 أرسل رقم/عنوان حساب ShamCash الذي تريد حفظه لهذه العملة:")
+    await callback.message.edit_text(
+        "💳 <b>تعديل حساب ShamCash</b>\n\nأرسل رقم/عنوان الحساب لهذه العملة:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_payment_methods")]]),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
 
@@ -203,9 +245,10 @@ async def payment_method_qr_start(callback: CallbackQuery, state: FSMContext):
     code = callback.data.removeprefix("admin_pm_qr_")
     await state.update_data(payment_method_code=code)
     await state.set_state(PaymentMethodStates.waiting_qr)
-    await callback.message.answer(
-        "🖼️ أرسل صورة QR الخاصة بحساب ShamCash الآن.\n"
-        "سيتم حفظ Telegram file_id ولن تحتاج لإعادة رفعها مع كل طلب."
+    await callback.message.edit_text(
+        "🖼️ <b>حفظ QR</b>\n\nأرسل صورة QR الخاصة بحساب ShamCash الآن.\nسيتم حفظها ولن تحتاج لإعادة رفعها مع كل طلب.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_payment_methods")]]),
+        parse_mode="HTML",
     )
     await callback.answer()
 
