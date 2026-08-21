@@ -5,10 +5,8 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
-from config import Config
 from database import get_pool
 from keyboards.inline import order_confirmation_keyboard
-from locale import locale_alias
 from services.exchange_service import ExchangeService
 from services.locale_service import locale_service
 from states import OrderStates
@@ -27,9 +25,7 @@ async def _user_lang(telegram_id: int) -> str:
 @router.callback_query(OrderStates.waiting_currency, F.data.startswith("currency_"))
 async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
     """Calculate and display the immutable quote after currency selection."""
-    # Acknowledge immediately so Telegram does not leave the button spinner active.
     await callback.answer()
-
     currency = callback.data.removeprefix("currency_")
     lang = await _user_lang(callback.from_user.id)
 
