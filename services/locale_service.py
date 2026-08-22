@@ -23,6 +23,15 @@ class LocaleService:
                 logger.error(f"Failed to load locale {lang}: {e}")
                 self._locales[lang] = {}
 
+        if 'ar' in self._locales:
+            self._locales['ar']['enter_amount'] = "💵 اختر كمية USDT التي تريد شراءها:"
+            self._locales['ar']['enter_amount_custom'] = "💵 أدخل كمية USDT التي تريد شراءها:\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT\n\nمثال صحيح: 100"
+            self._locales['ar']['invalid_amount'] = "❌ كمية غير صحيحة.\n\nالحد الأدنى: {min} USDT\nالحد الأقصى: {max} USDT"
+        if 'en' in self._locales:
+            self._locales['en']['enter_amount'] = "💵 Choose the amount of USDT you want to buy:"
+            self._locales['en']['enter_amount_custom'] = "💵 Enter the amount of USDT you want to buy:\n\nMinimum: {min} USDT\nMaximum: {max} USDT\n\nExample: 100"
+            self._locales['en']['invalid_amount'] = "❌ Invalid USDT amount.\n\nMinimum: {min} USDT\nMaximum: {max} USDT"
+
     def get(self, key: str, lang: str = 'ar', **kwargs) -> str:
         """Get translated string."""
         text = self._locales.get(lang, {}).get(key, key)
@@ -41,5 +50,4 @@ class LocaleService:
         return names.get(lang, lang)
 
 
-# Singleton
 locale_service = LocaleService()
