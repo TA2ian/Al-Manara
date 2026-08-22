@@ -106,6 +106,12 @@ async def _show_verified_wallets(message: Message, state: FSMContext, user_id: i
 
 
 async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, lang: str):
+    from handlers.order import global_rate_limiter
+
+    allowed, _ = global_rate_limiter.check(message.from_user.id, "order_amount")
+    if not allowed:
+        return
+
     user = await _user(message.from_user.id)
     if not user:
         await message.answer("يرجى بدء البوت أولاً: /start" if lang == "ar" else "Please start the bot first: /start")
@@ -162,7 +168,8 @@ async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Invalid amount", show_alert=True)
         return
 
-    lang = ((await _user(callback.from_user.id))["language"] if await _user(callback.from_user.id) else "ar") or "ar"
+    user = await _user(callback.from_user.id)
+    lang = (user["language"] if user else "ar") or "ar"
     await _accept_amount(callback.message, state, amount, lang)
     await callback.answer()
 
