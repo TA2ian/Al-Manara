@@ -1,6 +1,7 @@
 """Active-order customer guidance policy."""
 from aiogram import Router, F
 from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 
 from database import get_pool
 from keyboards.reply import compact_reply_keyboard
@@ -16,10 +17,8 @@ ACTIVE_STATUSES = (
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
-async def guide_active_order(message: Message, state=None):
+async def guide_active_order(message: Message, state: FSMContext):
     """Guide active customers; otherwise delegate to the normal order flow."""
-    # The normal order handler must remain the source of truth for terms,
-    # blocking, verification and new-order initialization.
     from handlers.order import start_order
 
     pool = await get_pool()
