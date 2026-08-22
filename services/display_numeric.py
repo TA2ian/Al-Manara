@@ -17,6 +17,14 @@ class DisplayDecimal(Decimal):
     def __str__(self) -> str:
         return format(self.quantize(Decimal("0.01")), "f")
 
+    def __format__(self, spec: str) -> str:
+        # Empty f-string formatting (e.g. f"{amount}") is a very common
+        # display path in the bot. Explicit format specs remain untouched so
+        # intentional rate formatting such as :,.0f keeps working.
+        if not spec:
+            return str(self)
+        return super().__format__(spec)
+
 
 _original_create_pool = asyncpg.create_pool
 
