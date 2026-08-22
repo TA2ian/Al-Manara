@@ -1,8 +1,24 @@
 """Notification service."""
 import logging
+from decimal import Decimal, InvalidOperation
+
 from aiogram import Bot
 
 logger = logging.getLogger(__name__)
+
+
+def _format_usdt(value) -> str:
+    try:
+        return f"{Decimal(str(value)):,.3f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.000"
+
+
+def _format_money(value) -> str:
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
 
 
 class NotificationService:
@@ -34,7 +50,7 @@ class NotificationService:
 
 📋 الرقم: #{order['order_number']}
 👤 العميل: {order.get('username', 'N/A')}
-💰 المبلغ: {order['amount_usdt']} USDT
+💰 المبلغ: {_format_usdt(order['amount_usdt'])} USDT
 🌐 الشبكة: {order['network']}
 💱 العملة: {order['payment_currency']}
 
@@ -47,7 +63,7 @@ class NotificationService:
         from services.locale_service import locale_service
         from config import Config
 
-        amount = order['total_amount']
+        amount = _format_money(order['total_amount'])
         currency = 'NEW.SYP' if order['payment_currency'] == 'SYP' else order['payment_currency']
         account = order.get('payment_account_snapshot') or (
             Config.get_shamcash_syp() if currency == 'NEW.SYP' else Config.get_shamcash_usd()
@@ -57,7 +73,6 @@ class NotificationService:
 
         # The payment method is snapshotted on the order. This prevents a later
         # admin change from altering the payment instructions of an existing order.
-        payment_method_code = order.get('payment_method_code')
         if not account or not qr_photo_id:
             # Compatibility fallback for orders created before snapshots existed.
             from database import get_pool
@@ -94,11 +109,11 @@ class NotificationService:
             old_syp_amount = order.get('old_syp_total')
             if old_syp_amount is None:
                 from services.exchange_service import ExchangeService
-                old_syp_amount = ExchangeService.old_syp_equivalent(amount)
+                old_syp_amount = ExchangeService.old_syp_equivalent(order['total_amount'])
             equivalent_line = (
-                f"\nℹ️ يعادل <b>{old_syp_amount:,.2f}</b> ليرة سورية قديمة"
+                f"\nℹ️ يعادل <b>{_format_money(old_syp_amount)}</b> ليرة سورية قديمة"
                 if lang == 'ar'
-                else f"\nℹ️ Equivalent to <b>{old_syp_amount:,.2f}</b> legacy Syrian pounds"
+                else f"\nℹ️ Equivalent to <b>{_format_money(old_syp_amount)}</b> legacy Syrian pounds"
             )
             await self.notify_user(user_id, equivalent_line)
 
