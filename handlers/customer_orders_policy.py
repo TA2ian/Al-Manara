@@ -1,0 +1,129 @@
+"""Customer order-history display policy.
+
+Keeps the existing order-management handlers intact while presenting the exact
+next state from the customer's perspective, especially when the remaining
+step belongs to the admin.
+"""
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from keyboards.inline import orders_pagination_keyboard, receipt_upload_keyboard
+from services.locale_service import locale_service
+from database import get_pool
+
+router = Router()
+PAGE_SIZE = 5
+
+AR_STATUS = {
+    "pending": "⏳ بانتظار موافقة الإدارة",
+    "waiting_payment": "💳 بانتظار دفع المبلغ ورفع الإيصال",
+    "receipt_received": "📎 تم استلام الإيصال — بانتظار مراجعة الإدارة",
+    "payment_confirmed": "🚀 تم تأكيد الدفع — بانتظار إرسال USDT من الإدارة",
+    "completed": "✅ اكتمل الطلب وتم إرسال USDT",
+    "rejected": "❌ تم رفض الطلب",
+    "expired": "⌛ انتهت صلاحية الطلب",
+}
+
+EN_STATUS = {
+    "pending": "⏳ Awaiting admin approval",
+    "waiting_payment": "💳 Awaiting payment and receipt upload",
+    "receipt_received": "📎 Receipt received — awaiting admin review",
+    "payment_confirmed": "🚀 Payment confirmed — awaiting USDT transfer by admin",
+    "completed": "✅ Completed and USDT sent",
+    "rejected": "❌ Order rejected",
+    "expired": "⌛ Order expired",
+}
+
+
+async def _render_page(user_id: int, lang: str, page: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", user_id)
+        if not total:
+            return None, 0, []
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, total_pages))
+        orders = await conn.fetch(
+            "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            user_id, PAGE_SIZE, (page - 1) * PAGE_SIZE,
+        )
+
+    status_map = AR_STATUS if lang == "ar" else EN_STATUS
+    title = "📋 <b>طلباتي</b>" if lang == "ar" else "📋 <b>My Orders</b>"
+    lines = [f"{title} — ({page}/{total_pages})"]
+
+    for order in orders:
+        status = status_map.get(order["status"], order["status"])
+        lines.append(
+            "\n━━━━━━━━━━━━━━━\n"
+            f"📦 <b>#{order['order_number']}</b>\n"
+            f"💰 {order['amount_usdt']} USDT ({order['network']})\n"
+            f"📊 <b>{status}</b>\n"
+            f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
+        )
+
+    return "\n".join(lines), total_pages, orders
+
+
+async def _get_user(message_or_callback):
+    telegram_id = message_or_callback.from_user.id
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id = $1", telegram_id
+        )
+
+
+@router.message(F.text.in_(["📋 طلباتي", "📋 Orders"]))
+async def show_precise_orders(message: Message):
+    user = await _get_user(message)
+    if not user:
+        await message.answer("Please start the bot first: /start")
+        return
+
+    lang = user["language"] or "ar"
+    text, total_pages, orders = await _render_page(user["id"], lang, 1)
+    if not orders:
+        await message.answer(locale_service.get("no_orders", lang))
+        return
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=orders_pagination_keyboard(1, total_pages, lang),
+    )
+
+    # Only the payment-awaiting state requires an immediate customer action.
+    for order in orders:
+        if order["status"] == "waiting_payment":
+            prompt = (
+                f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
+                if lang == "ar" else
+                f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
+            )
+            await message.answer(
+                prompt,
+                parse_mode="HTML",
+                reply_markup=receipt_upload_keyboard(order["id"], lang),
+            )
+
+
+@router.callback_query(F.data.startswith("orders_page_"))
+async def show_precise_orders_page(callback: CallbackQuery):
+    page = int(callback.data.replace("orders_page_", ""))
+    user = await _get_user(callback)
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+
+    lang = user["language"] or "ar"
+    text, total_pages, orders = await _render_page(user["id"], lang, page)
+    if not orders:
+        await callback.answer("📭 لا توجد طلبات", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=orders_pagination_keyboard(page, total_pages, lang),
+    )
+    await callback.answer()
