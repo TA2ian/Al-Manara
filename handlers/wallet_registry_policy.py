@@ -17,6 +17,14 @@ from states import WalletStates
 router = Router()
 
 
+async def _user(telegram_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT id, language FROM users WHERE telegram_id=$1", telegram_id
+        )
+
+
 def _normalize_wallet_qr(value: str) -> str:
     normalized = (value or "").strip()
     for prefix in ("ethereum:", "tron:", "trc20:", "bep20:", "usdt:"):
@@ -27,10 +35,8 @@ def _normalize_wallet_qr(value: str) -> str:
 
 
 async def _lang(telegram_id: int) -> str:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id=$1", telegram_id)
-    return (row["language"] if row else "ar") or "ar"
+    user = await _user(telegram_id)
+    return (user["language"] if user else "ar") or "ar"
 
 
 async def _download_qr(message: Message, file_id: str) -> str:
@@ -151,7 +157,6 @@ async def wallet_label_preserve_order_state(message: Message, state: FSMContext)
             user["id"], address, network, label, qr_photo_id,
         )
 
-    # Preserve every order datum that existed before entering wallet registration.
     preserved = {
         "amount_usdt": data.get("amount_usdt"),
         "return_to_order": bool(data.get("return_to_order")),
