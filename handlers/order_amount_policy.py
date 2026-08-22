@@ -9,18 +9,12 @@ from config import Config
 from database import get_pool
 from keyboards.inline import cancel_keyboard, preset_amounts_keyboard, start_verification_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
-from states import OrderStates, WalletStates
+from services.formatters import usdt
 from services.locale_service import locale_service
+from states import OrderStates, WalletStates
 
 router = Router()
 ACTIVE_STATUSES = ("pending", "waiting_payment", "receipt_received", "payment_confirmed")
-
-
-def _usdt(value) -> str:
-    try:
-        return f"{Decimal(str(value)):,.3f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return "0.000"
 
 
 async def _user(telegram_id: int):
@@ -80,7 +74,6 @@ async def start_order_authoritative(message: Message, state: FSMContext):
     if not user:
         await message.answer("يرجى بدء البوت أولاً: /start")
         return
-
     lang = user["language"] or "ar"
     if not user["terms_accepted"]:
         await message.answer("يرجى قبول الشروط أولاً: /start" if lang == "ar" else "Please accept the terms first: /start")
@@ -92,11 +85,9 @@ async def start_order_authoritative(message: Message, state: FSMContext):
         await message.answer(
             "🔒 <b>يرجى إكمال التوثيق أولاً</b>\n\nلإنشاء طلب، يجب توثيق حسابك أولاً." if lang == "ar" else
             "🔒 <b>Verification required</b>\n\nYou must verify your account before creating an order.",
-            parse_mode="HTML",
-            reply_markup=start_verification_keyboard(lang),
+            parse_mode="HTML", reply_markup=start_verification_keyboard(lang),
         )
         return
-
     active = await _active_order(user["id"])
     if active:
         await message.answer(
@@ -105,11 +96,7 @@ async def start_order_authoritative(message: Message, state: FSMContext):
             parse_mode="HTML",
         )
         return
-
-    await message.answer(
-        locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
-        reply_markup=preset_amounts_keyboard(lang),
-    )
+    await message.answer(locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=preset_amounts_keyboard(lang))
     await state.set_state(OrderStates.waiting_amount)
 
 
@@ -139,8 +126,8 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
     if Decimal(str(today_total or 0)) + amount > Decimal(str(Config.DAILY_LIMIT)):
         remaining = Decimal(str(Config.DAILY_LIMIT)) - Decimal(str(today_total or 0))
         await message.answer(
-            f"❌ تجاوز الحد اليومي.\nالحد اليومي: {_usdt(Config.DAILY_LIMIT)} USDT\nالمستخدم اليوم: {_usdt(today_total)} USDT\nالمبلغ المطلوب: {_usdt(amount)} USDT\nالمتبقي: {_usdt(max(remaining, Decimal('0')))} USDT" if lang == "ar" else
-            f"❌ The daily limit would be exceeded.\nDaily limit: {_usdt(Config.DAILY_LIMIT)} USDT\nUsed today: {_usdt(today_total)} USDT\nRequested: {_usdt(amount)} USDT\nRemaining: {_usdt(max(remaining, Decimal('0')))} USDT"
+            f"❌ تجاوز الحد اليومي.\nالحد اليومي: {usdt(Config.DAILY_LIMIT)} USDT\nالمستخدم اليوم: {usdt(today_total)} USDT\nالمبلغ المطلوب: {usdt(amount)} USDT\nالمتبقي: {usdt(max(remaining, Decimal('0')))} USDT" if lang == "ar" else
+            f"❌ The daily limit would be exceeded.\nDaily limit: {usdt(Config.DAILY_LIMIT)} USDT\nUsed today: {usdt(today_total)} USDT\nRequested: {usdt(amount)} USDT\nRemaining: {usdt(max(remaining, Decimal('0')))} USDT"
         )
         return
     await state.update_data(amount_usdt=amount)
