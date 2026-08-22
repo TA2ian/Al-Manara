@@ -7,6 +7,11 @@ class DispatcherIntegrityTests(unittest.TestCase):
         source = Path("handlers/admin.py").read_text(encoding="utf-8")
         self.assertNotIn("admin_rejection_policy", source)
 
+    def test_handlers_package_has_no_legacy_router_side_effects(self):
+        source = Path("handlers/__init__.py").read_text(encoding="utf-8")
+        self.assertNotIn("from . import order", source)
+        self.assertNotIn("from . import admin_rejection_policy", source)
+
     def test_legacy_order_router_is_not_registered_by_dispatcher(self):
         source = Path("bot.py").read_text(encoding="utf-8")
         self.assertNotIn("dp.include_router(order.router)", source)
