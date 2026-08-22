@@ -24,18 +24,17 @@ async def _user_lang(telegram_id: int) -> str:
 
 
 def _money(value, currency: str) -> str:
-    """Format payment amounts without noisy trailing zeros."""
-    places = 3 if currency == "USD" else 2
-    return f"{Decimal(str(value)):,.{places}f}"
-
-
-def _usdt(value) -> str:
-    """USDT is shown with practical two-decimal precision."""
+    """Format customer payment amounts with exactly two decimals."""
     return f"{Decimal(str(value)):,.2f}"
 
 
+def _usdt(value) -> str:
+    """Format customer-facing USDT with exactly three decimals."""
+    return f"{Decimal(str(value)):,.3f}"
+
+
 def _rate(value) -> str:
-    """Exchange rate is always shown to two decimals for NEW.SYP."""
+    """Format NEW.SYP exchange rates with exactly two decimals."""
     return f"{Decimal(str(value)):,.2f}"
 
 
@@ -59,10 +58,7 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
     else:
         payment_currency = "🇺🇸 الدولار الأمريكي (USD)"
         unit = "USD"
-        rate_block = (
-            "──── 💱 سعر الصرف ────\n"
-            "🔄 <b>1 USD = 1.000 USD</b>\n"
-        )
+        rate_block = ""
 
     return (
         "📋 <b>ملخص طلبك #PENDING</b>\n\n"
@@ -70,7 +66,7 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
         f"💰 المبلغ المطلوب: <b>{_usdt(amount_usdt)} USDT</b>\n"
         f"🌐 الشبكة: {network_display}\n"
         f"📍 العنوان: <code>{data['wallet']}</code>\n\n"
-        f"{rate_block}\n"
+        f"{rate_block}"
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
         "👇 <b>المبلغ الذي سيصل إلى محفظتك:</b>\n"
         f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
@@ -102,7 +98,7 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
     if currency == "NEW.SYP":
         rate_block = f"──── 💱 Exchange Rate ────\n🔄 <b>1 USD = {_rate(calculation['exchange_rate'])} NEW.SYP</b>\n"
     else:
-        rate_block = "──── 💱 Exchange Rate ────\n🔄 <b>1 USD = 1.000 USD</b>\n"
+        rate_block = ""
 
     return (
         "📋 <b>Order Summary #PENDING</b>\n\n"
@@ -110,7 +106,7 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
         f"💰 Requested: <b>{_usdt(amount_usdt)} USDT</b>\n"
         f"🌐 Network: {network_display}\n"
         f"📍 Address: <code>{data['wallet']}</code>\n\n"
-        f"{rate_block}\n"
+        f"{rate_block}"
         f"💳 Payment currency: <b>{unit}</b>\n\n"
         "👇 <b>Amount that will arrive in your wallet:</b>\n"
         f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
