@@ -8,8 +8,9 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from config import Config
 from database import get_pool
-from states import AdminStates
+from services.formatters import usdt
 from services.order_completion_service import complete_order
+from states import AdminStates
 
 router = Router()
 
@@ -37,7 +38,6 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-
     try:
         order_id = int(callback.data.removeprefix("admin_send_usdt_"))
     except ValueError:
@@ -47,19 +47,14 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT order_number, status, network, amount_usdt, wallet_address "
-            "FROM orders WHERE id = $1",
+            "SELECT order_number, status, network, amount_usdt, wallet_address FROM orders WHERE id = $1",
             order_id,
         )
-
     if not order:
         await callback.answer("❌ الطلب غير موجود", show_alert=True)
         return
     if order["status"] != "payment_confirmed":
-        await callback.answer(
-            f"⚠️ لا يمكن إرسال USDT من الحالة الحالية: {order['status']}",
-            show_alert=True,
-        )
+        await callback.answer(f"⚠️ لا يمكن إرسال USDT من الحالة الحالية: {order['status']}", show_alert=True)
         return
 
     await state.clear()
@@ -69,18 +64,15 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         admin_screenshot_id="",
     )
     await state.set_state(AdminStates.waiting_typing_txid)
-
     await callback.message.edit_text(
         f"🚀 <b>إرسال USDT — الطلب #{html.escape(str(order['order_number']))}</b>\n\n"
-        f"💰 المبلغ: <b>{order['amount_usdt']} USDT</b>\n"
+        f"💰 المبلغ: <b>{usdt(order['amount_usdt'])} USDT</b>\n"
         f"🌐 الشبكة: <b>{html.escape(order['network'] or 'TRC20')}</b>\n"
         f"📍 المحفظة: <code>{html.escape(order['wallet_address'])}</code>\n\n"
         "بعد تنفيذ التحويل، أرسل <b>TXID</b> كنص.\n"
         "ويمكنك بدلاً من ذلك إرسال صورة إثبات التحويل، ثم إرسال TXID في رسالة لاحقة.",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_transfer")]
-        ]),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_transfer")]]),
     )
     await callback.answer()
 
@@ -92,10 +84,7 @@ async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text(
-        "⚙️ <b>تم إلغاء إدخال التحويل.</b>\n\nلم يتم تغيير حالة الطلب.",
-        parse_mode="HTML",
-    )
+    await callback.message.edit_text("⚙️ <b>تم إلغاء إدخال التحويل.</b>\n\nلم يتم تغيير حالة الطلب.", parse_mode="HTML")
     await callback.answer("تم الإلغاء")
 
 
@@ -112,7 +101,6 @@ async def admin_transfer_photo_first(message: Message, state: FSMContext):
 
     screenshot_id = message.photo[-1].file_id
     caption_txid = (message.caption or "").strip()
-
     if _valid_txid(caption_txid, network):
         await complete_order(message, state, caption_txid, screenshot_id, order_id)
         return
@@ -134,16 +122,11 @@ async def admin_transfer_txid_after_photo(message: Message, state: FSMContext):
     screenshot_id = data.get("admin_screenshot_id", "")
     network = data.get("admin_txid_network", "TRC20")
     txid = (message.text or "").strip()
-
     if not order_id:
         await message.answer("❌ لا يوجد طلب مرتبط بهذه العملية. ابدأ من زر إرسال USDT.")
         await state.clear()
         return
-
     if not _valid_txid(txid, network):
-        await message.answer(
-            "❌ صيغة TXID غير صحيحة لهذه الشبكة. تحقق من TXID وأرسله مرة أخرى."
-        )
+        await message.answer("❌ صيغة TXID غير صحيحة لهذه الشبكة. تحقق من TXID وأرسله مرة أخرى.")
         return
-
     await complete_order(message, state, txid, screenshot_id, order_id)
