@@ -1,8 +1,8 @@
 """Authoritative admin user-management policy.
 
-Owns user listing, ban/unban, and irreversible user deletion.  The legacy
-admin router remains loaded for compatibility, but this policy is registered
-before it so these flows have one authoritative implementation.
+User deletion is intentionally available only from customer search results,
+not from the customer list, because the list is designed to scale without
+turning every row into an action-heavy UI.
 """
 import html
 import logging
@@ -22,6 +22,18 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
+def _user_action_keyboard(telegram_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
+    action = "admin_unban_" if is_blocked else "admin_ban_"
+    action_text = "✅ فك الحظر" if is_blocked else "🚫 حظر"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=action_text, callback_data=f"{action}{telegram_id}"),
+            InlineKeyboardButton(text="🗑️ حذف", callback_data=f"admin_del_user_{telegram_id}"),
+        ],
+        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+    ])
+
+
 async def _fetch_users():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -34,7 +46,7 @@ async def _fetch_users():
 
 @router.callback_query(F.data == "admin_list_users")
 async def admin_list_users(callback: CallbackQuery):
-    """List active users with safe pagination."""
+    """List active users without destructive/action buttons."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -54,25 +66,18 @@ async def admin_list_users(callback: CallbackQuery):
 async def _render_user_page(callback: CallbackQuery, users, page: int, total_pages: int, page_size: int):
     page = max(0, min(page, total_pages - 1))
     start = page * page_size
-    visible_users = users[start:start + page_size]
     lines = []
-    buttons = []
-
-    for i, user in enumerate(visible_users, start + 1):
+    for i, user in enumerate(users[start:start + page_size], start + 1):
         name = html.escape(user["full_name"] or "—")
         username = html.escape(user["username"] or "—")
         verified = "✅" if user["is_verified"] else "⏳"
         lang_flag = "🇸🇦" if user["language"] == "ar" else "🇬🇧"
-        telegram_id = user["telegram_id"]
         lines.append(
             f"{i}. {verified} <b>{name}</b>\n"
-            f"   🆔 <code>{telegram_id}</code> | @{username} | {lang_flag}"
+            f"   🆔 <code>{user['telegram_id']}</code> | @{username} | {lang_flag}"
         )
-        buttons.append([
-            InlineKeyboardButton(text=f"🚫 حظر #{i}", callback_data=f"admin_ban_{telegram_id}"),
-            InlineKeyboardButton(text=f"🗑️ حذف #{i}", callback_data=f"admin_del_user_{telegram_id}"),
-        ])
 
+    buttons = []
     if total_pages > 1:
         nav = []
         if page > 0:
@@ -81,11 +86,13 @@ async def _render_user_page(callback: CallbackQuery, users, page: int, total_pag
         if page < total_pages - 1:
             nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"users_page_{page + 1}"))
         buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔍 بحث عن عميل", callback_data="admin_search_user")])
     buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")])
 
     text = (
         f"📍 <b>قائمة العملاء</b> ({len(users)})\n"
-        "━━━━━━━━━━━━━━━━━━\n" + "\n".join(lines)
+        "━━━━━━━━━━━━━━━━━━\n" + "\n".join(lines) + "\n\n"
+        "لإدارة أو حذف عميل، استخدم <b>بحث عميل</b>."
     )
     await callback.message.edit_text(
         text,
@@ -289,9 +296,6 @@ async def admin_del_user_execute(callback: CallbackQuery):
             await conn.execute("DELETE FROM feedback_messages WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM audit_logs WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM users WHERE id = $1", user_id)
-
-            # The audit entry intentionally has no user_id because the subject
-            # has just been removed; admin_id remains the accountable actor.
             await conn.execute(
                 "INSERT INTO audit_logs (user_id, admin_id, action, details, severity) "
                 "VALUES (NULL, $1, 'user_deleted', $2, 'warning')",
@@ -302,18 +306,11 @@ async def admin_del_user_execute(callback: CallbackQuery):
     try:
         from aiogram import Bot
         bot = Bot(token=Config.BOT_TOKEN)
-        if lang == "ar":
-            text = (
-                "🗑️ <b>تم حذف حسابك</b>\n\n"
-                "تم حذف حسابك وجميع بياناتك من نظامنا.\n\n"
-                "إذا كان لديك أي استفسار، يمكنك التواصل مع الدعم."
-            )
-        else:
-            text = (
-                "🗑️ <b>Your Account Has Been Deleted</b>\n\n"
-                "Your account and all associated data have been deleted from our system.\n\n"
-                "If you have any questions, you can contact support."
-            )
+        text = (
+            "🗑️ <b>تم حذف حسابك</b>\n\nتم حذف حسابك وجميع بياناتك من نظامنا.\n\nإذا كان لديك أي استفسار، يمكنك التواصل مع الدعم."
+            if lang == "ar" else
+            "🗑️ <b>Your Account Has Been Deleted</b>\n\nYour account and all associated data have been deleted from our system.\n\nIf you have any questions, you can contact support."
+        )
         await bot.send_message(telegram_id, text, parse_mode="HTML")
     except Exception:
         logger.exception("Failed to notify deleted user %s", telegram_id)
