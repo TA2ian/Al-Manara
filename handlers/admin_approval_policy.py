@@ -37,6 +37,53 @@ def _format_money(value) -> str:
         return "0.00"
 
 
+async def _sync_customer_status_message(bot: Bot, order: dict, approved: bool) -> bool:
+    """Replace the customer's stale approval-status message after delivery succeeds."""
+    message_id = order.get("customer_status_message_id")
+    user_id = order.get("telegram_id")
+    if not message_id or not user_id:
+        return False
+
+    lang = order.get("language") or "ar"
+    if approved:
+        text = (
+            f"✅ <b>تمت الموافقة على الطلب #{html.escape(order['order_number'])}</b>\n\n"
+            "💳 تم إرسال بيانات الدفع الرسمية إلى هذه المحادثة.\n"
+            "⏱ يرجى إتمام الدفع ضمن المهلة المحددة ثم رفع الإيصال.\n\n"
+            "⚠️ لا تعتمد على أي بيانات دفع خارج رسالة الموافقة الرسمية."
+            if lang == "ar" else
+            f"✅ <b>Order #{html.escape(order['order_number'])} approved</b>\n\n"
+            "💳 The official payment details have been sent to this chat.\n"
+            "⏱ Complete the payment within the stated deadline, then upload the receipt.\n\n"
+            "⚠️ Do not use payment details from outside the official approval message."
+        )
+    else:
+        text = (
+            f"⏳ <b>الطلب #{html.escape(order['order_number'])} بانتظار موافقة الإدارة.</b>\n\n"
+            "لا ترسل أي مبلغ قبل وصول تعليمات الدفع الرسمية."
+            if lang == "ar" else
+            f"⏳ <b>Order #{html.escape(order['order_number'])} is awaiting admin approval.</b>\n\n"
+            "Do not send any funds before the official payment instructions arrive."
+        )
+
+    try:
+        await bot.edit_message_text(
+            chat_id=user_id,
+            message_id=int(message_id),
+            text=text,
+            parse_mode="HTML",
+        )
+        return True
+    except Exception as exc:
+        # The message may be too old/deleted or the bot may be unable to edit it.
+        # This must never invalidate a successfully delivered payment notification.
+        logger.warning(
+            "Could not synchronize customer status message for order %s: %s",
+            order.get("order_number"), exc,
+        )
+        return False
+
+
 @router.callback_query(F.data.startswith("admin_approve_"))
 async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext):
     """Approve an order only when the complete payment destination can be delivered."""
@@ -125,6 +172,11 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             show_alert=True,
         )
         return
+
+    # The payment destination is now confirmed delivered. Synchronize the
+    # original customer-facing status message so it can never remain visually
+    # stuck on "awaiting admin approval" while the database is waiting_payment.
+    await _sync_customer_status_message(bot, dict(order), approved=True)
 
     try:
         upload_text = (
