@@ -8,6 +8,7 @@ implementation authoritative for their callback/state flows.
 from . import admin
 from . import admin_maintenance_policy
 from . import admin_order_list_policy
+from . import admin_rejection_policy
 from . import admin_settings_policy
 from . import admin_user_management_policy
 from . import admin_utility_policy
@@ -20,6 +21,7 @@ for extracted_router in (
     admin_utility_policy.router,
     admin_maintenance_policy.router,
     admin_settings_policy.router,
+    admin_rejection_policy.router,
 ):
     if extracted_router not in admin.router.sub_routers:
         admin.router.include_router(extracted_router)
