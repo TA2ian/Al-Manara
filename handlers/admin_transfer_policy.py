@@ -1,18 +1,12 @@
-"""Admin transfer-completion input policy.
-
-Makes the final transfer-proof flow explicit: a screenshot can be submitted
-first and the TXID afterward, or a screenshot can carry the TXID in its caption.
-The existing completion function remains the single finalization path.
-"""
+"""Admin transfer-completion input policy."""
 import html
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from config import Config
-from database import get_pool
 from states import AdminStates
+from services.order_completion_service import complete_order
 
 router = Router()
 
@@ -21,19 +15,9 @@ def _valid_txid(txid: str) -> bool:
     return bool(txid and len(txid.strip()) >= 5)
 
 
-async def _order_for_admin(order_id: int):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name FROM orders o "
-            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
-        )
-
-
 @router.message(AdminStates.waiting_typing_txid, F.photo)
 async def admin_transfer_photo_first(message: Message, state: FSMContext):
-    """Accept a proof screenshot even when the admin sends it before the TXID."""
+    """Accept a proof screenshot before the TXID."""
     data = await state.get_data()
     order_id = data.get("admin_txid_order_id")
     if not order_id:
@@ -45,15 +29,15 @@ async def admin_transfer_photo_first(message: Message, state: FSMContext):
     caption_txid = (message.caption or "").strip()
 
     if _valid_txid(caption_txid):
-        from handlers.admin import complete_order
         await complete_order(message, state, caption_txid, screenshot_id, order_id)
         return
 
     await state.update_data(admin_screenshot_id=screenshot_id)
     await message.answer(
         f"📸 <b>تم استلام صورة إثبات التحويل للطلب #{html.escape(str(order_id))}.</b>\n\n"
-        "🔗 الآن أرسل TXID كنص لإكمال الطلب وإرسال الإثبات للعميل."
-    , parse_mode="HTML")
+        "🔗 الآن أرسل TXID كنص لإكمال الطلب وإرسال الإثبات للعميل.",
+        parse_mode="HTML",
+    )
     await state.set_state(AdminStates.waiting_typing_txid)
 
 
@@ -74,5 +58,4 @@ async def admin_transfer_txid_after_photo(message: Message, state: FSMContext):
         await message.answer("❌ TXID غير صالح. أرسل TXID صحيحاً (5 أحرف على الأقل).")
         return
 
-    from handlers.admin import complete_order
     await complete_order(message, state, txid, screenshot_id, order_id)
