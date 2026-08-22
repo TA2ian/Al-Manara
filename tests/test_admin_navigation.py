@@ -40,5 +40,10 @@ def test_order_views_expose_return_to_admin():
 
 
 def test_settings_and_auto_approve_have_back_control():
-    assert "admin_menu" in callback_data(settings_keyboard())
+    data = callback_data(settings_keyboard())
+    assert "admin_menu" in data
+    assert "setting_shamcash_new_syp" in data
+    assert "setting_shamcash_usd" in data
+    assert "setting_rate" in data
+    assert "setting_fees" in data
     assert "admin_menu" in callback_data(auto_approve_keyboard(False))
