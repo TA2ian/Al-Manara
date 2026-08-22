@@ -80,6 +80,18 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await self._insert_order()
 
+    async def test_missing_payment_account_is_rejected(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE payment_methods SET account_identifier='' WHERE code='shamcash_new_syp'")
+        with self.assertRaises(Exception):
+            await self._insert_order()
+
+    async def test_missing_payment_qr_is_rejected(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE payment_methods SET qr_photo_id=NULL WHERE code='shamcash_new_syp'")
+        with self.assertRaises(Exception):
+            await self._insert_order()
+
     async def test_legacy_syp_is_normalized_to_new_syp(self):
         row = await self._insert_order()
         async with self.pool.acquire() as conn:
