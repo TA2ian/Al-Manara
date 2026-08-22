@@ -316,5 +316,6 @@ async def payment_method_toggle(callback: CallbackQuery):
     if not row:
         await callback.answer("وسيلة الدفع غير موجودة", show_alert=True)
         return
-    await callback.answer("✅ تم تحديث حالة وسيلة الدفع")
+    # payment_method_view renders the updated state and answers the callback;
+    # do not acknowledge the same callback twice.
     await payment_method_view(callback)
