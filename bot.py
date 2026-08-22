@@ -10,6 +10,7 @@ def create_dispatcher() -> Dispatcher:
         order_wallet_policy,
         payment_currency_policy,
         legacy_wallet_guard,
+        wallet_registry_policy,
         wallets,
         order_amount_policy,
         order,
@@ -55,6 +56,9 @@ def create_dispatcher() -> Dispatcher:
     # and must run before the legacy order router.
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
+    # Wallet registration policy must precede the legacy wallet router so the
+    # order amount survives wallet registration and image documents are accepted.
+    dp.include_router(wallet_registry_policy.router)
     dp.include_router(wallets.router)
     # Amount handling must precede legacy order handlers so only verified saved
     # wallets are shown and selected during order creation.
@@ -90,8 +94,8 @@ def create_dispatcher() -> Dispatcher:
     # QR handler; successful validation delegates to that existing flow.
     dp.include_router(shamcash_verification_policy.router)
     dp.include_router(admin.router)
-    # Language switching must precede the legacy menu language callbacks so
-    # the prompt and result always use the user's selected language.
+    # Language switching must precede the legacy menu language callbacks so the
+    # prompt and result always use the user's selected language.
     dp.include_router(language_policy.router)
     dp.include_router(verification.router)
     # Customer navigation policy must precede the legacy menu so old callbacks
