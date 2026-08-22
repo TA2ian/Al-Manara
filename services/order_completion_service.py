@@ -1,4 +1,5 @@
 """Service for finalizing an approved USDT order."""
+import asyncio
 import html
 import logging
 
@@ -6,6 +7,7 @@ from aiogram import Bot
 
 from config import Config
 from database import get_pool
+from services.order_state_service import InvalidOrderTransition, transition_order
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +30,19 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             await state.clear()
             return False
 
-        # Make the state transition itself atomic so two concurrent admin
-        # actions cannot finalize the same order with different TXIDs.
-        updated = await conn.execute(
-            "UPDATE orders SET status = 'completed', txid = $1, completed_at = NOW(), "
-            "wallet_qr_photo_id = NULL, receipt_photo_id = NULL "
-            "WHERE id = $2 AND status = 'payment_confirmed'",
-            txid,
-            order_id,
-        )
-        if updated != "UPDATE 1":
+        try:
+            order = await transition_order(
+                conn,
+                order_id,
+                "completed",
+                updates={
+                    "txid": txid,
+                    "completed_at": __import__("datetime").datetime.now(),
+                    "wallet_qr_photo_id": None,
+                    "receipt_photo_id": None,
+                },
+            )
+        except InvalidOrderTransition:
             await msg.answer("⚠️ تم إكمال هذا الطلب مسبقاً أو تغيرت حالته.")
             await state.clear()
             return False
@@ -57,7 +62,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             f"✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
             f"📦 الطلب: #{order['order_number']}\n"
             f"💰 المبلغ: {order['amount_usdt']} USDT إلى {network_name}\n"
-            f"🔗 TXID: <code>{txid}</code>\n\n"
+            f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
             "يمكنك التحقق من المعاملة عبر مستكشف الشبكة."
         )
     else:
@@ -65,7 +70,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             f"✅ <b>Your order has been completed!</b>\n\n"
             f"📦 Order: #{order['order_number']}\n"
             f"💰 Amount: {order['amount_usdt']} USDT on {network_name}\n"
-            f"🔗 TXID: <code>{txid}</code>\n\n"
+            f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
             "You can verify the transaction on the network explorer."
         )
 
@@ -93,28 +98,16 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
     except Exception:
         logger.exception("Failed to notify customer for completed order %s", order_id)
 
-    if comp_lang == "ar":
-        admin_done = (
-            f"✅ <b>تم إكمال الطلب</b>\n\n"
-            f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
-            f"🆔 <code>{order['telegram_id']}</code>\n"
-            f"📦 الطلب: #{order['order_number']}\n"
-            f"💰 {order['amount_usdt']} USDT\n"
-            f"🌐 {network_name}\n"
-            f"🔗 TXID: <code>{txid}</code>"
-        )
-    else:
-        admin_done = (
-            f"✅ <b>Order completed</b>\n\n"
-            f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
-            f"🆔 <code>{order['telegram_id']}</code>\n"
-            f"📦 Order: #{order['order_number']}\n"
-            f"💰 {order['amount_usdt']} USDT\n"
-            f"🌐 {network_name}\n"
-            f"🔗 TXID: <code>{txid}</code>"
-        )
+    admin_done = (
+        f"✅ <b>{'تم إكمال الطلب' if comp_lang == 'ar' else 'Order completed'}</b>\n\n"
+        f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
+        f"🆔 <code>{order['telegram_id']}</code>\n"
+        f"📦 {'الطلب' if comp_lang == 'ar' else 'Order'}: #{order['order_number']}\n"
+        f"💰 {order['amount_usdt']} USDT\n"
+        f"🌐 {html.escape(network_name)}\n"
+        f"🔗 TXID: <code>{html.escape(txid)}</code>"
+    )
 
-    import asyncio
     await asyncio.gather(*[
         bot.send_message(admin_id, admin_done, parse_mode="HTML")
         for admin_id in Config.ADMIN_IDS
