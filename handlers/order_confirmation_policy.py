@@ -16,6 +16,7 @@ from config import Config
 from database import get_pool
 from keyboards.inline import main_menu_inline, order_admin_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
+from services.formatters import money, usdt
 from services.locale_service import locale_service
 from states import OrderStates
 
@@ -136,10 +137,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"👤 العميل: {customer_name}\n"
             f"🆔 المعرف: <code>{callback.from_user.id}</code>\n"
             f"👤 المستخدم: @{username}\n"
-            f"💰 الكمية: {data['amount_usdt']:,.3f} USDT\n"
+            f"💰 الكمية: {usdt(data['amount_usdt'])} USDT\n"
             f"🌐 الشبكة: {data['network']}\n"
             f"💱 عملة الدفع: {currency}\n"
-            f"💵 الإجمالي: {calculation['total_amount']:,.2f} {currency}\n"
+            f"💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{data['wallet_address']}</code>\n\n"
             "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع بعد الموافقة."
         )
@@ -162,8 +163,6 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             if lang == "ar" else
             "⏳ Your order has been sent to the administration for review. Do not send any payment yet; official payment instructions will appear after approval.",
         )
-        # Persisting this UI pointer is a convenience feature. Failure here
-        # must never turn a successfully-created order into a reported error.
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
