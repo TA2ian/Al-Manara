@@ -13,17 +13,6 @@ from config import Config
 router = Router()
 
 
-WELCOME_TEXT_AR = """🎉 <b>أهلاً وسهلاً يا {name}!</b>
-
-تم تفعيل حسابك بنجاح ✅
-
-يمكنك الآن:
-💰 إنشاء طلب شحن USDT جديد
-📋 متابعة طلباتك السابقة
-
-اضغط على الأزرار أدناه 👇"""
-
-
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     """Handle /start and keep the Telegram username current.
@@ -60,14 +49,9 @@ async def cmd_start(message: Message, state: FSMContext):
         )
         return
 
-    await message.answer(
-        locale_service.get('bot_intro', 'ar'),
-        parse_mode='HTML'
-    )
-    await message.answer(
-        locale_service.get('select_language', 'ar'),
-        reply_markup=language_select_keyboard()
-    )
+    # The language is not known yet, so do not send Arabic-only customer copy.
+    # The selected language is used for every following screen.
+    await message.answer("🌐", reply_markup=language_select_keyboard())
     await state.set_state(TermsStates.waiting_acceptance)
 
 
@@ -101,6 +85,7 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
             VALUES ($1, $2, $3, TRUE, NOW())
             ON CONFLICT (telegram_id) DO UPDATE SET
                 username = EXCLUDED.username,
+                language = EXCLUDED.language,
                 terms_accepted = TRUE,
                 terms_accepted_at = NOW()
         """, callback.from_user.id, username, lang)
