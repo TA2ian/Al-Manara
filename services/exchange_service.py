@@ -46,11 +46,15 @@ class ExchangeService:
                     rate = (rate / OLD_SYP_PER_NEW_SYP).quantize(
                         RATE_QUANT, rounding=ROUND_HALF_UP
                     )
+                if rate <= 0:
+                    return None
                 self._cache["rate"] = rate
                 self._cache_time = datetime.now()
                 return rate
 
-            return Decimal("150.00")
+            # A financial quote must never be generated from a hard-coded
+            # fallback rate. The caller must surface the unavailable-rate state.
+            return None
 
     async def update_rate(self, rate, admin_id: int) -> bool:
         """Update the USD/NEW.SYP rate after strict positive-value validation."""
