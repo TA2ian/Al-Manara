@@ -41,7 +41,12 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Send the immutable payment snapshot after approval."""
+        """Deliver the immutable payment snapshot as one mandatory QR message.
+
+        The account, amount, currency and deadline are included in the same
+        Telegram photo caption as the QR. This avoids approving an order after
+        only a partial payment-instructions message was delivered.
+        """
         from config import Config
         from services.exchange_service import ExchangeService
 
@@ -55,10 +60,14 @@ class NotificationService:
 
         if not account or not qr_photo_id:
             logger.error("Incomplete payment snapshot for approved order %s: account=%r qr=%r", order_number, bool(account), bool(qr_photo_id))
-            await self.notify_user(
-                user_id,
-                (f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة." if lang == "ar" else f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration."),
-            )
+            try:
+                await self.notify_user(
+                    user_id,
+                    (f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة." if lang == "ar" else
+                     f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration."),
+                )
+            except Exception:
+                logger.exception("Failed to send incomplete-payment warning for %s", order_number)
             return False
 
         old_syp_line = ""
@@ -66,43 +75,47 @@ class NotificationService:
             old_syp_amount = order.get("old_syp_total")
             if old_syp_amount is None:
                 old_syp_amount = ExchangeService.old_syp_equivalent(order.get("total_amount"))
-            old_syp_line = (f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة" if lang == "ar" else f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds")
-
-        if lang == "ar":
-            text = (
-                f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
-                "💳 <b>بيانات الدفع الرسمية</b>\n"
-                f"🏦 الجهة: <b>{name}</b>\n"
-                f"💱 عملة الدفع: <b>{currency}</b>\n"
-                f"💰 المبلغ المطلوب: <b>{amount} {currency}</b>\n"
-                f"📱 حساب شام كاش: <code>{account}</code>\n"
-                f"⏱ مهلة الدفع: <b>{timeout} دقيقة</b>{old_syp_line}\n\n"
-                "⚠️ <b>لا ترسل أي مبلغ قبل التأكد من أن بيانات الدفع مطابقة لهذه الرسالة.</b>\n"
-                "بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
+            old_syp_line = (
+                f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة"
+                if lang == "ar" else
+                f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
             )
-        else:
-            text = (
-                f"🔔 <b>Your order #{order_number} has been approved</b>\n\n"
-                "💳 <b>Official Payment Details</b>\n"
-                f"🏦 Provider: <b>{name}</b>\n"
-                f"💱 Payment currency: <b>{currency}</b>\n"
-                f"💰 Amount due: <b>{amount} {currency}</b>\n"
-                f"📱 ShamCash account: <code>{account}</code>\n"
-                f"⏱ Payment deadline: <b>{timeout} minutes</b>{old_syp_line}\n\n"
-                "⚠️ <b>Do not send funds until these payment details match this message.</b>\n"
-                "After payment, use the receipt-upload button to submit your proof."
-            )
-
-        await self.notify_user(user_id, text)
 
         caption = (
-            f"💳 <b>QR الدفع — {name}</b>\n📦 الطلب: <b>#{order_number}</b>\n💰 المبلغ: <b>{amount} {currency}</b>\n📱 الحساب: <code>{account}</code>"
+            f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
+            "💳 <b>بيانات الدفع الرسمية</b>\n"
+            f"🏦 الجهة: <b>{name}</b>\n"
+            f"💱 عملة الدفع: <b>{currency}</b>\n"
+            f"💰 المبلغ المطلوب: <b>{amount} {currency}</b>\n"
+            f"📱 حساب شام كاش: <code>{account}</code>\n"
+            f"⏱ مهلة الدفع: <b>{timeout} دقيقة</b>{old_syp_line}\n\n"
+            "⚠️ <b>لا ترسل أي مبلغ قبل التأكد من مطابقة هذه البيانات.</b>"
             if lang == "ar" else
-            f"💳 <b>Payment QR — {name}</b>\n📦 Order: <b>#{order_number}</b>\n💰 Amount: <b>{amount} {currency}</b>\n📱 Account: <code>{account}</code>"
+            f"🔔 <b>Your order #{order_number} has been approved</b>\n\n"
+            "💳 <b>Official Payment Details</b>\n"
+            f"🏦 Provider: <b>{name}</b>\n"
+            f"💱 Payment currency: <b>{currency}</b>\n"
+            f"💰 Amount due: <b>{amount} {currency}</b>\n"
+            f"📱 ShamCash account: <code>{account}</code>\n"
+            f"⏱ Payment deadline: <b>{timeout} minutes</b>{old_syp_line}\n\n"
+            "⚠️ <b>Do not send funds until these details match.</b>"
         )
+
         try:
             await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
         except Exception as exc:
-            logger.exception("Failed to send mandatory payment QR for order %s", order_number)
-            raise RuntimeError("payment_qr_delivery_failed") from exc
+            logger.exception("Failed to send mandatory payment snapshot for order %s", order_number)
+            raise RuntimeError("payment_snapshot_delivery_failed") from exc
+
+        try:
+            await self.notify_user(
+                user_id,
+                "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
+                if lang == "ar" else
+                "📎 After payment, use the receipt-upload button to submit your proof.",
+            )
+        except Exception:
+            # The mandatory payment snapshot was already delivered; a failure of
+            # this secondary instruction must not roll the approved order back.
+            logger.exception("Failed to send secondary receipt instruction for %s", order_number)
         return True
