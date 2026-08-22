@@ -17,9 +17,16 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+async def _user_lang(telegram_id: int) -> str:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id=$1", telegram_id)
+    return (row['language'] if row else 'ar') or 'ar'
+
+
 @router.callback_query(F.data == "start_verification")
 async def start_verification(callback: CallbackQuery, state: FSMContext):
-    """Start mandatory account verification."""
+    """Explain requirements first, then start mandatory account verification."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", callback.from_user.id)
@@ -29,7 +36,39 @@ async def start_verification(callback: CallbackQuery, state: FSMContext):
 
     lang = user['language'] or 'ar'
     await state.clear()
-    await callback.message.edit_text(locale_service.get('verification_prompt', lang), parse_mode='HTML')
+
+    requirements = (
+        "🔒 <b>متطلبات التوثيق قبل البدء</b>\n\n"
+        "يرجى تجهيز المعلومات التالية أولاً:\n\n"
+        "1️⃣ <b>رقم هاتفك</b>\n"
+        "يجب مشاركته من حساب Telegram نفسه عبر زر مشاركة رقم الهاتف.\n\n"
+        "2️⃣ <b>الاسم الكامل</b>\n"
+        "يجب أن يكون الاسم المرتبط بحسابك في ShamCash.\n\n"
+        "3️⃣ <b>حساب ShamCash</b>\n"
+        "اسم المستخدم أو رقم/معرّف الحساب كما يظهر في ShamCash.\n\n"
+        "4️⃣ <b>صورة QR لحساب ShamCash</b>\n"
+        "يجب أن تكون واضحة وتخص الحساب نفسه، وهي مطلوبة لمطابقة الحساب أثناء المراجعة.\n\n"
+        "⚠️ <b>مهم:</b> لا يمكن تخطي أي من هذه المتطلبات.\n"
+        "📋 بعد إرسال البيانات، تتم مراجعتها من الإدارة قبل تفعيل الحساب.\n\n"
+        "إذا كانت هذه المتطلبات جاهزة لديك، سنبدأ التوثيق الآن."
+    ) if lang == 'ar' else (
+        "🔒 <b>Verification requirements before you start</b>\n\n"
+        "Please prepare the following first:\n\n"
+        "1️⃣ <b>Your phone number</b>\n"
+        "It must be shared from this Telegram account using the Share Phone Number button.\n\n"
+        "2️⃣ <b>Full name</b>\n"
+        "It must match the name associated with your ShamCash account.\n\n"
+        "3️⃣ <b>ShamCash account</b>\n"
+        "Your ShamCash username or account identifier as shown in ShamCash.\n\n"
+        "4️⃣ <b>ShamCash account QR image</b>\n"
+        "It must be clear, belong to the same account, and is required for account matching during review.\n\n"
+        "⚠️ <b>Important:</b> None of these requirements can be skipped.\n"
+        "📋 After submission, the information is reviewed by the admin before the account is activated.\n\n"
+        "If you have everything ready, we will start verification now."
+    )
+
+    await callback.message.edit_text(requirements, parse_mode='HTML')
+
     if not user.get('phone_verified'):
         await callback.message.answer(
             "📱 <b>الخطوة 1 من 4: رقم الهاتف</b>\n\nيجب مشاركة رقم الهاتف من حساب Telegram نفسه لإكمال التوثيق."
@@ -92,13 +131,6 @@ async def _ask_full_name(message: Message, state: FSMContext, lang: str):
         parse_mode='HTML'
     )
     await state.set_state(VerificationStates.waiting_full_name)
-
-
-async def _user_lang(telegram_id: int) -> str:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id=$1", telegram_id)
-    return (row['language'] if row else 'ar') or 'ar'
 
 
 @router.message(VerificationStates.waiting_full_name)
