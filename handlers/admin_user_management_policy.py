@@ -22,18 +22,6 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-def _user_action_keyboard(telegram_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
-    action = "admin_unban_" if is_blocked else "admin_ban_"
-    action_text = "✅ فك الحظر" if is_blocked else "🚫 حظر"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=action_text, callback_data=f"{action}{telegram_id}"),
-            InlineKeyboardButton(text="🗑️ حذف", callback_data=f"admin_del_user_{telegram_id}"),
-        ],
-        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
-    ])
-
-
 async def _fetch_users():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -66,18 +54,25 @@ async def admin_list_users(callback: CallbackQuery):
 async def _render_user_page(callback: CallbackQuery, users, page: int, total_pages: int, page_size: int):
     page = max(0, min(page, total_pages - 1))
     start = page * page_size
+    visible_users = users[start:start + page_size]
     lines = []
-    for i, user in enumerate(users[start:start + page_size], start + 1):
+    buttons = []
+
+    for i, user in enumerate(visible_users, start + 1):
         name = html.escape(user["full_name"] or "—")
         username = html.escape(user["username"] or "—")
         verified = "✅" if user["is_verified"] else "⏳"
         lang_flag = "🇸🇦" if user["language"] == "ar" else "🇬🇧"
+        telegram_id = user["telegram_id"]
         lines.append(
             f"{i}. {verified} <b>{name}</b>\n"
-            f"   🆔 <code>{user['telegram_id']}</code> | @{username} | {lang_flag}"
+            f"   🆔 <code>{telegram_id}</code> | @{username} | {lang_flag}"
         )
+        buttons.append([
+            InlineKeyboardButton(text=f"🚫 حظر #{i}", callback_data=f"admin_ban_{telegram_id}"),
+            InlineKeyboardButton(text=f"🗑️ حذف #{i}", callback_data=f"admin_del_user_{telegram_id}"),
+        ])
 
-    buttons = []
     if total_pages > 1:
         nav = []
         if page > 0:
