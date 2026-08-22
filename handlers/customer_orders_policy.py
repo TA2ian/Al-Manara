@@ -1,16 +1,12 @@
-"""Customer order-history display policy.
-
-Keeps the existing order-management handlers intact while presenting the exact
-next state from the customer's perspective, especially when the remaining
-step belongs to the admin.
-"""
-from decimal import Decimal, InvalidOperation
+"""Customer order-history display policy."""
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
+
 from keyboards.inline import orders_pagination_keyboard, receipt_upload_keyboard
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
+from services.formatters import usdt
 from database import get_pool
 from config import Config
 
@@ -38,14 +34,6 @@ EN_STATUS = {
 }
 
 
-def _format_usdt(value) -> str:
-    """Format customer-facing USDT amounts consistently to three decimals."""
-    try:
-        return f"{Decimal(str(value)):,.3f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return "0.000"
-
-
 async def _render_page(user_id: int, lang: str, page: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -68,7 +56,7 @@ async def _render_page(user_id: int, lang: str, page: int):
         lines.append(
             "\n━━━━━━━━━━━━━━━\n"
             f"📦 <b>#{order['order_number']}</b>\n"
-            f"💰 {_format_usdt(order['amount_usdt'])} USDT ({order['network']})\n"
+            f"💰 {usdt(order['amount_usdt'])} USDT ({order['network']})\n"
             f"📊 <b>{status}</b>\n"
             f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
         )
@@ -80,47 +68,29 @@ async def _get_user(message_or_callback):
     telegram_id = message_or_callback.from_user.id
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            "SELECT id, language FROM users WHERE telegram_id = $1", telegram_id
-        )
+        return await conn.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
 
 
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
-    """Recover an older approved order whose customer status message was not tracked."""
     if order["status"] != "waiting_payment" or order.get("customer_status_message_id"):
         return False
-
     try:
         bot = Bot(token=Config.BOT_TOKEN)
         notification = NotificationService(bot, Config.ADMIN_IDS)
-        delivered = await notification.notify_order_approved(
-            message.from_user.id,
-            dict(order),
-            lang=lang,
-        )
+        delivered = await notification.notify_order_approved(message.from_user.id, dict(order), lang=lang)
         if not delivered:
             return False
-
         prompt = (
             f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
             if lang == "ar" else
             f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
         )
-        prompt_message = await message.answer(
-            prompt,
-            parse_mode="HTML",
-            reply_markup=receipt_upload_keyboard(order["id"], lang),
-        )
+        prompt_message = await message.answer(prompt, parse_mode="HTML", reply_markup=receipt_upload_keyboard(order["id"], lang))
         pool = await get_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE orders SET customer_status_message_id = $1 WHERE id = $2",
-                prompt_message.message_id,
-                order["id"],
-            )
+            await conn.execute("UPDATE orders SET customer_status_message_id = $1 WHERE id = $2", prompt_message.message_id, order["id"])
         return True
     except Exception:
-        # The order remains waiting_payment; this is only a visibility repair.
         return False
 
 
@@ -130,19 +100,12 @@ async def show_precise_orders(message: Message):
     if not user:
         await message.answer("يرجى بدء البوت أولاً: /start")
         return
-
     lang = user["language"] or "ar"
     text, total_pages, orders = await _render_page(user["id"], lang, 1)
     if not orders:
         await message.answer(locale_service.get("no_orders", lang))
         return
-
-    await message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=orders_pagination_keyboard(1, total_pages, lang),
-    )
-
+    await message.answer(text, parse_mode="HTML", reply_markup=orders_pagination_keyboard(1, total_pages, lang))
     for order in orders:
         if order["status"] == "waiting_payment":
             repaired = await _repair_waiting_payment_visibility(message, order, lang)
@@ -152,11 +115,7 @@ async def show_precise_orders(message: Message):
                     if lang == "ar" else
                     f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
                 )
-                await message.answer(
-                    prompt,
-                    parse_mode="HTML",
-                    reply_markup=receipt_upload_keyboard(order["id"], lang),
-                )
+                await message.answer(prompt, parse_mode="HTML", reply_markup=receipt_upload_keyboard(order["id"], lang))
 
 
 @router.callback_query(F.data.startswith("orders_page_"))
@@ -166,16 +125,10 @@ async def show_precise_orders_page(callback: CallbackQuery):
     if not user:
         await callback.answer("❌ المستخدم غير موجود", show_alert=True)
         return
-
     lang = user["language"] or "ar"
     text, total_pages, orders = await _render_page(user["id"], lang, page)
     if not orders:
         await callback.answer("📭 لا توجد طلبات", show_alert=True)
         return
-
-    await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=orders_pagination_keyboard(page, total_pages, lang),
-    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=orders_pagination_keyboard(page, total_pages, lang))
     await callback.answer()
