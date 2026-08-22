@@ -1,5 +1,4 @@
 """Active-order customer guidance policy."""
-from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.types import Message
@@ -7,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from database import get_pool
 from keyboards.reply import compact_reply_keyboard
+from services.formatters import usdt
 
 router = Router()
 
@@ -18,14 +18,6 @@ ACTIVE_STATUSES = (
 )
 
 
-def _format_usdt(value) -> str:
-    """Format active-order USDT amounts consistently to three decimals."""
-    try:
-        return f"{Decimal(str(value)):,.3f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return "0.000"
-
-
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
 async def guide_active_order(message: Message, state: FSMContext):
     """Guide active customers; otherwise delegate to the normal order flow."""
@@ -34,19 +26,15 @@ async def guide_active_order(message: Message, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            "SELECT id, language, terms_accepted, is_blocked, is_verified "
-            "FROM users WHERE telegram_id = $1",
+            "SELECT id, language, terms_accepted, is_blocked, is_verified FROM users WHERE telegram_id = $1",
             message.from_user.id,
         )
-
         if not user or not user["terms_accepted"] or user["is_blocked"] or not user["is_verified"]:
             await start_order(message, state)
             return
-
         active_order = await conn.fetchrow(
-            "SELECT order_number, created_at, amount_usdt, status "
-            "FROM orders WHERE user_id = $1 AND status = ANY($2) "
-            "ORDER BY created_at DESC LIMIT 1",
+            "SELECT order_number, created_at, amount_usdt, status FROM orders "
+            "WHERE user_id = $1 AND status = ANY($2) ORDER BY created_at DESC LIMIT 1",
             user["id"], ACTIVE_STATUSES,
         )
 
@@ -55,7 +43,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         return
 
     lang = user["language"] or "ar"
-    amount_usdt = _format_usdt(active_order["amount_usdt"])
+    amount_usdt = usdt(active_order["amount_usdt"])
     if lang == "ar":
         status_map = {
             "pending": "بانتظار موافقة الإدارة",
@@ -89,8 +77,4 @@ async def guide_active_order(message: Message, state: FSMContext):
             "You cannot create another order until the current one is completed."
         )
 
-    await message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=compact_reply_keyboard(lang),
-    )
+    await message.answer(text, parse_mode="HTML", reply_markup=compact_reply_keyboard(lang))
