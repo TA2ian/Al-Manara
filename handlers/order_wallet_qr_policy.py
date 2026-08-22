@@ -9,6 +9,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
+from database import get_pool
 from states import WalletStates
 
 router = Router()
@@ -18,7 +19,10 @@ async def _block_order_skip(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if not data.get("return_to_order"):
         return False
-    lang = data.get("language", "ar")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", callback.from_user.id)
+    lang = (row["language"] if row and row["language"] in ("ar", "en") else "ar")
     await callback.answer(
         "❌ لا يمكن تخطي QR عند إنشاء طلب. أرسل QR المطابق لنفس العنوان." if lang == "ar" else
         "❌ QR cannot be skipped during order creation. Send the matching QR for this address.",
