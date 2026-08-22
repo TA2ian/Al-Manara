@@ -1,5 +1,6 @@
 """Admin transfer-completion input policy."""
 import html
+import re
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -17,8 +18,17 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-def _valid_txid(txid: str) -> bool:
-    return bool(txid and len(txid.strip()) >= 5)
+def _valid_txid(txid: str, network: str | None = None) -> bool:
+    """Validate the transaction hash shape without claiming on-chain confirmation."""
+    value = (txid or "").strip()
+    if not value:
+        return False
+    normalized = (network or "TRC20").upper()
+    if normalized == "TRC20":
+        return bool(re.fullmatch(r"[0-9a-fA-F]{64}", value))
+    if normalized in {"BEP20", "ERC20"}:
+        return bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", value))
+    return bool(re.fullmatch(r"[0-9A-Za-z_-]{32,128}", value))
 
 
 @router.callback_query(F.data.startswith("admin_send_usdt_"))
@@ -53,13 +63,17 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.clear()
-    await state.update_data(admin_txid_order_id=order_id, admin_screenshot_id="")
+    await state.update_data(
+        admin_txid_order_id=order_id,
+        admin_txid_network=order["network"] or "TRC20",
+        admin_screenshot_id="",
+    )
     await state.set_state(AdminStates.waiting_typing_txid)
 
     await callback.message.edit_text(
-        f"🚀 <b>إرسال USDT — الطلب #{html.escape(order['order_number'])}</b>\n\n"
+        f"🚀 <b>إرسال USDT — الطلب #{html.escape(str(order['order_number']))}</b>\n\n"
         f"💰 المبلغ: <b>{order['amount_usdt']} USDT</b>\n"
-        f"🌐 الشبكة: <b>{html.escape(order['network'])}</b>\n"
+        f"🌐 الشبكة: <b>{html.escape(order['network'] or 'TRC20')}</b>\n"
         f"📍 المحفظة: <code>{html.escape(order['wallet_address'])}</code>\n\n"
         "بعد تنفيذ التحويل، أرسل <b>TXID</b> كنص.\n"
         "ويمكنك بدلاً من ذلك إرسال صورة إثبات التحويل، ثم إرسال TXID في رسالة لاحقة.",
@@ -79,8 +93,7 @@ async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await callback.message.edit_text(
-        "⚙️ <b>تم إلغاء إدخال التحويل.</b>\n\n"
-        "لم يتم تغيير حالة الطلب.",
+        "⚙️ <b>تم إلغاء إدخال التحويل.</b>\n\nلم يتم تغيير حالة الطلب.",
         parse_mode="HTML",
     )
     await callback.answer("تم الإلغاء")
@@ -91,6 +104,7 @@ async def admin_transfer_photo_first(message: Message, state: FSMContext):
     """Accept a proof screenshot before the TXID."""
     data = await state.get_data()
     order_id = data.get("admin_txid_order_id")
+    network = data.get("admin_txid_network", "TRC20")
     if not order_id:
         await message.answer("❌ لا يوجد طلب مرتبط بهذه العملية. ابدأ من زر إرسال USDT.")
         await state.clear()
@@ -99,14 +113,14 @@ async def admin_transfer_photo_first(message: Message, state: FSMContext):
     screenshot_id = message.photo[-1].file_id
     caption_txid = (message.caption or "").strip()
 
-    if _valid_txid(caption_txid):
+    if _valid_txid(caption_txid, network):
         await complete_order(message, state, caption_txid, screenshot_id, order_id)
         return
 
     await state.update_data(admin_screenshot_id=screenshot_id)
     await message.answer(
         f"📸 <b>تم استلام صورة إثبات التحويل للطلب #{html.escape(str(order_id))}.</b>\n\n"
-        "🔗 الآن أرسل TXID كنص لإكمال الطلب وإرسال الإثبات للعميل.",
+        "🔗 الآن أرسل TXID الصحيح كنص لإكمال الطلب وإرسال الإثبات للعميل.",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_typing_txid)
@@ -118,6 +132,7 @@ async def admin_transfer_txid_after_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     order_id = data.get("admin_txid_order_id")
     screenshot_id = data.get("admin_screenshot_id", "")
+    network = data.get("admin_txid_network", "TRC20")
     txid = (message.text or "").strip()
 
     if not order_id:
@@ -125,8 +140,10 @@ async def admin_transfer_txid_after_photo(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    if not _valid_txid(txid):
-        await message.answer("❌ TXID غير صالح. أرسل TXID صحيحاً (5 أحرف على الأقل).")
+    if not _valid_txid(txid, network):
+        await message.answer(
+            "❌ صيغة TXID غير صحيحة لهذه الشبكة. تحقق من TXID وأرسله مرة أخرى."
+        )
         return
 
     await complete_order(message, state, txid, screenshot_id, order_id)
