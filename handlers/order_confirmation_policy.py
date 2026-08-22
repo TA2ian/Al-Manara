@@ -6,7 +6,7 @@ order snapshot and notifies admins.
 """
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
@@ -14,11 +14,9 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import main_menu_inline, order_admin_keyboard, receipt_upload_keyboard
+from keyboards.inline import main_menu_inline, order_admin_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.locale_service import locale_service
-from services.notification_service import NotificationService
-from services.settings_service import SettingsService
 from states import OrderStates
 
 router = Router()
