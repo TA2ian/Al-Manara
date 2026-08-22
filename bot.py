@@ -39,6 +39,7 @@ def create_dispatcher() -> Dispatcher:
         customer_settings_policy,
         menu,
         admin_tools_policy,
+        admin_search_policy,
     )
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
@@ -52,9 +53,8 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
-    # Fallback/admin utility router must precede legacy handlers for callbacks
-    # such as customer search, backups, order notes, and terms decline.
     dp.include_router(admin_tools_policy.router)
+    dp.include_router(admin_search_policy.router)
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
     dp.include_router(payment_currency_policy.router)
