@@ -10,8 +10,6 @@ from aiogram import Bot
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from config import Config
-# Install the NUMERIC display codec before database creates its pool.
-import services.display_numeric  # noqa: F401
 from database import init_db, close_db, get_pool
 from bot import create_dispatcher
 from keep_alive import keep_alive
