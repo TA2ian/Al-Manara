@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from aiohttp import web
 from aiogram import Bot
@@ -29,6 +30,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _format_usdt(value) -> str:
+    """Format USDT consistently for customer-facing notifications."""
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
+
+
 async def send_expiry_reminders(bot: Bot):
     """Background task: warn users 10 minutes before payment deadline."""
     while True:
@@ -45,16 +54,17 @@ async def send_expiry_reminders(bot: Bot):
                     for order in soon_expiring:
                         remaining = int((order['payment_deadline'] - datetime.now()).total_seconds() / 60)
                         lang = order['language'] or 'ar'
+                        amount_usdt = _format_usdt(order['amount_usdt'])
                         msg = (
                             f"⏰ <b>تنبيه: المهلة على وشك الانتهاء!</b>\n\n"
                             f"📦 الطلب: #{order['order_number']}\n"
-                            f"💰 المبلغ: {order['amount_usdt']} USDT\n"
+                            f"💰 المبلغ: {amount_usdt} USDT\n"
                             f"⏱ الوقت المتبقي: <b>{remaining} دقائق</b>\n\n"
                             f"⚠️ يرجى إرسال إيصال الدفع قبل انتهاء المهلة."
                         ) if lang == 'ar' else (
                             f"⏰ <b>Warning: Payment deadline approaching!</b>\n\n"
                             f"📦 Order: #{order['order_number']}\n"
-                            f"💰 Amount: {order['amount_usdt']} USDT\n"
+                            f"💰 Amount: {amount_usdt} USDT\n"
                             f"⏱ Time remaining: <b>{remaining} minutes</b>\n\n"
                             f"⚠️ Please upload your payment receipt before the deadline."
                         )
@@ -93,16 +103,17 @@ async def check_expired_orders(bot: Bot):
                             order['id']
                         )
                         exp_lang = order['language'] or 'ar'
+                        amount_usdt = _format_usdt(order['amount_usdt'])
                         from keyboards.reply import compact_reply_keyboard
                         exp_msg = (
                             f"⏰ <b>انتهت مهلة الدفع</b>\n\n"
                             f"📦 الطلب: #{order['order_number']}\n"
-                            f"💰 المبلغ: {order['amount_usdt']} USDT\n\n"
+                            f"💰 المبلغ: {amount_usdt} USDT\n\n"
                             f"انتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد بالضغط على <b>💰 إنشاء طلب شراء</b>."
                         ) if exp_lang == 'ar' else (
                             f"⏰ <b>Payment deadline expired</b>\n\n"
                             f"📦 Order: #{order['order_number']}\n"
-                            f"💰 Amount: {order['amount_usdt']} USDT\n\n"
+                            f"💰 Amount: {amount_usdt} USDT\n\n"
                             f"The payment deadline has expired. You can create a new order by pressing <b>💰 Buy Order</b>."
                         )
                         try:
