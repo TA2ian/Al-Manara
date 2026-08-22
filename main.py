@@ -15,6 +15,7 @@ from database import init_db, close_db, get_pool
 from bot import create_dispatcher
 from keep_alive import keep_alive
 from services.settings_service import SettingsService
+from services.order_state_service import transition_order, InvalidOrderTransition
 
 # Fresh production deployments do not contain the ignored runtime logs/ directory.
 os.makedirs("logs", exist_ok=True)
@@ -85,7 +86,7 @@ async def send_expiry_reminders(bot: Bot):
 
 
 async def check_expired_orders(bot: Bot):
-    """Background task: auto-cancel orders past payment deadline."""
+    """Background task: atomically expire orders past their payment deadline."""
     while True:
         try:
             pool = await get_pool()
@@ -98,10 +99,13 @@ async def check_expired_orders(bot: Bot):
                         "AND o.payment_deadline < NOW()"
                     )
                     for order in expired:
-                        await conn.execute(
-                            "UPDATE orders SET status = 'expired' WHERE id = $1",
-                            order['id']
-                        )
+                        try:
+                            updated = await transition_order(conn, order['id'], 'expired')
+                        except InvalidOrderTransition:
+                            # Another worker may have handled the order between
+                            # discovery and locking. Leave its current state intact.
+                            continue
+
                         exp_lang = order['language'] or 'ar'
                         amount_usdt = _format_usdt(order['amount_usdt'])
                         from keyboards.reply import compact_reply_keyboard
@@ -118,15 +122,15 @@ async def check_expired_orders(bot: Bot):
                         )
                         try:
                             await bot.send_message(
-                                order['telegram_id'],
+                                updated['telegram_id'],
                                 exp_msg,
                                 parse_mode='HTML',
                                 reply_markup=compact_reply_keyboard(exp_lang)
                             )
                         except Exception as e:
-                            logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
+                            logger.error(f"Failed to notify user {updated['telegram_id']}: {e}")
                     if expired:
-                        logger.info(f"Auto-cancelled {len(expired)} expired orders")
+                        logger.info(f"Processed {len(expired)} expired-order candidates")
         except Exception as e:
             logger.error(f"Expired order check failed: {e}")
         await asyncio.sleep(60)
