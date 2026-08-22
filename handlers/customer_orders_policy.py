@@ -86,12 +86,7 @@ async def _get_user(message_or_callback):
 
 
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
-    """Recover an older approved order whose customer status message was not tracked.
-
-    This is deliberately limited to orders in waiting_payment with no stored
-    customer status message. It prevents duplicate payment instructions for
-    newly created orders while allowing pre-fix orders to recover immediately.
-    """
+    """Recover an older approved order whose customer status message was not tracked."""
     if order["status"] != "waiting_payment" or order.get("customer_status_message_id"):
         return
 
@@ -99,7 +94,7 @@ async def _repair_waiting_payment_visibility(message: Message, order, lang: str)
         bot = Bot(token=Config.BOT_TOKEN)
         notification = NotificationService(bot, Config.ADMIN_IDS)
         delivered = await notification.notify_order_approved(
-            order["user_id"] if False else message.from_user.id,
+            message.from_user.id,
             dict(order),
             lang=lang,
         )
@@ -116,7 +111,6 @@ async def _repair_waiting_payment_visibility(message: Message, order, lang: str)
             )
     except Exception:
         # The order remains waiting_payment; this is only a visibility repair.
-        # The normal approval/delivery path remains authoritative.
         return
 
 
@@ -139,7 +133,6 @@ async def show_precise_orders(message: Message):
         reply_markup=orders_pagination_keyboard(1, total_pages, lang),
     )
 
-    # Only the payment-awaiting state requires an immediate customer action.
     for order in orders:
         if order["status"] == "waiting_payment":
             await _repair_waiting_payment_visibility(message, order, lang)
