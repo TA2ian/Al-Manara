@@ -1,4 +1,4 @@
-"""Authoritative customer-search input handler."""
+"""Authoritative admin search input handler for customers and orders."""
 import html
 
 from aiogram import F, Router
@@ -8,7 +8,7 @@ from aiogram.types import Message
 from config import Config
 from database import get_pool
 from keyboards.inline import admin_menu_keyboard
-from services.formatters import usdt
+from services.formatters import money, rate, usdt
 from states import AdminStates
 
 router = Router()
@@ -19,21 +19,68 @@ def is_admin(user_id: int) -> bool:
 
 
 @router.message(AdminStates.waiting_search, F.text)
-async def search_customer(message: Message, state: FSMContext):
+async def search_input(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
         return
+
     data = await state.get_data()
-    if data.get("admin_search_type") != "user":
+    search_type = data.get("admin_search_type", "user")
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer("❌ أرسل قيمة للبحث.")
         return
 
-    query = (message.text or "").strip()
-    clean = query.lstrip("@").strip()
     pool = await get_pool()
+
+    if search_type == "order":
+        order_number = query.upper()
+        if not order_number.startswith("ORD_"):
+            await state.clear()
+            await message.answer(
+                "❌ صيغة رقم الطلب غير صحيحة. يجب أن يبدأ بـ <code>ORD_</code>.",
+                reply_markup=admin_menu_keyboard(),
+                parse_mode="HTML",
+            )
+            return
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT o.*, u.full_name, u.telegram_id
+                   FROM orders o JOIN users u ON o.user_id = u.id
+                   WHERE o.order_number ILIKE $1""",
+                order_number,
+            )
+        await state.clear()
+        if not row:
+            await message.answer("❌ لم يتم العثور على طلب بهذا الرقم.", reply_markup=admin_menu_keyboard())
+            return
+        text = (
+            f"📦 <b>الطلب #{html.escape(row['order_number'])}</b>\n\n"
+            f"👤 العميل: {html.escape(row['full_name'] or 'N/A')}\n"
+            f"🆔 <code>{row['telegram_id']}</code>\n"
+            f"💰 الكمية: {usdt(row['amount_usdt'])} USDT\n"
+            f"🌐 الشبكة: {html.escape(row['network'] or '')}\n"
+            f"📊 الحالة: <b>{html.escape(row['status'])}</b>\n"
+            f"💱 السعر: <b>{rate(row['exchange_rate'])}</b> {html.escape(row['payment_currency'])}\n"
+            f"💵 الإجمالي: <b>{money(row['total_amount'])}</b> {html.escape(row['payment_currency'])}\n"
+            f"📅 الإنشاء: {row['created_at'].strftime('%Y-%m-%d %H:%M')}"
+        )
+        await message.answer(text, parse_mode="HTML", reply_markup=admin_menu_keyboard())
+        return
+
+    clean = query.lstrip("@").strip()
+    pattern = f"%{clean}%"
     async with pool.acquire() as conn:
         if clean.isdigit():
-            rows = await conn.fetch("SELECT * FROM users WHERE telegram_id=$1", int(clean))
+            rows = await conn.fetch(
+                """SELECT * FROM users
+                   WHERE telegram_id = $1
+                      OR phone_number ILIKE $2
+                      OR shamcash_account ILIKE $2
+                   ORDER BY created_at DESC LIMIT 20""",
+                int(clean), pattern,
+            )
         else:
             rows = await conn.fetch(
                 """SELECT * FROM users
@@ -42,7 +89,7 @@ async def search_customer(message: Message, state: FSMContext):
                       OR phone_number ILIKE $1
                       OR shamcash_account ILIKE $1
                    ORDER BY created_at DESC LIMIT 20""",
-                f"%{clean}%",
+                pattern,
             )
 
         result_rows = []
@@ -76,8 +123,4 @@ async def search_customer(message: Message, state: FSMContext):
             f"💰 USDT مكتمل: <b>{usdt(stats['usdt_completed'])}</b>\n"
             f"📅 التسجيل: {user['created_at'].strftime('%Y-%m-%d')}"
         )
-        await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=admin_menu_keyboard(),
-        )
+        await message.answer(text, parse_mode="HTML", reply_markup=admin_menu_keyboard())
