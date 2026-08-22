@@ -44,7 +44,12 @@ jobs:
       - name: Install system libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libzbar0 libzbar-dev
+          if apt-cache show libzbar0t64 >/dev/null 2>&1; then
+            sudo apt-get install -y libzbar0t64
+          else
+            sudo apt-get install -y libzbar0
+          fi
+          sudo apt-get install -y libzbar-dev
           sudo ldconfig
           ldconfig -p | grep -E 'libzbar\.so' || true
 
