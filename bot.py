@@ -16,6 +16,7 @@ def create_dispatcher() -> Dispatcher:
         profile,
         active_order_policy,
         receipt_processing_policy,
+        receipt_document_policy,
         customer_orders_policy,
         my_orders,
         feedback,
@@ -66,6 +67,9 @@ def create_dispatcher() -> Dispatcher:
     # Receipt progress must precede my_orders so the temporary processing
     # message appears while the existing OCR/verification handler works.
     dp.include_router(receipt_processing_policy.router)
+    # Exported ShamCash proofs are accepted as Telegram documents before the
+    # legacy photo-only receipt handler.
+    dp.include_router(receipt_document_policy.router)
     # Precise customer-facing statuses must precede the legacy order-history
     # handlers, including pagination callbacks.
     dp.include_router(customer_orders_policy.router)
