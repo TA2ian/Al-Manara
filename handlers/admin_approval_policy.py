@@ -66,6 +66,24 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
             return
 
+        # Payment must be configured by the admin before an order can be
+        # approved. New orders are also blocked at the database boundary when
+        # this snapshot is missing, but this protects legacy orders as well.
+        account = (order["payment_account_snapshot"] or "").strip()
+        qr_photo_id = (order["payment_qr_photo_id"] or "").strip()
+        if not account or not qr_photo_id:
+            await callback.answer(
+                "⚠️ بيانات ShamCash لهذه العملة غير مكتملة. ثبّت الحساب وQR أولاً.",
+                show_alert=True,
+            )
+            await callback.message.answer(
+                "⚠️ <b>لا يمكن اعتماد الطلب بعد.</b>\n\n"
+                "بيانات الدفع الخاصة بالعملة المختارة غير مكتملة."
+                " يجب على الأدمن تثبيت حساب ShamCash وQR الخاصين به من <b>وسائل الدفع</b> ثم إعادة المحاولة.",
+                parse_mode="HTML",
+            )
+            return
+
         deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)
         await conn.execute(
             "UPDATE orders SET status = 'waiting_payment', approved_at = NOW(), "
@@ -102,13 +120,13 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     try:
         upload_text = (
             f"🔔 <b>تمت الموافقة على طلبك #{order['order_number']}</b>\n\n"
-            "✅ يمكنك الآن تنفيذ إجراء الدفع عبر بيانات الدفع التي سيعرضها لك البوت.\n"
+            "✅ يمكنك الآن تنفيذ الدفع عبر بيانات ShamCash الظاهرة أعلاه.\n"
             f"⏱ <b>مهلة الدفع: {Config.PAYMENT_TIMEOUT} دقيقة</b>\n\n"
             "📎 <b>بعد إتمام الدفع، أرسل صورة إيصال التحويل من شام كاش عبر الزر أدناه.</b>\n"
             "يجب أن يكون الإيصال واضحاً ويظهر المبلغ والتاريخ وبيانات العملية."
         ) if lang == "ar" else (
             f"🔔 <b>Your order #{order['order_number']} has been approved</b>\n\n"
-            "✅ You can now complete the payment using the payment details provided by the bot.\n"
+            "✅ You can now complete the payment using the ShamCash details shown above.\n"
             f"⏱ <b>Payment deadline: {Config.PAYMENT_TIMEOUT} minutes</b>\n\n"
             "📎 <b>After payment, send the ShamCash receipt using the button below.</b>\n"
             "Make sure the receipt clearly shows the amount, date, and transaction details."
@@ -144,7 +162,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"📦 #{html.escape(order['order_number'])}\n"
             f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
             f"🆔 <code>{user_id}</code>\n"
-            f"💰 { _format_usdt(order['amount_usdt']) } USDT\n"
+            f"💰 {_format_usdt(order['amount_usdt'])} USDT\n"
             f"🌐 {order['network']}\n"
             f"💵 الإجمالي: {_format_money(order['total_amount'])} {order['payment_currency']}\n"
             f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
@@ -161,7 +179,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     await callback.answer("✅ تمت الموافقة!")
     await callback.message.edit_text(
         f"✅ تمت الموافقة على طلب #{order['order_number']}\n\n"
-        "📎 تم إرسال تعليمات الدفع ورفع الإيصال للعميل.",
+        "📎 تم إرسال بيانات الدفع وتعليمات رفع الإيصال للعميل.",
         parse_mode="HTML",
     )
     await callback.message.answer(
