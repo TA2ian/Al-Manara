@@ -29,6 +29,7 @@ def create_dispatcher() -> Dispatcher:
         payment_methods,
         verification,
         language_policy,
+        customer_navigation_policy,
         menu,
     )
     from middleware.rate_limit import RateLimitMiddleware
@@ -83,6 +84,9 @@ def create_dispatcher() -> Dispatcher:
     # the prompt and result always use the user's selected language.
     dp.include_router(language_policy.router)
     dp.include_router(verification.router)
+    # Customer navigation policy must precede the legacy menu so old callbacks
+    # cannot bypass active-order, wallet, language, or currency policies.
+    dp.include_router(customer_navigation_policy.router)
     dp.include_router(menu.router)
 
     return dp
