@@ -6,6 +6,7 @@ admin UI. Notes remain internal to the admin order record.
 """
 import html
 import logging
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -21,6 +22,13 @@ router = Router()
 
 def _is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
+
+
+def _format_usdt(value) -> str:
+    try:
+        return f"{Decimal(str(value)):,.3f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.000"
 
 
 @router.callback_query(F.data.startswith("admin_note_"))
@@ -54,7 +62,7 @@ async def admin_note_start(callback: CallbackQuery, state: FSMContext):
         "expired": "منتهي",
     }
     status = status_names.get(order["status"], order["status"])
-    amount = f"{order['amount_usdt']}"
+    amount = _format_usdt(order["amount_usdt"])
     currency = html.escape(order["payment_currency"] or "USD")
 
     await state.update_data(admin_note_order_id=order_id)
