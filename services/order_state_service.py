@@ -42,6 +42,58 @@ async def transition_order(
     if target_status not in ALLOWED_TRANSITIONS.get(current, frozenset()):
         raise InvalidOrderTransition(f"Invalid transition: {current} -> {target_status}")
 
+    return await _apply_status_update(
+        conn,
+        order,
+        target_status,
+        admin_id=admin_id,
+        updates=updates,
+        action="order_status_transition",
+    )
+
+
+async def rollback_order(
+    conn,
+    order_id: int,
+    target_status: str,
+    *,
+    admin_id: int | None = None,
+    updates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Perform a narrowly-scoped compensating rollback and audit it.
+
+    This is intentionally separate from the business transition graph. It is
+    used when an external delivery operation fails after a state was advanced.
+    Currently only waiting_payment -> pending is supported.
+    """
+    if not (target_status == "pending"):
+        raise InvalidOrderTransition("Unsupported rollback target")
+
+    order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
+    if not order:
+        raise InvalidOrderTransition("Order not found")
+    if order["status"] != "waiting_payment":
+        raise InvalidOrderTransition(f"Invalid rollback from {order['status']}")
+
+    return await _apply_status_update(
+        conn,
+        order,
+        target_status,
+        admin_id=admin_id,
+        updates=updates,
+        action="order_status_rollback",
+    )
+
+
+async def _apply_status_update(
+    conn,
+    order,
+    target_status: str,
+    *,
+    admin_id: int | None,
+    updates: dict[str, Any] | None,
+    action: str,
+) -> dict[str, Any]:
     fields = ["status = $1"]
     values: list[Any] = [target_status]
     param = 2
@@ -61,23 +113,21 @@ async def transition_order(
         values.append(value)
         param += 1
 
-    values.append(order_id)
+    values.append(order["id"])
     await conn.execute(
         f"UPDATE orders SET {', '.join(fields)} WHERE id = ${param}",
         *values,
     )
-
     await conn.execute(
         """INSERT INTO audit_logs
            (user_id, admin_id, action, details, previous_value, new_value, severity)
            VALUES ($1, $2, $3, $4, $5, $6, $7)""",
         order["user_id"],
         admin_id,
-        "order_status_transition",
-        f"order_id={order_id}",
-        current,
+        action,
+        f"order_id={order['id']}",
+        order["status"],
         target_status,
         "info",
     )
-
-    return await conn.fetchrow("SELECT * FROM orders WHERE id = $1", order_id)
+    return await conn.fetchrow("SELECT * FROM orders WHERE id = $1", order["id"])
