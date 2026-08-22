@@ -15,7 +15,6 @@ from . import (
     admin_maintenance_policy,
     admin_settings_policy,
     admin_rejection_policy,
-    admin_policy_bootstrap,
 )
 
 __all__ = [
@@ -34,5 +33,4 @@ __all__ = [
     "admin_maintenance_policy",
     "admin_settings_policy",
     "admin_rejection_policy",
-    "admin_policy_bootstrap",
 ]
