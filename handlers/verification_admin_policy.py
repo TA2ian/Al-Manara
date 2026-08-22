@@ -49,7 +49,10 @@ async def approve_verification(callback: CallbackQuery):
             await callback.answer("⚠️ طلب التوثيق ليس في حالة انتظار", show_alert=True)
             return
 
-        await conn.execute("UPDATE users SET is_verified=TRUE, verification_status='approved' WHERE telegram_id=$1", telegram_id)
+        await conn.execute(
+            "UPDATE users SET is_verified=TRUE, verification_status='approved' WHERE telegram_id=$1",
+            telegram_id,
+        )
         await conn.execute(
             """INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
                VALUES ($1,$2,'verification_approved',$3,'info')""",
@@ -72,8 +75,10 @@ async def approve_verification(callback: CallbackQuery):
         logger.error("Failed to notify verified user %s: %s", telegram_id, exc)
 
     await callback.message.edit_text(
-        f"✅ تم توثيق المستخدم <code>{telegram_id}</code> بنجاح.\n"
-        "Telegram username لم يُستخدم كمعرّف أو شرط للتوثيق.",
+        "✅ <b>تم توثيق المستخدم بنجاح.</b>\n"
+        "لم يتم استخدام اسم المستخدم في Telegram كمعرّف أو شرط للتوثيق."
+        if callback.from_user.id in Config.ADMIN_IDS else
+        "✅ Verification approved.",
         parse_mode="HTML",
     )
     await callback.answer("✅ تم التوثيق!")
@@ -88,11 +93,17 @@ async def reject_verification(callback: CallbackQuery):
     telegram_id = int(callback.data.replace("verify_reject_", ""))
     pool = await get_pool()
     async with pool.acquire() as conn:
-        user = await conn.fetchrow("SELECT id, language, verification_status FROM users WHERE telegram_id=$1", telegram_id)
+        user = await conn.fetchrow(
+            "SELECT id, language, verification_status FROM users WHERE telegram_id=$1",
+            telegram_id,
+        )
         if not user:
             await callback.answer("المستخدم غير موجود", show_alert=True)
             return
-        await conn.execute("UPDATE users SET is_verified=FALSE, verification_status='rejected' WHERE telegram_id=$1", telegram_id)
+        await conn.execute(
+            "UPDATE users SET is_verified=FALSE, verification_status='rejected' WHERE telegram_id=$1",
+            telegram_id,
+        )
         await conn.execute(
             """INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
                VALUES ($1,$2,'verification_rejected','manual ShamCash verification review rejected','warning')""",
@@ -112,5 +123,8 @@ async def reject_verification(callback: CallbackQuery):
     except Exception as exc:
         logger.error("Failed to notify rejected user %s: %s", telegram_id, exc)
 
-    await callback.message.edit_text(f"❌ تم رفض توثيق المستخدم <code>{telegram_id}</code>.", parse_mode="HTML")
+    await callback.message.edit_text(
+        "❌ تم رفض توثيق المستخدم." if callback.from_user.id in Config.ADMIN_IDS else "❌ Verification rejected.",
+        parse_mode="HTML",
+    )
     await callback.answer("❌ تم الرفض!")
