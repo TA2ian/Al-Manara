@@ -100,7 +100,7 @@ async def check_expired_orders(bot: Bot):
                     )
                     for order in expired:
                         try:
-                            updated = await transition_order(conn, order['id'], 'expired')
+                            await transition_order(conn, order['id'], 'expired')
                         except InvalidOrderTransition:
                             # Another worker may have handled the order between
                             # discovery and locking. Leave its current state intact.
@@ -122,13 +122,13 @@ async def check_expired_orders(bot: Bot):
                         )
                         try:
                             await bot.send_message(
-                                updated['telegram_id'],
+                                order['telegram_id'],
                                 exp_msg,
                                 parse_mode='HTML',
                                 reply_markup=compact_reply_keyboard(exp_lang)
                             )
                         except Exception as e:
-                            logger.error(f"Failed to notify user {updated['telegram_id']}: {e}")
+                            logger.error(f"Failed to notify user {order['telegram_id']}: {e}")
                     if expired:
                         logger.info(f"Processed {len(expired)} expired-order candidates")
         except Exception as e:
