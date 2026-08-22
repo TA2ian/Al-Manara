@@ -38,6 +38,7 @@ def create_dispatcher() -> Dispatcher:
         customer_navigation_policy,
         customer_settings_policy,
         menu,
+        admin_tools_policy,
     )
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
@@ -51,6 +52,9 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
+    # Fallback/admin utility router must precede legacy handlers for callbacks
+    # such as customer search, backups, order notes, and terms decline.
+    dp.include_router(admin_tools_policy.router)
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
     dp.include_router(payment_currency_policy.router)
@@ -62,8 +66,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(profile.router)
     dp.include_router(receipt_processing_policy.router)
     dp.include_router(receipt_document_policy.router)
-    # Retry/manual-review callbacks must precede their legacy equivalents so
-    # state changes go through order_state_service atomically.
     dp.include_router(receipt_transition_policy.router)
     dp.include_router(customer_orders_policy.router)
     dp.include_router(my_orders.router)
@@ -72,11 +74,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_broadcast_policy.router)
     dp.include_router(verification_admin_policy.router)
     dp.include_router(admin_financial_dashboard_policy.router)
-    # Rate input must precede legacy/admin navigation handlers for the same FSM state.
     dp.include_router(admin_rate_policy.router)
     dp.include_router(admin_navigation_policy.router)
     dp.include_router(admin_approval_policy.router)
-    # Payment confirmation must precede the legacy admin.py implementation.
     dp.include_router(admin_payment_confirmation_policy.router)
     dp.include_router(admin_transfer_policy.router)
     dp.include_router(admin_note_policy.router)
@@ -85,7 +85,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(language_policy.router)
     dp.include_router(verification.router)
     dp.include_router(customer_navigation_policy.router)
-    # Customer settings entry must precede the legacy menu handler.
     dp.include_router(customer_settings_policy.router)
     dp.include_router(menu.router)
 
