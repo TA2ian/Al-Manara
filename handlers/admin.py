@@ -1,11 +1,10 @@
 """Compatibility facade for the decomposed admin handler stack.
 
-The original monolithic admin.py has been retired.  Existing dispatcher code
-still includes ``admin.router``, so this facade registers only the newly
-extracted policies that are not separately included by the dispatcher yet.
-Existing authoritative policies (rate, navigation, approval, payment
-confirmation, transfer, note, broadcast, financial dashboard, verification)
-are registered directly by bot.py and are deliberately not duplicated here.
+The original monolithic admin.py has been retired. Existing dispatcher code
+still includes ``admin.router``, so this facade registers only policies that
+are not separately included by the dispatcher. Authoritative policies that
+are registered directly by bot.py must not be nested here, otherwise the same
+router can be attached twice and callback precedence becomes ambiguous.
 """
 from aiogram import Router
 
@@ -15,7 +14,6 @@ from . import admin_utility_policy
 from . import admin_maintenance_policy
 from . import admin_settings_policy
 from . import admin_settings_alias_policy
-from . import admin_rejection_policy
 
 router = Router()
 
@@ -26,6 +24,5 @@ for policy_router in (
     admin_maintenance_policy.router,
     admin_settings_policy.router,
     admin_settings_alias_policy.router,
-    admin_rejection_policy.router,
 ):
     router.include_router(policy_router)
