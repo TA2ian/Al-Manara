@@ -10,9 +10,8 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
-from PIL import Image
-from pyzbar.pyzbar import decode as qr_decode
 
+from services.qr_decoder import decode_qr_bytes
 from services.shamcash_qr_validator import qr_matches_account
 from states import VerificationStates
 
@@ -28,8 +27,7 @@ async def _lang(telegram_id: int) -> str:
     return (row["language"] if row else "ar") or "ar"
 
 
-@router.message(VerificationStates.waiting_shamcash_qr, F.photo)
-async def validate_shamcash_qr(message: Message, state: FSMContext):
+async def _validate(message: Message, state: FSMContext, file_id: str):
     """Decode and match the ShamCash QR before submitting verification."""
     lang = await _lang(message.from_user.id)
     data = await state.get_data()
@@ -45,19 +43,17 @@ async def validate_shamcash_qr(message: Message, state: FSMContext):
 
     raw = io.BytesIO()
     try:
-        await message.bot.download(file=message.photo[-1].file_id, destination=raw)
-        raw.seek(0)
-        decoded = qr_decode(Image.open(raw))
-        qr_text = decoded[0].data.decode("utf-8", errors="replace").strip() if decoded else ""
+        await message.bot.download(file=file_id, destination=raw)
+        qr_text = decode_qr_bytes(raw.getvalue())
     except Exception:
         logger.exception("Failed to decode ShamCash QR for user %s", message.from_user.id)
         qr_text = ""
 
     if not qr_text:
         await message.answer(
-            "❌ لم أتمكن من قراءة QR لحساب ShamCash. أرسل صورة أوضح لنفس عنوان الاستلام."
+            "❌ لم أتمكن من قراءة QR لحساب ShamCash. أرسل صورة أوضح لنفس عنوان الاستلام، كصورة أو كملف صورة."
             if lang == "ar" else
-            "❌ I could not read the ShamCash QR. Please send a clearer QR image for the same receiving address."
+            "❌ I could not read the ShamCash QR. Send a clearer QR for the same receiving address, as a photo or image file."
         )
         return
 
@@ -72,8 +68,26 @@ async def validate_shamcash_qr(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(shamcash_qr_photo_id=message.photo[-1].file_id)
-
-    # Reuse the existing verification submission flow; do not duplicate it here.
+    await state.update_data(shamcash_qr_photo_id=file_id)
     from handlers.verification import submit_verification
     await submit_verification(message, state)
+
+
+@router.message(VerificationStates.waiting_shamcash_qr, F.photo)
+async def validate_shamcash_qr_photo(message: Message, state: FSMContext):
+    await _validate(message, state, message.photo[-1].file_id)
+
+
+@router.message(VerificationStates.waiting_shamcash_qr, F.document)
+async def validate_shamcash_qr_document(message: Message, state: FSMContext):
+    document = message.document
+    mime = (document.mime_type or "").lower()
+    if not mime.startswith("image/"):
+        lang = await _lang(message.from_user.id)
+        await message.answer(
+            "❌ أرسل QR كصورة، وليس كملف من نوع آخر."
+            if lang == "ar" else
+            "❌ Send the QR as an image, not another file type."
+        )
+        return
+    await _validate(message, state, document.file_id)
