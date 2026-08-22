@@ -10,6 +10,7 @@ from config import Config
 from database import get_pool
 from keyboards.inline import admin_menu_keyboard, receipt_upload_keyboard
 from keyboards.reply import compact_reply_keyboard
+from services.order_state_service import InvalidOrderTransition, transition_order
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -34,7 +35,17 @@ async def reject_receipt(callback: CallbackQuery):
             await callback.answer("الطلب غير موجود", show_alert=True); return
         if order["status"] != "receipt_received":
             await callback.answer("لا يمكن رفض الإيصال من الحالة الحالية", show_alert=True); return
-        await conn.execute("UPDATE orders SET status = 'waiting_payment' WHERE id = $1", order_id)
+        try:
+            await transition_order(
+                conn,
+                order_id,
+                "waiting_payment",
+                admin_id=callback.from_user.id,
+            )
+        except InvalidOrderTransition as exc:
+            logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
+            await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
+            return
 
     remaining = ""
     if order["payment_deadline"]:
@@ -74,10 +85,21 @@ async def reject_order(callback: CallbackQuery):
             await callback.answer("الطلب غير موجود", show_alert=True); return
         if order["status"] not in ("pending", "waiting_payment", "receipt_received"):
             await callback.answer("لا يمكن رفض الطلب من حالته الحالية", show_alert=True); return
-        await conn.execute(
-            "UPDATE orders SET status = 'rejected', wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $1",
-            order_id,
-        )
+        try:
+            await transition_order(
+                conn,
+                order_id,
+                "rejected",
+                admin_id=callback.from_user.id,
+                updates={
+                    "wallet_qr_photo_id": None,
+                    "receipt_photo_id": None,
+                },
+            )
+        except InvalidOrderTransition as exc:
+            logger.warning("Order rejection transition failed for %s: %s", order_id, exc)
+            await callback.answer("لا يمكن رفض الطلب من حالته الحالية", show_alert=True)
+            return
     bot = Bot(token=Config.BOT_TOKEN)
     try:
         lang = order["language"] or "ar"
