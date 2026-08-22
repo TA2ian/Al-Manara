@@ -1,8 +1,8 @@
-"""Authoritative admin navigation, analytics, and operational settings.
+"""Authoritative admin navigation and analytics.
 
 Search input is owned by ``admin_search_policy`` and exchange-rate input is
-owned by ``admin_rate_policy``. This module deliberately keeps only one owner
-for each remaining admin callback/FSM flow.
+owned by ``admin_rate_policy``. Operational settings are owned exclusively by
+``admin_settings_policy`` so each callback/FSM flow has one authority.
 """
 import logging
 
@@ -13,7 +13,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config import Config
 from database import get_pool
 from keyboards.inline import admin_menu_keyboard
-from services.settings_service import SettingsService
 from states import AdminStates
 
 logger = logging.getLogger(__name__)
@@ -141,165 +140,3 @@ async def search_order_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(admin_search_type="order")
     await state.set_state(AdminStates.waiting_search)
     await callback.answer()
-
-
-@router.callback_query(F.data == "setting_fees")
-async def fee_settings_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    current = await SettingsService.get("service_fee_percent", str(Config.SERVICE_FEE_PERCENT))
-    await callback.message.edit_text(
-        "⚙️ <b>الرسوم الحالية</b>\n\n"
-        f"📊 نسبة الرسوم: <b>{current}%</b>\n\n"
-        "أرسل نسبة الرسوم الجديدة من 0 إلى 100.",
-        reply_markup=_cancel_keyboard(),
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_fee_percent)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_fee_percent)
-async def fee_settings_save(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    try:
-        pct = float((message.text or "").strip())
-        if pct < 0 or pct > 100:
-            raise ValueError
-    except ValueError:
-        await message.answer(
-            "❌ نسبة غير صالحة. أرسل رقماً بين 0 و100.",
-            reply_markup=_cancel_keyboard(),
-        )
-        return
-
-    Config.SERVICE_FEE_PERCENT = pct
-    await SettingsService.set("service_fee_percent", str(pct))
-    await state.clear()
-    await message.answer(
-        f"✅ تم حفظ نسبة الرسوم: <b>{pct:g}%</b>\n\n"
-        "سيتم تطبيقها على عروض الأسعار الجديدة.",
-        parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "setting_timeout")
-async def timeout_settings_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    current = await SettingsService.get("payment_timeout", str(Config.PAYMENT_TIMEOUT))
-    await callback.message.edit_text(
-        f"⏱ <b>مهلة الدفع الحالية:</b> {current} دقيقة\n\n"
-        "أرسل المهلة الجديدة بالدقائق (1-1440):",
-        reply_markup=_cancel_keyboard(),
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_timeout)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_timeout)
-async def timeout_settings_save(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    try:
-        timeout = int((message.text or "").strip())
-        if not 1 <= timeout <= 1440:
-            raise ValueError
-    except ValueError:
-        await message.answer(
-            "❌ قيمة غير صالحة. أرسل عدداً صحيحاً بين 1 و1440 دقيقة.",
-            reply_markup=_cancel_keyboard(),
-        )
-        return
-
-    Config.PAYMENT_TIMEOUT = timeout
-    await SettingsService.set("payment_timeout", str(timeout))
-    await state.clear()
-    await message.answer(
-        f"✅ تم حفظ مهلة الدفع: <b>{timeout} دقيقة</b>",
-        parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "setting_limits")
-async def limits_settings_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    min_order = await SettingsService.get("min_order", str(Config.MIN_ORDER))
-    max_order = await SettingsService.get("max_order", str(Config.MAX_ORDER))
-    await callback.message.edit_text(
-        "📊 <b>الحدود الحالية</b>\n\n"
-        f"🔽 الحد الأدنى: {min_order} USDT\n"
-        f"🔼 الحد الأقصى: {max_order} USDT\n\n"
-        "أرسل الحد الأدنى الجديد:",
-        reply_markup=_cancel_keyboard(),
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_min_order)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_min_order)
-async def limits_min_save(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    try:
-        value = float((message.text or "").strip())
-        if value < 1:
-            raise ValueError
-    except ValueError:
-        await message.answer(
-            "❌ قيمة غير صالحة. أرسل رقماً أكبر أو يساوي 1.",
-            reply_markup=_cancel_keyboard(),
-        )
-        return
-
-    Config.MIN_ORDER = value
-    await SettingsService.set("min_order", str(value))
-    await state.set_state(AdminStates.waiting_max_order)
-    await message.answer(
-        f"✅ تم حفظ الحد الأدنى: <b>{value:g} USDT</b>\n\n"
-        "أرسل الحد الأقصى الجديد:",
-        parse_mode="HTML",
-        reply_markup=_cancel_keyboard(),
-    )
-
-
-@router.message(AdminStates.waiting_max_order)
-async def limits_max_save(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    try:
-        value = float((message.text or "").strip())
-        if value < Config.MIN_ORDER:
-            raise ValueError
-    except ValueError:
-        await message.answer(
-            f"❌ قيمة غير صالحة. أرسل رقماً أكبر أو يساوي الحد الأدنى ({Config.MIN_ORDER:g}).",
-            reply_markup=_cancel_keyboard(),
-        )
-        return
-
-    Config.MAX_ORDER = value
-    await SettingsService.set("max_order", str(value))
-    await state.clear()
-    await message.answer(
-        f"✅ تم حفظ الحد الأقصى: <b>{value:g} USDT</b>",
-        parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
-    )
