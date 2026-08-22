@@ -20,8 +20,8 @@ ACTIVE_STATUSES = (
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
 async def guide_active_order(message: Message, state: FSMContext):
-    """Guide active customers; otherwise delegate to the normal order flow."""
-    from handlers.order import start_order
+    """Guide active customers; otherwise delegate to the authoritative order flow."""
+    from handlers.order_amount_policy import start_order_authoritative
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -30,7 +30,7 @@ async def guide_active_order(message: Message, state: FSMContext):
             message.from_user.id,
         )
         if not user or not user["terms_accepted"] or user["is_blocked"] or not user["is_verified"]:
-            await start_order(message, state)
+            await start_order_authoritative(message, state)
             return
         active_order = await conn.fetchrow(
             "SELECT order_number, created_at, amount_usdt, status FROM orders "
@@ -39,7 +39,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         )
 
     if not active_order:
-        await start_order(message, state)
+        await start_order_authoritative(message, state)
         return
 
     lang = user["language"] or "ar"
