@@ -19,11 +19,11 @@ ACTIVE_STATUSES = (
 
 
 def _format_usdt(value) -> str:
-    """Format active-order USDT amounts consistently to two decimals."""
+    """Format active-order USDT amounts consistently to three decimals."""
     try:
-        return f"{Decimal(str(value)):,.2f}"
+        return f"{Decimal(str(value)):,.3f}"
     except (InvalidOperation, TypeError, ValueError):
-        return "0.00"
+        return "0.000"
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
