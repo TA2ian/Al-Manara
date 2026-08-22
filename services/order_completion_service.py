@@ -14,8 +14,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
     """Finalize an order, notify the customer/admins, and request a rating."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Finalization is idempotent at the application boundary: do not
-        # overwrite an already-completed order with a second TXID.
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
@@ -30,12 +28,20 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             await state.clear()
             return False
 
-        await conn.execute(
+        # Make the state transition itself atomic so two concurrent admin
+        # actions cannot finalize the same order with different TXIDs.
+        updated = await conn.execute(
             "UPDATE orders SET status = 'completed', txid = $1, completed_at = NOW(), "
-            "wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $2",
+            "wallet_qr_photo_id = NULL, receipt_photo_id = NULL "
+            "WHERE id = $2 AND status = 'payment_confirmed'",
             txid,
             order_id,
         )
+        if updated != "UPDATE 1":
+            await msg.answer("⚠️ تم إكمال هذا الطلب مسبقاً أو تغيرت حالته.")
+            await state.clear()
+            return False
+
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
