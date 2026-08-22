@@ -78,7 +78,7 @@ async def start_order_authoritative(message: Message, state: FSMContext):
     """Start a new order through the authoritative customer gates."""
     user = await _user(message.from_user.id)
     if not user:
-        await message.answer("يرجى بدء البوت أولاً: /start" if True else "Please start the bot first: /start")
+        await message.answer("يرجى بدء البوت أولاً: /start")
         return
 
     lang = user["language"] or "ar"
