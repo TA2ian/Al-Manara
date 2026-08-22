@@ -50,6 +50,92 @@ async def cancel_admin_input(callback: CallbackQuery, state: FSMContext):
     await callback.answer("تم الإلغاء")
 
 
+@router.callback_query(F.data == "admin_dashboard")
+async def financial_dashboard(callback: CallbackQuery):
+    """Show the operational financial dashboard."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        today = await conn.fetchrow(
+            """SELECT COUNT(*) AS orders,
+                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt,
+                      COALESCE(SUM(fee_amount), 0) AS fees
+               FROM orders WHERE created_at >= CURRENT_DATE"""
+        )
+        week = await conn.fetchrow(
+            """SELECT COUNT(*) AS orders,
+                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt,
+                      COALESCE(SUM(fee_amount), 0) AS fees
+               FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'"""
+        )
+        month = await conn.fetchrow(
+            """SELECT COUNT(*) AS orders,
+                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt,
+                      COALESCE(SUM(fee_amount), 0) AS fees
+               FROM orders WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)"""
+        )
+        states = await conn.fetch(
+            """SELECT status, COUNT(*) AS count, COALESCE(SUM(amount_usdt), 0) AS usdt
+               FROM orders
+               WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
+               GROUP BY status ORDER BY status"""
+        )
+        expired_today = await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE status = 'expired' AND created_at >= CURRENT_DATE"
+        )
+
+    labels = {
+        "pending": "⏳ معلقة",
+        "waiting_payment": "💳 بانتظار الدفع",
+        "receipt_received": "📎 الإيصالات للمراجعة",
+        "payment_confirmed": "✅ الدفع مؤكد",
+    }
+    state_lines = [
+        f"{labels.get(row['status'], row['status'])}: <b>{row['count']}</b> — {row['usdt']:,.2f} USDT"
+        for row in states
+    ]
+    state_text = "\n".join(state_lines) if state_lines else "لا توجد طلبات نشطة"
+
+    text = (
+        "📊 <b>لوحة الأداء المالي</b>\n\n"
+        "━━━ اليوم ━━━\n"
+        f"📦 الطلبات: <b>{today['orders']}</b>\n"
+        f"✅ المكتمل: <b>{today['completed']}</b>\n"
+        f"💰 USDT: <b>{today['usdt']:,.2f}</b>\n"
+        f"💵 الرسوم: <b>{today['fees']:,.2f}</b>\n\n"
+        "━━━ آخر 7 أيام ━━━\n"
+        f"📦 الطلبات: <b>{week['orders']}</b>\n"
+        f"✅ المكتمل: <b>{week['completed']}</b>\n"
+        f"💰 USDT: <b>{week['usdt']:,.2f}</b>\n"
+        f"💵 الرسوم: <b>{week['fees']:,.2f}</b>\n\n"
+        "━━━ هذا الشهر ━━━\n"
+        f"📦 الطلبات: <b>{month['orders']}</b>\n"
+        f"✅ المكتمل: <b>{month['completed']}</b>\n"
+        f"💵 الرسوم: <b>{month['fees']:,.2f}</b>\n"
+        f"💰 USDT: <b>{month['usdt']:,.2f}</b>\n\n"
+        "━━━ الطلبات النشطة ━━━\n"
+        f"{state_text}\n\n"
+        f"⌛ منتهية اليوم: <b>{expired_today}</b>"
+    )
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📈 التحليل المالي", callback_data="admin_analytics")],
+                [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+            ]
+        ),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_analytics")
 async def financial_analytics(callback: CallbackQuery, state: FSMContext):
     """Show financial/business analytics only."""
