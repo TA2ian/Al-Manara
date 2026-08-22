@@ -39,7 +39,7 @@ def _rate(value) -> str:
 
 
 def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -> str:
-    """Build an explicit financial summary with a clear amount-to-send hierarchy."""
+    """Build the order summary only; payment destination is shown after approval."""
     currency = calculation["payment_currency"]
     rate = calculation["exchange_rate"]
     base = calculation["base_amount"]
@@ -68,19 +68,16 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
         f"📍 العنوان: <code>{data['wallet']}</code>\n\n"
         f"{rate_block}"
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
-        "👇 <b>المبلغ الذي سيصل إلى محفظتك:</b>\n"
-        f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
         "──── 💵 المبلغ الأساسي ────\n"
         f"💵 <b>{_money(base, unit)} {unit}</b>\n\n"
         "──── 💰 رسوم الخدمة ────\n"
         f"📊 النسبة: <b>{Decimal(str(fee_pct)):,.2f}%</b>\n"
         f"💵 قيمة الرسوم: <b>{_money(fee, unit)} {unit}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>المجموع الإجمالي — المبلغ المطلوب إرساله:</b>\n\n"
+        "💸 <b>الإجمالي المستحق:</b>\n\n"
         f"<b>💰 {_money(total, unit)} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "⚠️ <b>مهم:</b> أرسل المجموع الإجمالي أعلاه.\n"
-        "إذا أرسلت المبلغ الأساسي فقط، فسيتم اقتطاع رسوم الخدمة منه.\n\n"
+        "ℹ️ بعد تأكيد الطلب وموافقة الإدارة، ستصلك رسالة منفصلة تتضمن تعليمات الدفع، والمبلغ المطلوب تحويله، وحساب ShamCash ورمز QR الخاص بالدفع.\n\n"
         "⏱ المدة المتوقعة: 15 دقيقة - 24 ساعة"
     )
 
@@ -108,19 +105,16 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
         f"📍 Address: <code>{data['wallet']}</code>\n\n"
         f"{rate_block}"
         f"💳 Payment currency: <b>{unit}</b>\n\n"
-        "👇 <b>Amount that will arrive in your wallet:</b>\n"
-        f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
         "──── 💵 Base Amount ────\n"
         f"💵 <b>{_money(base, unit)} {unit}</b>\n\n"
         "──── 💰 Service Fee ────\n"
         f"📊 Rate: <b>{Decimal(str(fee_pct)):,.2f}%</b>\n"
         f"💵 Fee: <b>{_money(fee, unit)} {unit}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>Total — Amount to Send:</b>\n\n"
+        "💸 <b>Total Due:</b>\n\n"
         f"<b>💰 {_money(total, unit)} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "⚠️ <b>Important:</b> Send the total amount shown above.\n"
-        "If you send only the base amount, the service fee will be deducted from it.\n\n"
+        "ℹ️ After you confirm the order and it is approved, you will receive a separate payment message with the amount to transfer, the ShamCash account, and its payment QR code.\n\n"
         "⏱ Expected duration: 15 minutes - 24 hours"
     )
 
