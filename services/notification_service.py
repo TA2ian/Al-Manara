@@ -1,4 +1,4 @@
-"""Notification service."""
+"""Customer and admin notification service."""
 import logging
 from decimal import Decimal, InvalidOperation
 
@@ -22,130 +22,135 @@ def _format_money(value) -> str:
 
 
 class NotificationService:
-    """Send notifications to users and admins."""
+    """Send authoritative order/payment notifications."""
 
     def __init__(self, bot: Bot, admin_ids: list):
         self._bot = bot
         self._admin_ids = admin_ids
 
-    async def notify_admins(self, message: str, parse_mode: str = 'HTML'):
-        """Send notification to all admins."""
+    async def notify_admins(self, message: str, parse_mode: str = "HTML"):
         for admin_id in self._admin_ids:
             try:
                 await self._bot.send_message(admin_id, message, parse_mode=parse_mode)
-            except Exception as e:
-                logger.error(f"Failed to notify admin {admin_id}: {e}")
+            except Exception as exc:
+                logger.error("Failed to notify admin %s: %s", admin_id, exc)
 
-    async def notify_user(self, user_id: int, message: str, parse_mode: str = 'HTML'):
-        """Send notification to user."""
+    async def notify_user(self, user_id: int, message: str, parse_mode: str = "HTML"):
         try:
             await self._bot.send_message(user_id, message, parse_mode=parse_mode)
-        except Exception as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+        except Exception as exc:
+            logger.error("Failed to notify user %s: %s", user_id, exc)
+            raise
 
     async def notify_new_order(self, order: dict):
-        """Notify admins of new order."""
-        text = f"""
-📦 <b>طلب جديد!</b>
-
-📋 الرقم: #{order['order_number']}
-👤 العميل: {order.get('username', 'N/A')}
-💰 المبلغ: {_format_usdt(order['amount_usdt'])} USDT
-🌐 الشبكة: {order['network']}
-💱 العملة: {order['payment_currency']}
-
-[📋 عرض التفاصيل]
-"""
+        text = (
+            "📦 <b>طلب جديد!</b>\n\n"
+            f"📋 الرقم: #{order['order_number']}\n"
+            f"👤 العميل: {order.get('username', 'N/A')}\n"
+            f"💰 المبلغ: {_format_usdt(order['amount_usdt'])} USDT\n"
+            f"🌐 الشبكة: {order['network']}\n"
+            f"💱 العملة: {order['payment_currency']}"
+        )
         await self.notify_admins(text)
 
-    async def notify_order_approved(self, user_id: int, order: dict, lang: str = 'ar'):
-        """Notify the customer using only the payment snapshot stored on the order."""
-        from services.locale_service import locale_service
+    async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar"):
+        """Send the complete immutable payment snapshot after approval.
+
+        This deliberately does not depend on a locale key: missing translation
+        keys must never reduce a financial payment message to a key name.
+        """
         from config import Config
+        from services.exchange_service import ExchangeService
 
-        amount = _format_money(order['total_amount'])
-        currency = 'NEW.SYP' if order['payment_currency'] == 'SYP' else order['payment_currency']
-        account = (order.get('payment_account_snapshot') or '').strip()
-        qr_photo_id = (order.get('payment_qr_photo_id') or '').strip()
-        name = Config.get_shamcash_name()
+        currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
+        account = (order.get("payment_account_snapshot") or "").strip()
+        qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
+        amount = _format_money(order.get("total_amount"))
+        order_number = order.get("order_number", "N/A")
+        timeout = Config.PAYMENT_TIMEOUT
+        name = Config.get_shamcash_name().strip() or "ShamCash"
 
-        # Never substitute the current admin payment destination for an order
-        # that lacks a snapshot. Existing orders must remain isolated from later
-        # ShamCash account/QR changes.
+        # An approved order must always have the immutable payment snapshot.
+        # Never substitute a live/current payment method here.
         if not account or not qr_photo_id:
             logger.error(
-                "Missing immutable payment snapshot for approved order %s",
-                order.get('order_number'),
+                "Incomplete payment snapshot for approved order %s: account=%r qr=%r",
+                order_number, bool(account), bool(qr_photo_id),
             )
             await self.notify_user(
                 user_id,
                 (
-                    f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order['order_number']}</b>\n\n"
-                    "لم يتم إرسال أي عنوان دفع لأن بيانات الدفع المثبتة لهذا الطلب غير مكتملة. "
-                    "يرجى مراجعة الإدارة قبل الدفع."
-                    if lang == 'ar' else
-                    f"⚠️ <b>Payment details unavailable for order #{order['order_number']}</b>\n\n"
-                    "No payment destination was sent because this order has no complete immutable payment snapshot. "
-                    "Please contact administration before paying."
+                    f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\n"
+                    "بيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة."
+                    if lang == "ar" else
+                    f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\n"
+                    "The immutable payment details for this order are incomplete. Do not send funds; please contact administration."
                 ),
             )
-            return
+            return False
 
-        text = locale_service.get(
-            'order_approved',
-            lang,
-            order_number=order['order_number'],
-            timeout=Config.PAYMENT_TIMEOUT,
-            account=account,
-            name=name,
-            amount=amount,
-            currency=currency,
-        )
+        old_syp_line = ""
+        if currency == "NEW.SYP":
+            old_syp_amount = order.get("old_syp_total")
+            if old_syp_amount is None:
+                old_syp_amount = ExchangeService.old_syp_equivalent(order.get("total_amount"))
+            old_syp_line = (
+                f"\nℹ️ يعادل <b>{_format_money(old_syp_amount)}</b> ليرة سورية قديمة"
+                if lang == "ar" else
+                f"\nℹ️ Equivalent to <b>{_format_money(old_syp_amount)}</b> legacy Syrian pounds"
+            )
 
+        if lang == "ar":
+            text = (
+                f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
+                "💳 <b>بيانات الدفع الرسمية</b>\n"
+                f"🏦 الجهة: <b>{name}</b>\n"
+                f"💱 عملة الدفع: <b>{currency}</b>\n"
+                f"💰 المبلغ المطلوب: <b>{amount} {currency}</b>\n"
+                f"📱 حساب شام كاش: <code>{account}</code>\n"
+                f"⏱ مهلة الدفع: <b>{timeout} دقيقة</b>"
+                f"{old_syp_line}\n\n"
+                "⚠️ <b>لا ترسل أي مبلغ قبل التأكد من أن بيانات الدفع مطابقة لهذه الرسالة.</b>\n"
+                "بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
+            )
+        else:
+            text = (
+                f"🔔 <b>Your order #{order_number} has been approved</b>\n\n"
+                "💳 <b>Official Payment Details</b>\n"
+                f"🏦 Provider: <b>{name}</b>\n"
+                f"💱 Payment currency: <b>{currency}</b>\n"
+                f"💰 Amount due: <b>{amount} {currency}</b>\n"
+                f"📱 ShamCash account: <code>{account}</code>\n"
+                f"⏱ Payment deadline: <b>{timeout} minutes</b>"
+                f"{old_syp_line}\n\n"
+                "⚠️ <b>Do not send funds until these payment details match this message.</b>\n"
+                "After payment, use the receipt-upload button to submit your proof."
+            )
+
+        # The text message is mandatory and contains the account + exact amount.
         await self.notify_user(user_id, text)
 
-        # Legacy SYP is display-only. NEW.SYP is the actual payment currency.
-        if currency == 'NEW.SYP':
-            old_syp_amount = order.get('old_syp_total')
-            if old_syp_amount is None:
-                from services.exchange_service import ExchangeService
-                old_syp_amount = ExchangeService.old_syp_equivalent(order['total_amount'])
-            equivalent_line = (
-                f"\nℹ️ يعادل <b>{_format_money(old_syp_amount)}</b> ليرة سورية قديمة"
-                if lang == 'ar'
-                else f"\nℹ️ Equivalent to <b>{_format_money(old_syp_amount)}</b> legacy Syrian pounds"
-            )
-            await self.notify_user(user_id, equivalent_line)
-
-        # This QR is the admin's ShamCash payment QR, not the customer's wallet QR.
+        # QR is supplemental. If Telegram rejects the photo, the account details
+        # have already reached the customer and the failure is logged.
         caption = (
-            f"💳 <b>بيانات الدفع — {name}</b>\n"
-            f"العملة: <b>{currency}</b>\n"
-            f"الحساب: <code>{account}</code>\n\n"
-            f"📱 استخدم رمز QR أعلاه للدفع.\n"
-            f"📦 الطلب: <b>#{order['order_number']}</b>"
-        ) if lang == 'ar' else (
-            f"💳 <b>Payment details — {name}</b>\n"
-            f"Currency: <b>{currency}</b>\n"
-            f"Account: <code>{account}</code>\n\n"
-            f"📱 Use the QR code above to pay.\n"
-            f"📦 Order: <b>#{order['order_number']}</b>"
+            f"💳 <b>QR الدفع — {name}</b>\n"
+            f"📦 الطلب: <b>#{order_number}</b>\n"
+            f"💰 المبلغ: <b>{amount} {currency}</b>\n"
+            f"📱 الحساب: <code>{account}</code>"
+        ) if lang == "ar" else (
+            f"💳 <b>Payment QR — {name}</b>\n"
+            f"📦 Order: <b>#{order_number}</b>\n"
+            f"💰 Amount: <b>{amount} {currency}</b>\n"
+            f"📱 Account: <code>{account}</code>"
         )
         try:
-            await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"Failed to send payment QR for order {order['order_number']}: {e}")
+            await self._bot.send_photo(
+                user_id,
+                qr_photo_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.exception("Failed to send payment QR for order %s: %s", order_number, exc)
 
-    async def notify_feedback(self, user: dict, message: str):
-        """Notify admins of new feedback."""
-        text = f"""
-📨 <b>اقتراح جديد من عميل</b>
-
-👤 من: @{user.get('username', 'بدون')}
-🆔 ID: <code>{user['telegram_id']}</code>
-📛 الاسم: {user.get('full_name', 'غير مسجل')}
-
-💬 <b>الرسالة:</b>
-{message}
-"""
-        await self.notify_admins(text)
+        return True
