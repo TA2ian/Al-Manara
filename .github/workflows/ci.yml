@@ -40,10 +40,13 @@ jobs:
       - name: Install system libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libzbar0
+          sudo apt-get install -y libzbar0 libzbar-dev
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+
+      - name: Verify QR runtime dependency
+        run: python -c "from pyzbar.pyzbar import decode; print('pyzbar/zbar OK')"
 
       - name: Verify dependency resolution
         run: python -m pip check
