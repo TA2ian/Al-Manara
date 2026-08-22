@@ -3,7 +3,7 @@ import html
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import Config
 from database import get_pool
@@ -16,6 +16,19 @@ router = Router()
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
+
+
+def _customer_action_keyboard(telegram_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
+    action = "admin_unban_" if is_blocked else "admin_ban_"
+    action_text = "✅ فك الحظر" if is_blocked else "🚫 حظر"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=action_text, callback_data=f"{action}{telegram_id}"),
+            InlineKeyboardButton(text="🗑️ حذف العميل", callback_data=f"admin_del_user_{telegram_id}"),
+        ],
+        [InlineKeyboardButton(text="🔍 بحث عميل آخر", callback_data="admin_search_user")],
+        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+    ])
 
 
 @router.message(AdminStates.waiting_search, F.text)
@@ -108,19 +121,38 @@ async def search_input(message: Message, state: FSMContext):
         await message.answer("❌ لم يتم العثور على عميل مطابق.", reply_markup=admin_menu_keyboard())
         return
 
-    for user, stats in result_rows:
-        text = (
-            "👤 <b>معلومات العميل</b>\n\n"
-            f"🆔 Telegram ID: <code>{user['telegram_id']}</code>\n"
-            f"📛 الاسم: {html.escape(user['full_name'] or 'N/A')}\n"
-            f"📱 اليوزر: @{html.escape(user['username'] or 'N/A')}\n"
-            f"📞 الهاتف: <code>{html.escape(user['phone_number'] or 'N/A')}</code>\n"
-            f"🏦 ShamCash: <code>{html.escape(user['shamcash_account'] or 'N/A')}</code>\n"
-            f"🔰 التوثيق: {'✅' if user['is_verified'] else '❌'} — {html.escape(user['verification_status'] or 'N/A')}\n"
-            f"🚫 محظور: {'نعم' if user['is_blocked'] else 'لا'}\n"
-            f"📦 طلبات مكتملة: <b>{stats['completed']}</b>\n"
-            f"⏳ طلبات نشطة: <b>{stats['active']}</b>\n"
-            f"💰 USDT مكتمل: <b>{usdt(stats['usdt_completed'])}</b>\n"
-            f"📅 التسجيل: {user['created_at'].strftime('%Y-%m-%d')}"
+    if len(result_rows) > 1:
+        await message.answer(
+            f"🔎 تم العثور على <b>{len(result_rows)}</b> عملاء مطابقين.\n\n"
+            "لإدارة أو حذف عميل، اجعل البحث أكثر تحديداً باستخدام Telegram ID أو @username أو الهاتف أو حساب ShamCash.",
+            parse_mode="HTML",
+            reply_markup=admin_menu_keyboard(),
         )
-        await message.answer(text, parse_mode="HTML", reply_markup=admin_menu_keyboard())
+        for user, _stats in result_rows[:10]:
+            await message.answer(
+                f"👤 <b>{html.escape(user['full_name'] or 'N/A')}</b> — "
+                f"<code>{user['telegram_id']}</code> — @{html.escape(user['username'] or 'N/A')}",
+                parse_mode="HTML",
+            )
+        return
+
+    user, stats = result_rows[0]
+    text = (
+        "👤 <b>معلومات العميل</b>\n\n"
+        f"🆔 Telegram ID: <code>{user['telegram_id']}</code>\n"
+        f"📛 الاسم: {html.escape(user['full_name'] or 'N/A')}\n"
+        f"📱 اليوزر: @{html.escape(user['username'] or 'N/A')}\n"
+        f"📞 الهاتف: <code>{html.escape(user['phone_number'] or 'N/A')}</code>\n"
+        f"🏦 ShamCash: <code>{html.escape(user['shamcash_account'] or 'N/A')}</code>\n"
+        f"🔰 التوثيق: {'✅' if user['is_verified'] else '❌'} — {html.escape(user['verification_status'] or 'N/A')}\n"
+        f"🚫 محظور: {'نعم' if user['is_blocked'] else 'لا'}\n"
+        f"📦 طلبات مكتملة: <b>{stats['completed']}</b>\n"
+        f"⏳ طلبات نشطة: <b>{stats['active']}</b>\n"
+        f"💰 USDT مكتمل: <b>{usdt(stats['usdt_completed'])}</b>\n"
+        f"📅 التسجيل: {user['created_at'].strftime('%Y-%m-%d')}"
+    )
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=_customer_action_keyboard(user["telegram_id"], user["is_blocked"]),
+    )
