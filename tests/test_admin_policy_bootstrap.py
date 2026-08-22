@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_admin_facade_registers_only_newly_extracted_policies():
+def test_admin_facade_registers_only_nested_policies():
     admin = (ROOT / "handlers" / "admin.py").read_text(encoding="utf-8")
     required = [
         "admin_order_list_policy.router",
@@ -13,12 +13,14 @@ def test_admin_facade_registers_only_newly_extracted_policies():
         "admin_utility_policy.router",
         "admin_maintenance_policy.router",
         "admin_settings_policy.router",
-        "admin_rejection_policy.router",
+        "admin_settings_alias_policy.router",
     ]
     for marker in required:
         assert marker in admin
-    # These are already registered directly by bot.py and must not be nested again.
+
+    # Authoritative policies are registered directly by bot.py and must not be nested again.
     for marker in (
+        "admin_rejection_policy.router",
         "admin_broadcast_policy.router",
         "admin_financial_dashboard_policy.router",
         "admin_rate_policy.router",
@@ -31,18 +33,10 @@ def test_admin_facade_registers_only_newly_extracted_policies():
         assert marker not in admin
 
 
-def test_handler_package_exposes_extracted_admin_policies():
+def test_handler_package_initializer_is_side_effect_free():
     init = (ROOT / "handlers" / "__init__.py").read_text(encoding="utf-8")
-    for name in (
-        "admin_order_list_policy",
-        "admin_user_management_policy",
-        "admin_utility_policy",
-        "admin_maintenance_policy",
-        "admin_settings_policy",
-        "admin_rejection_policy",
-    ):
-        assert name in init
-    assert "admin_policy_bootstrap" not in init
+    assert "from . import order" not in init
+    assert "from . import admin_rejection_policy" not in init
 
 
 def test_legacy_admin_module_is_now_a_small_compatibility_facade():
