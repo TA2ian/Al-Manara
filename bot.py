@@ -29,6 +29,7 @@ def create_dispatcher() -> Dispatcher:
         admin_note_policy,
         admin,
         payment_methods,
+        shamcash_verification_policy,
         verification,
         language_policy,
         customer_navigation_policy,
@@ -85,6 +86,9 @@ def create_dispatcher() -> Dispatcher:
     # Polished internal order notes must run before the legacy admin note handlers.
     dp.include_router(admin_note_policy.router)
     dp.include_router(payment_methods.router)
+    # ShamCash account QR matching must happen before the legacy verification
+    # QR handler; successful validation delegates to that existing flow.
+    dp.include_router(shamcash_verification_policy.router)
     dp.include_router(admin.router)
     # Language switching must precede the legacy menu language callbacks so
     # the prompt and result always use the user's selected language.
