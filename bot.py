@@ -24,6 +24,7 @@ def create_dispatcher() -> Dispatcher:
         admin_navigation_policy,
         admin_approval_policy,
         admin_transfer_policy,
+        admin_note_policy,
         admin,
         payment_methods,
         verification,
@@ -74,6 +75,8 @@ def create_dispatcher() -> Dispatcher:
     # Admin transfer-proof input must precede the legacy TXID handlers so a
     # screenshot can safely be submitted before or together with its TXID.
     dp.include_router(admin_transfer_policy.router)
+    # Polished internal order notes must run before the legacy admin note handlers.
+    dp.include_router(admin_note_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     # Language switching must precede the legacy menu language callbacks so
