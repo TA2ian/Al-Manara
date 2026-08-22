@@ -9,6 +9,7 @@ from config import Config
 from database import get_pool
 from keyboards.inline import admin_menu_keyboard
 from services.exchange_service import ExchangeService
+from services.formatters import rate
 from states import AdminStates
 
 router = Router()
@@ -19,9 +20,7 @@ def is_admin(user_id: int) -> bool:
 
 
 def _cancel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ إلغاء والعودة للوحة التحكم", callback_data="admin_cancel_input")]
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء والعودة للوحة التحكم", callback_data="admin_cancel_input")]])
 
 
 async def _current_rate() -> Decimal:
@@ -37,12 +36,11 @@ async def rate_settings_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-
-    rate = await _current_rate()
+    current = await _current_rate()
     await state.clear()
     await callback.message.edit_text(
-        f"💱 <b>سعر الصرف الحالي:</b> 1 USDT = {rate:,.2f} NEW.SYP\n\n"
-        "أرسل السعر الجديد:",
+        f"💱 <b>سعر الصرف الحالي:</b> 1 USD = {rate(current)} NEW.SYP\n\n"
+        "أرسل سعر NEW.SYP مقابل 1 USD:",
         reply_markup=_cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -53,12 +51,10 @@ async def rate_settings_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_rate)
 async def rate_settings_save(message: Message, state: FSMContext):
-    """Validate, persist, and immediately close the rate-input flow."""
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
         return
-
     raw = (message.text or "").strip().replace(",", "")
     try:
         value = Decimal(raw)
@@ -67,29 +63,14 @@ async def rate_settings_save(message: Message, state: FSMContext):
     except (InvalidOperation, ValueError):
         data = await state.get_data()
         prompt_id = data.get("rate_prompt_message_id")
+        text = "❌ <b>سعر غير صالح</b>\n\nأرسل رقماً أكبر من صفر.\nمثال: <code>150.50</code>"
         if prompt_id:
             try:
-                await message.bot.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=prompt_id,
-                    text=(
-                        "❌ <b>سعر غير صالح</b>\n\n"
-                        "أرسل رقماً أكبر من صفر.\n"
-                        "مثال: <code>150.50</code>"
-                    ),
-                    reply_markup=_cancel_keyboard(),
-                    parse_mode="HTML",
-                )
+                await message.bot.edit_message_text(chat_id=message.chat.id, message_id=prompt_id, text=text, reply_markup=_cancel_keyboard(), parse_mode="HTML")
             except Exception:
-                await message.answer(
-                    "❌ سعر غير صالح. أرسل رقماً أكبر من صفر.",
-                    reply_markup=_cancel_keyboard(),
-                )
+                await message.answer(text, reply_markup=_cancel_keyboard(), parse_mode="HTML")
         else:
-            await message.answer(
-                "❌ سعر غير صالح. أرسل رقماً أكبر من صفر.",
-                reply_markup=_cancel_keyboard(),
-            )
+            await message.answer(text, reply_markup=_cancel_keyboard(), parse_mode="HTML")
         return
 
     pool = await get_pool()
@@ -98,30 +79,17 @@ async def rate_settings_save(message: Message, state: FSMContext):
     prompt_id = data.get("rate_prompt_message_id")
     await state.clear()
 
-    if not success:
-        text = (
-            "❌ <b>تعذر تحديث سعر الصرف</b>\n\n"
-            "لم يتم تغيير السعر. حاول مرة أخرى من لوحة التحكم."
-        )
-    else:
-        # Exchange rates are displayed as monetary values with two decimals.
-        text = (
-            "✅ <b>تم تحديث سعر الصرف بنجاح</b>\n\n"
-            f"💱 1 USDT = <b>{value:,.2f} NEW.SYP</b>\n\n"
-            "تم حفظ السعر وتطبيقه على عروض الأسعار الجديدة."
-        )
-
+    text = (
+        "❌ <b>تعذر تحديث سعر الصرف</b>\n\nلم يتم تغيير السعر. حاول مرة أخرى من لوحة التحكم."
+        if not success else
+        "✅ <b>تم تحديث سعر الصرف بنجاح</b>\n\n"
+        f"💱 1 USD = <b>{rate(value)} NEW.SYP</b>\n\n"
+        "تم حفظ السعر وتطبيقه على عروض الأسعار الجديدة."
+    )
     if prompt_id:
         try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=prompt_id,
-                text=text,
-                reply_markup=admin_menu_keyboard(),
-                parse_mode="HTML",
-            )
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=prompt_id, text=text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
             return
         except Exception:
             pass
-
     await message.answer(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
