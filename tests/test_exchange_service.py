@@ -16,18 +16,19 @@ class FakeAcquire:
 
 
 class FakeConnection:
-    def __init__(self, rate):
+    def __init__(self, rate, rate_currency="NEW.SYP"):
         self.rate = rate
+        self.rate_currency = rate_currency
 
     async def fetchrow(self, query, *args):
         if self.rate is None:
             return None
-        return {"rate": self.rate}
+        return {"rate": self.rate, "rate_currency": self.rate_currency}
 
 
 class FakePool:
-    def __init__(self, rate):
-        self.conn = FakeConnection(rate)
+    def __init__(self, rate, rate_currency="NEW.SYP"):
+        self.conn = FakeConnection(rate, rate_currency)
 
     def acquire(self):
         return FakeAcquire(self.conn)
@@ -51,7 +52,7 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["base_amount"], Decimal("15000.00"))
 
     async def test_legacy_rate_is_normalized_once(self):
-        service = ExchangeService(FakePool(Decimal("15000")))
+        service = ExchangeService(FakePool(Decimal("15000"), "SYP"))
         quote = await service.calculate_order(Decimal("100"), "NEW.SYP")
 
         self.assertEqual(quote["exchange_rate"], Decimal("150.00000000"))
