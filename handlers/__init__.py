@@ -11,6 +11,9 @@ from . import (
     admin_rate_policy,
     admin_order_list_policy,
     admin_user_management_policy,
+    admin_utility_policy,
+    admin_maintenance_policy,
+    admin_settings_policy,
     admin_policy_bootstrap,
 )
 
@@ -26,5 +29,8 @@ __all__ = [
     "admin_rate_policy",
     "admin_order_list_policy",
     "admin_user_management_policy",
+    "admin_utility_policy",
+    "admin_maintenance_policy",
+    "admin_settings_policy",
     "admin_policy_bootstrap",
 ]
