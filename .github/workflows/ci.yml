@@ -46,7 +46,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q .
 
-      - name: Run unit tests
+      - name: Run test suite
         env:
           TEST_DATABASE_URL: postgresql://test:test@localhost:5432/almanara_test
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        run: python -m pytest -q
