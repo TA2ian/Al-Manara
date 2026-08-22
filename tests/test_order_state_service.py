@@ -49,6 +49,27 @@ class OrderStateServiceTests(unittest.TestCase):
         self.assertEqual(audit_calls[0][2][4], "pending")
         self.assertEqual(audit_calls[0][2][5], "waiting_payment")
 
+    def test_admin_can_reject_pending_order(self):
+        conn = FakeConn("pending")
+        result = self.run_async(
+            transition_order(conn, 7, "rejected", admin_id=99)
+        )
+        self.assertEqual(result["status"], "rejected")
+
+    def test_admin_can_reject_waiting_payment_order(self):
+        conn = FakeConn("waiting_payment")
+        result = self.run_async(
+            transition_order(conn, 7, "rejected", admin_id=99)
+        )
+        self.assertEqual(result["status"], "rejected")
+
+    def test_admin_can_reject_receipt_received_order(self):
+        conn = FakeConn("receipt_received")
+        result = self.run_async(
+            transition_order(conn, 7, "rejected", admin_id=99)
+        )
+        self.assertEqual(result["status"], "rejected")
+
     def test_invalid_transition_is_rejected(self):
         conn = FakeConn("pending")
         with self.assertRaises(InvalidOrderTransition):
