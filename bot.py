@@ -3,7 +3,7 @@ from aiogram import Dispatcher
 
 
 def create_dispatcher() -> Dispatcher:
-    """Create dispatcher with all handlers."""
+    """Create dispatcher with all authoritative handlers."""
     from handlers import (
         start,
         saved_wallets,
@@ -13,7 +13,6 @@ def create_dispatcher() -> Dispatcher:
         wallets,
         order_amount_policy,
         order_confirmation_policy,
-        order,
         profile,
         active_order_policy,
         receipt_processing_policy,
@@ -60,7 +59,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(order_amount_policy.router)
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
-    dp.include_router(order.router)
     dp.include_router(profile.router)
     dp.include_router(receipt_processing_policy.router)
     dp.include_router(receipt_document_policy.router)
