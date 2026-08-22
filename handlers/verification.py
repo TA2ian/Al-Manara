@@ -3,11 +3,11 @@ import html
 import logging
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from states import VerificationStates
-from keyboards.inline import main_menu_inline, admin_verify_keyboard
+from keyboards.inline import main_menu_inline
 from keyboards.reply import compact_reply_keyboard, phone_share_keyboard
 from services.locale_service import locale_service
 from config import Config
@@ -238,7 +238,7 @@ async def submit_verification(msg: Message, state: FSMContext):
 
     lang = user['language'] or 'ar'
     bot = Bot(token=Config.BOT_TOKEN)
-    verify_kb = admin_verify_keyboard(msg.chat.id, full_name, shamcash_account)
+    verify_kb = _verification_review_keyboard(msg.chat.id)
     admin_text = (
         f"🔔 <b>طلب توثيق جديد</b>\n\n"
         f"👤 المستخدم: @{html.escape(msg.chat.username or 'بدون')}\n"
@@ -258,3 +258,11 @@ async def submit_verification(msg: Message, state: FSMContext):
     await msg.answer(locale_service.get('verification_submitted', lang), reply_markup=main_menu_inline(lang))
     await msg.answer("👇", reply_markup=compact_reply_keyboard(lang))
     await state.clear()
+
+
+def _verification_review_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    """Only terminal verification decisions are shown on a pending review."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ توثيق", callback_data=f"verify_approve_{telegram_id}"),
+        InlineKeyboardButton(text="❌ رفض", callback_data=f"verify_reject_{telegram_id}"),
+    ]])
