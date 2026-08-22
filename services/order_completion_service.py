@@ -2,18 +2,20 @@
 import asyncio
 import html
 import logging
+from datetime import datetime
 
 from aiogram import Bot
 
 from config import Config
 from database import get_pool
+from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
 
 logger = logging.getLogger(__name__)
 
 
 async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int):
-    """Finalize an order, notify the customer/admins, and request a rating."""
+    """Finalize an approved USDT order, notify the customer/admins, and request a rating."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
@@ -31,13 +33,13 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             return False
 
         try:
-            order = await transition_order(
+            await transition_order(
                 conn,
                 order_id,
                 "completed",
                 updates={
                     "txid": txid,
-                    "completed_at": __import__("datetime").datetime.now(),
+                    "completed_at": datetime.now(),
                     "wallet_qr_photo_id": None,
                     "receipt_photo_id": None,
                 },
@@ -56,12 +58,13 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
     bot = Bot(token=Config.BOT_TOKEN)
     comp_lang = order["language"] or "ar"
     network_name = order["network"] or "TRC20"
+    amount_text = usdt(order["amount_usdt"])
 
     if comp_lang == "ar":
         completion_text = (
             f"✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
             f"📦 الطلب: #{order['order_number']}\n"
-            f"💰 المبلغ: {order['amount_usdt']} USDT إلى {network_name}\n"
+            f"💰 المبلغ: {amount_text} USDT إلى {network_name}\n"
             f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
             "يمكنك التحقق من المعاملة عبر مستكشف الشبكة."
         )
@@ -69,7 +72,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
         completion_text = (
             f"✅ <b>Your order has been completed!</b>\n\n"
             f"📦 Order: #{order['order_number']}\n"
-            f"💰 Amount: {order['amount_usdt']} USDT on {network_name}\n"
+            f"💰 Amount: {amount_text} USDT on {network_name}\n"
             f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
             "You can verify the transaction on the network explorer."
         )
@@ -103,7 +106,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
         f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
         f"🆔 <code>{order['telegram_id']}</code>\n"
         f"📦 {'الطلب' if comp_lang == 'ar' else 'Order'}: #{order['order_number']}\n"
-        f"💰 {order['amount_usdt']} USDT\n"
+        f"💰 {amount_text} USDT\n"
         f"🌐 {html.escape(network_name)}\n"
         f"🔗 TXID: <code>{html.escape(txid)}</code>"
     )
@@ -126,11 +129,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             "⭐ يرجى تقييم تجربتك:" if comp_lang == "ar" else "⭐ Please rate your experience:",
             reply_markup=rating_keyboard(order_id),
         )
-        await bot.send_message(
-            order["telegram_id"],
-            "👇",
-            reply_markup=compact_reply_keyboard(comp_lang),
-        )
+        await bot.send_message(order["telegram_id"], "👇", reply_markup=compact_reply_keyboard(comp_lang))
     except Exception:
         logger.exception("Failed to send rating prompt for order %s", order_id)
 
