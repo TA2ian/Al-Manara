@@ -1,4 +1,4 @@
-"""Authoritative admin tools: customer search, backup/restore, note refresh, and term fallback."""
+"""Authoritative admin tools: customer search, backup/restore, and invoice notes."""
 from __future__ import annotations
 
 import html
@@ -9,12 +9,11 @@ import tempfile
 from datetime import date, datetime
 from decimal import Decimal
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
-    Document,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -22,9 +21,9 @@ from aiogram.types import (
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard, order_admin_keyboard
-from services.formatters import money, percent, rate, usdt
-from states import AdminStates, TermsStates
+from keyboards.inline import admin_menu_keyboard
+from services.formatters import usdt
+from states import AdminStates
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -48,19 +47,15 @@ def is_admin(user_id: int) -> bool:
 
 
 def _menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")]]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")]])
 
 
 def _backup_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📤 تصدير نسخة الآن", callback_data="admin_backup_export")],
-            [InlineKeyboardButton(text="📥 استعادة نسخة", callback_data="admin_backup_restore")],
-            [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 تصدير نسخة الآن", callback_data="admin_backup_export")],
+        [InlineKeyboardButton(text="📥 استعادة نسخة", callback_data="admin_backup_restore")],
+        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+    ])
 
 
 def _json_default(value):
@@ -74,13 +69,13 @@ def _json_default(value):
 def _restore_value(value, column_type: str):
     if value is None:
         return None
-    if "timestamp" in column_type or column_type == "date":
-        if column_type == "date":
-            return date.fromisoformat(value)
+    if "timestamp" in column_type:
         return datetime.fromisoformat(value)
+    if column_type == "date":
+        return date.fromisoformat(value)
     if "numeric" in column_type or "decimal" in column_type:
         return Decimal(str(value))
-    if column_type == "bigint" or column_type == "integer":
+    if column_type in ("bigint", "integer"):
         return int(value)
     if column_type == "boolean":
         return bool(value)
@@ -103,23 +98,17 @@ async def search_user_start(callback: CallbackQuery, state: FSMContext):
         "• رقم الهاتف\n"
         "• اسم العميل\n"
         "• رقم/معرّف ShamCash",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_input")]]
-        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_input")]]),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
 @router.message(AdminStates.waiting_search, F.document)
-async def reject_backup_document_in_search(message: Message, state: FSMContext):
+async def receive_restore_document(message: Message, state: FSMContext):
     data = await state.get_data()
     if data.get("admin_search_type") != "restore":
         return
-    await _receive_restore_document(message, state)
-
-
-async def _receive_restore_document(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -153,12 +142,10 @@ async def _receive_restore_document(message: Message, state: FSMContext):
         "⚠️ <b>تأكيد استعادة النسخة</b>\n\n"
         "الاستعادة عملية مدمرة: ستستبدل بيانات قاعدة البيانات الحالية بالنسخة المرفوعة.\n\n"
         "تأكد من أن الملف هو النسخة الصحيحة قبل المتابعة.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⚠️ نعم، استعادة الآن", callback_data="admin_backup_restore_confirm")],
-                [InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_backup_restore_cancel")],
-            ]
-        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚠️ نعم، استعادة الآن", callback_data="admin_backup_restore_confirm")],
+            [InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_backup_restore_cancel")],
+        ]),
         parse_mode="HTML",
     )
 
@@ -171,9 +158,7 @@ async def backups_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     pool = await get_pool()
     async with pool.acquire() as conn:
-        counts = {}
-        for table in BACKUP_TABLES:
-            counts[table] = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
+        counts = {table: await conn.fetchval(f"SELECT COUNT(*) FROM {table}") for table in BACKUP_TABLES}
     await callback.message.edit_text(
         "📋 <b>النسخ الاحتياطية والتصدير</b>\n\n"
         f"👤 المستخدمون: {counts['users']:,}\n"
@@ -201,21 +186,12 @@ async def backup_export(callback: CallbackQuery):
         for table in BACKUP_TABLES:
             rows = await conn.fetch(f"SELECT * FROM {table} ORDER BY 1")
             tables[table] = [dict(row) for row in rows]
-    payload = {
-        "format": "al-manara-backup",
-        "version": BACKUP_VERSION,
-        "created_at": datetime.now().isoformat(),
-        "tables": tables,
-    }
+    payload = {"format": "al-manara-backup", "version": BACKUP_VERSION, "created_at": datetime.now().isoformat(), "tables": tables}
     data = json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default).encode("utf-8")
     filename = f"al-manara-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
     await callback.message.answer_document(
         BufferedInputFile(data, filename=filename),
-        caption=(
-            "📦 <b>نسخة Al-Manara الاحتياطية</b>\n"
-            "تتضمن بيانات المستخدمين والطلبات والأسعار ووسائل الدفع والإعدادات وسجل التدقيق.\n"
-            "🔐 الملف حساس ويجب حفظه في مكان آمن."
-        ),
+        caption="📦 <b>نسخة Al-Manara الاحتياطية</b>\nتتضمن بيانات المستخدمين والطلبات والأسعار ووسائل الدفع والإعدادات وسجل التدقيق.\n🔐 الملف حساس ويجب حفظه في مكان آمن.",
         parse_mode="HTML",
     )
     await callback.answer("✅ تم تصدير النسخة")
@@ -233,9 +209,7 @@ async def backup_restore_start(callback: CallbackQuery, state: FSMContext):
         "📥 <b>استعادة نسخة احتياطية</b>\n\n"
         "أرسل ملف <code>.json</code> الذي صدره البوت سابقاً.\n"
         "لن يتم حذف أي بيانات قبل أن تؤكد عملية الاستعادة.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_input")]]
-        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_input")]]),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -269,54 +243,35 @@ async def backup_restore_confirm(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         await callback.answer("❌ ملف الاستعادة غير موجود. أعد رفعه.", show_alert=True)
         return
-
     try:
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute(
-                    "TRUNCATE TABLE users, orders, exchange_rates, audit_logs, blocked_users, feedback_messages, saved_addresses, payment_methods, bot_settings RESTART IDENTITY CASCADE"
-                )
+                await conn.execute("TRUNCATE TABLE users, orders, exchange_rates, audit_logs, blocked_users, feedback_messages, saved_addresses, payment_methods, bot_settings RESTART IDENTITY CASCADE")
                 for table in BACKUP_TABLES:
                     rows = payload["tables"][table]
                     if not rows:
                         continue
                     columns = list(rows[0].keys())
-                    types = await conn.fetch(
-                        """SELECT column_name, data_type FROM information_schema.columns
-                           WHERE table_schema='public' AND table_name=$1""",
+                    type_rows = await conn.fetch(
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
                         table,
                     )
-                    type_map = {row["column_name"]: row["data_type"] for row in types}
+                    type_map = {row["column_name"]: row["data_type"] for row in type_rows}
                     for item in rows:
                         values = [_restore_value(item.get(column), type_map[column]) for column in columns]
                         placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
                         quoted = ", ".join(f'"{column}"' for column in columns)
-                        await conn.execute(
-                            f"INSERT INTO {table} ({quoted}) VALUES ({placeholders})",
-                            *values,
-                        )
+                        await conn.execute(f"INSERT INTO {table} ({quoted}) VALUES ({placeholders})", *values)
                 for table in ("users", "orders", "exchange_rates", "audit_logs", "blocked_users", "feedback_messages", "saved_addresses", "payment_methods"):
-                    await conn.execute(
-                        f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM {table}"
-                    )
-        await callback.message.edit_text(
-            "✅ <b>تمت استعادة النسخة بنجاح.</b>\n\n"
-            "أعد تشغيل البوت بعد الاستعادة للتأكد من تحميل الإعدادات والحالة الجديدة بالكامل.",
-            reply_markup=admin_menu_keyboard(),
-            parse_mode="HTML",
-        )
+                    await conn.execute(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM {table}")
+        await callback.message.edit_text("✅ <b>تمت استعادة النسخة بنجاح.</b>\n\nأعد تشغيل البوت بعد الاستعادة للتأكد من تحميل الإعدادات والحالة الجديدة بالكامل.", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
         await callback.answer("✅ تمت الاستعادة")
     except Exception:
         logger.exception("Database restore failed")
-        await callback.message.edit_text(
-            "❌ <b>فشلت استعادة النسخة.</b>\n\n"
-            "لم يتم اعتماد الاستعادة الجزئية؛ العملية داخل معاملة قاعدة بيانات واحدة.",
-            reply_markup=admin_menu_keyboard(),
-            parse_mode="HTML",
-        )
+        await callback.message.edit_text("❌ <b>فشلت استعادة النسخة.</b>\n\nلم يتم اعتماد الاستعادة الجزئية؛ العملية داخل معاملة قاعدة بيانات واحدة.", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
         await callback.answer("❌ فشلت الاستعادة", show_alert=True)
     finally:
         try:
@@ -337,10 +292,7 @@ async def note_start(callback: CallbackQuery, state: FSMContext):
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
-        order = await conn.fetchrow(
-            "SELECT order_number, status, amount_usdt, payment_currency, admin_notes FROM orders WHERE id=$1",
-            order_id,
-        )
+        order = await conn.fetchrow("SELECT order_number, amount_usdt FROM orders WHERE id=$1", order_id)
     if not order:
         await callback.answer("❌ الطلب غير موجود", show_alert=True)
         return
@@ -379,14 +331,8 @@ async def note_save(message: Message, state: FSMContext):
             await state.clear()
             await message.answer("❌ الطلب غير موجود.")
             return
-        await conn.execute(
-            "UPDATE orders SET admin_notes=CONCAT(COALESCE(admin_notes,''), $1, '\\n') WHERE id=$2",
-            f"[{message.from_user.id}] {note}", order_id,
-        )
-        await conn.execute(
-            "INSERT INTO audit_logs (user_id, admin_id, action, details, severity) VALUES ($1,$2,'note',$3,'info')",
-            order["user_id"], message.from_user.id, f"order={order['order_number']} | {note}",
-        )
+        await conn.execute("UPDATE orders SET admin_notes=CONCAT(COALESCE(admin_notes,''), $1, '\\n') WHERE id=$2", f"[{message.from_user.id}] {note}", order_id)
+        await conn.execute("INSERT INTO audit_logs (user_id, admin_id, action, details, severity) VALUES ($1,$2,'note',$3,'info')", order["user_id"], message.from_user.id, f"order={order['order_number']} | {note}")
     base = data.get("admin_note_base_text") or ""
     suffix = f"\n\n📝 <b>ملاحظة إدارية:</b> {html.escape(note)}"
     reply_markup = None
@@ -397,29 +343,8 @@ async def note_save(message: Message, state: FSMContext):
         except Exception:
             reply_markup = None
     try:
-        await message.bot.edit_message_text(
-            chat_id=data["admin_note_chat_id"],
-            message_id=data["admin_note_message_id"],
-            text=base + suffix,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+        await message.bot.edit_message_text(chat_id=data["admin_note_chat_id"], message_id=data["admin_note_message_id"], text=base + suffix, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
         logger.exception("Failed to refresh order invoice after note")
-    await message.answer(
-        f"✅ تم حفظ الملاحظة وتحديث الفاتورة #{html.escape(order['order_number'])}.",
-        reply_markup=_menu_keyboard(),
-        parse_mode="HTML",
-    )
+    await message.answer(f"✅ تم حفظ الملاحظة وتحديث الفاتورة #{html.escape(order['order_number'])}.", reply_markup=_menu_keyboard(), parse_mode="HTML")
     await state.clear()
-
-
-@router.callback_query(F.data == "decline_terms")
-async def decline_terms_fallback(callback: CallbackQuery, state: FSMContext):
-    """Fallback so the decline button still works if the start FSM was lost."""
-    if await state.get_state() != TermsStates.waiting_acceptance.state:
-        await callback.message.edit_text(
-            "❌ لم توافق على الشروط. لن يتم تفعيل الحساب حتى توافق عليها.\n\nاستخدم /start لإعادة المحاولة."
-        )
-        await state.clear()
-        await callback.answer("❌ تم الرفض")
