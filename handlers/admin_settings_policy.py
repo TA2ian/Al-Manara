@@ -60,16 +60,6 @@ async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_menu")
-async def admin_menu_back(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await state.clear()
-    await callback.message.edit_text("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-    await callback.answer()
-
-
 @router.callback_query(F.data == "setting_shamcash_usd")
 async def setting_shamcash_usd(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
