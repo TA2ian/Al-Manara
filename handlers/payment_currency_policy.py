@@ -23,7 +23,19 @@ async def _user_lang(telegram_id: int) -> str:
     return (row["language"] if row else "ar") or "ar"
 
 
-def _money(value) -> str:
+def _money(value, currency: str) -> str:
+    """Format payment amounts without noisy trailing zeros."""
+    places = 3 if currency == "USD" else 2
+    return f"{Decimal(str(value)):,.{places}f}"
+
+
+def _usdt(value) -> str:
+    """USDT is shown with practical two-decimal precision."""
+    return f"{Decimal(str(value)):,.2f}"
+
+
+def _rate(value) -> str:
+    """Exchange rate is always shown to two decimals for NEW.SYP."""
     return f"{Decimal(str(value)):,.2f}"
 
 
@@ -40,31 +52,36 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
     if currency == "NEW.SYP":
         payment_currency = "🇸🇾 الليرة السورية الجديدة (NEW.SYP)"
         unit = "NEW.SYP"
+        rate_block = (
+            "──── 💱 سعر الصرف ────\n"
+            f"🔄 <b>1 USD = {_rate(rate)} NEW.SYP</b>\n"
+        )
     else:
         payment_currency = "🇺🇸 الدولار الأمريكي (USD)"
         unit = "USD"
+        rate_block = (
+            "──── 💱 سعر الصرف ────\n"
+            "🔄 <b>1 USD = 1.000 USD</b>\n"
+        )
 
     return (
         "📋 <b>ملخص طلبك #PENDING</b>\n\n"
         "──── 💳 معلومات USDT ────\n"
-        f"💰 المبلغ المطلوب: <b>{_money(amount_usdt)} USDT</b>\n"
+        f"💰 المبلغ المطلوب: <b>{_usdt(amount_usdt)} USDT</b>\n"
         f"🌐 الشبكة: {network_display}\n"
         f"📍 العنوان: <code>{data['wallet']}</code>\n\n"
-        "──── 💱 سعر الصرف ────\n"
-        "🇺🇸 <b>الدولار الأمريكي (USD): 1.00 USD</b>\n"
-        f"🇸🇾 <b>الليرة السورية الجديدة (NEW.SYP): {_money(rate)} NEW.SYP</b>\n"
-        f"🔄 <b>1 USD = {_money(rate)} NEW.SYP</b>\n\n"
+        f"{rate_block}\n"
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
         "👇 <b>المبلغ الذي سيصل إلى محفظتك:</b>\n"
-        f"<b>💰 {_money(amount_usdt)} USDT</b>\n\n"
+        f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
         "──── 💵 المبلغ الأساسي ────\n"
-        f"💵 <b>{_money(base)} {unit}</b>\n\n"
+        f"💵 <b>{_money(base, unit)} {unit}</b>\n\n"
         "──── 💰 رسوم الخدمة ────\n"
-        f"📊 النسبة: <b>{_money(fee_pct)}%</b>\n"
-        f"💵 قيمة الرسوم: <b>{_money(fee)} {unit}</b>\n\n"
+        f"📊 النسبة: <b>{Decimal(str(fee_pct)):,.2f}%</b>\n"
+        f"💵 قيمة الرسوم: <b>{_money(fee, unit)} {unit}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>المجموع الإجمالي — المبلغ المطلوب إرساله:</b>\n"
-        f"<b>💰 {_money(total)} {unit}</b>\n"
+        "💸 <b>المجموع الإجمالي — المبلغ المطلوب إرساله:</b>\n\n"
+        f"<b>💰 {_money(total, unit)} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "⚠️ <b>مهم:</b> أرسل المجموع الإجمالي أعلاه.\n"
         "إذا أرسلت المبلغ الأساسي فقط، فسيتم اقتطاع رسوم الخدمة منه.\n\n"
@@ -75,7 +92,6 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
 def _build_english_summary(data: dict, calculation: dict, network_display: str) -> str:
     """Keep the English path consistent with the authoritative quote."""
     currency = calculation["payment_currency"]
-    rate = calculation["exchange_rate"]
     base = calculation["base_amount"]
     fee_pct = calculation["fee_percent"]
     fee = calculation["fee_amount"]
@@ -83,27 +99,29 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
     amount_usdt = data["amount_usdt"]
     unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
 
+    if currency == "NEW.SYP":
+        rate_block = f"──── 💱 Exchange Rate ────\n🔄 <b>1 USD = {_rate(calculation['exchange_rate'])} NEW.SYP</b>\n"
+    else:
+        rate_block = "──── 💱 Exchange Rate ────\n🔄 <b>1 USD = 1.000 USD</b>\n"
+
     return (
         "📋 <b>Order Summary #PENDING</b>\n\n"
         "──── 💳 USDT Details ────\n"
-        f"💰 Requested: <b>{_money(amount_usdt)} USDT</b>\n"
+        f"💰 Requested: <b>{_usdt(amount_usdt)} USDT</b>\n"
         f"🌐 Network: {network_display}\n"
         f"📍 Address: <code>{data['wallet']}</code>\n\n"
-        "──── 💱 Exchange Rate ────\n"
-        "🇺🇸 <b>US Dollar (USD): 1.00 USD</b>\n"
-        f"🇸🇾 <b>New Syrian Pound (NEW.SYP): {_money(rate)} NEW.SYP</b>\n"
-        f"🔄 <b>1 USD = {_money(rate)} NEW.SYP</b>\n\n"
+        f"{rate_block}\n"
         f"💳 Payment currency: <b>{unit}</b>\n\n"
         "👇 <b>Amount that will arrive in your wallet:</b>\n"
-        f"<b>💰 {_money(amount_usdt)} USDT</b>\n\n"
+        f"<b>💰 {_usdt(amount_usdt)} USDT</b>\n\n"
         "──── 💵 Base Amount ────\n"
-        f"💵 <b>{_money(base)} {unit}</b>\n\n"
+        f"💵 <b>{_money(base, unit)} {unit}</b>\n\n"
         "──── 💰 Service Fee ────\n"
-        f"📊 Rate: <b>{_money(fee_pct)}%</b>\n"
-        f"💵 Fee: <b>{_money(fee)} {unit}</b>\n\n"
+        f"📊 Rate: <b>{Decimal(str(fee_pct)):,.2f}%</b>\n"
+        f"💵 Fee: <b>{_money(fee, unit)} {unit}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>Total — Amount to Send:</b>\n"
-        f"<b>💰 {_money(total)} {unit}</b>\n"
+        "💸 <b>Total — Amount to Send:</b>\n\n"
+        f"<b>💰 {_money(total, unit)} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "⚠️ <b>Important:</b> Send the total amount shown above.\n"
         "If you send only the base amount, the service fee will be deducted from it.\n\n"
@@ -149,18 +167,11 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
             "amount_usdt": amount,
             "wallet": wallet,
         }
-        if lang == "ar":
-            summary = _build_arabic_summary(
-                data_for_summary,
-                calculation,
-                network_display,
-            )
-        else:
-            summary = _build_english_summary(
-                data_for_summary,
-                calculation,
-                network_display,
-            )
+        summary = (
+            _build_arabic_summary(data_for_summary, calculation, network_display)
+            if lang == "ar"
+            else _build_english_summary(data_for_summary, calculation, network_display)
+        )
 
         await callback.message.edit_text(summary, parse_mode="HTML")
         await callback.message.answer(
