@@ -37,11 +37,11 @@ EN_STATUS = {
 
 
 def _format_usdt(value) -> str:
-    """Format customer-facing USDT amounts consistently to two decimals."""
+    """Format customer-facing USDT amounts consistently to three decimals."""
     try:
-        return f"{Decimal(str(value)):,.2f}"
+        return f"{Decimal(str(value)):,.3f}"
     except (InvalidOperation, TypeError, ValueError):
-        return "0.00"
+        return "0.000"
 
 
 async def _render_page(user_id: int, lang: str, page: int):
@@ -87,7 +87,7 @@ async def _get_user(message_or_callback):
 async def show_precise_orders(message: Message):
     user = await _get_user(message)
     if not user:
-        await message.answer("Please start the bot first: /start")
+        await message.answer("يرجى بدء البوت أولاً: /start")
         return
 
     lang = user["language"] or "ar"
