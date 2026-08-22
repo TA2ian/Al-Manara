@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard, receipt_upload_keyboard
+from keyboards.inline import receipt_upload_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
@@ -87,7 +87,6 @@ async def reject_receipt(callback: CallbackQuery):
         logger.exception("Failed to notify receipt rejection for order %s", order_id)
     await callback.answer("❌ تم رفض الإيصال!")
     await callback.message.edit_text(f"❌ تم رفض إيصال الطلب #{order['order_number']}", parse_mode="HTML")
-    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("admin_reject_"), ~F.data.startswith("admin_reject_receipt_"))
@@ -135,7 +134,6 @@ async def reject_order(callback: CallbackQuery):
         logger.exception("Failed to notify order rejection for %s", order_id)
     await callback.answer("❌ تم رفض الطلب!")
     await callback.message.edit_text(f"❌ تم رفض الطلب #{order['order_number']}", parse_mode="HTML")
-    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("admin_noop"))
