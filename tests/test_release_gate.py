@@ -12,7 +12,6 @@ POLICY_MODULES = [
     "handlers.admin",
     "handlers.admin_approval_policy",
     "handlers.admin_broadcast_policy",
-    "handlers.admin_financial_dashboard_policy",
     "handlers.admin_maintenance_policy",
     "handlers.admin_navigation_policy",
     "handlers.admin_order_list_policy",
