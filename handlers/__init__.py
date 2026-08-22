@@ -9,6 +9,7 @@ from . import (
     verification,
     menu,
     admin_rate_policy,
+    admin_order_list_policy,
     admin_user_management_policy,
     admin_policy_bootstrap,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "verification",
     "menu",
     "admin_rate_policy",
+    "admin_order_list_policy",
     "admin_user_management_policy",
     "admin_policy_bootstrap",
 ]
