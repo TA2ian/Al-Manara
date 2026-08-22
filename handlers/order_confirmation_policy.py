@@ -157,11 +157,21 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             locale_service.get("order_created", lang, order_number=order_number),
             parse_mode="HTML",
         )
-        await callback.message.answer(
+        status_message = await callback.message.answer(
             "⏳ تم إرسال طلبك إلى الإدارة للمراجعة. لا ترسل أي مبلغ الآن؛ ستصلك تعليمات الدفع الرسمية بعد الموافقة."
             if lang == "ar" else
             "⏳ Your order has been sent to the administration for review. Do not send any payment yet; official payment instructions will appear after approval.",
         )
+        # Persist the exact customer-facing status message so an admin approval
+        # can replace the stale "awaiting approval" text instead of leaving the
+        # customer with a misleading status message in the chat.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET customer_status_message_id = $1 WHERE id = $2",
+                status_message.message_id,
+                order_id,
+            )
+
         await callback.message.answer(
             locale_service.get("main_menu", lang),
             reply_markup=main_menu_inline(lang),
