@@ -50,13 +50,25 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
     username = callback.from_user.username or ''
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO users (telegram_id, username, language, terms_accepted, terms_accepted_at)
-            VALUES ($1, $2, $3, TRUE, NOW())
+            INSERT INTO users (telegram_id, username, language, terms_accepted, terms_accepted_at, verification_status)
+            VALUES ($1, $2, $3, TRUE, NOW(), 'not_verified')
             ON CONFLICT (telegram_id) DO UPDATE SET
                 username = EXCLUDED.username,
                 language = EXCLUDED.language,
                 terms_accepted = TRUE,
-                terms_accepted_at = NOW()
+                terms_accepted_at = NOW(),
+                verification_status = CASE
+                    WHEN users.is_verified THEN users.verification_status
+                    WHEN users.verification_status = 'pending'
+                         AND users.phone_verified
+                         AND users.phone_number IS NOT NULL
+                         AND users.full_name IS NOT NULL
+                         AND users.shamcash_account IS NOT NULL
+                         AND users.shamcash_qr_photo_id IS NOT NULL
+                    THEN users.verification_status
+                    WHEN users.verification_status IN ('approved', 'rejected') THEN users.verification_status
+                    ELSE 'not_verified'
+                END
         """, callback.from_user.id, username, lang)
     await callback.message.delete()
     await callback.message.answer(locale_service.get('welcome', lang, name=callback.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode='HTML')
