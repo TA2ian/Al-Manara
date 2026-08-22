@@ -6,7 +6,7 @@ order snapshot and notifies admins.
 """
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
@@ -14,10 +14,13 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import main_menu_inline, order_admin_keyboard
+from keyboards.inline import main_menu_inline, order_admin_keyboard, receipt_upload_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.formatters import money, usdt
 from services.locale_service import locale_service
+from services.notification_service import NotificationService
+from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
+from services.settings_service import SettingsService
 from states import OrderStates
 
 router = Router()
@@ -49,6 +52,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             await state.clear()
             return
 
+        auto_approved = False
         async with pool.acquire() as conn:
             user = await conn.fetchrow(
                 "SELECT id, language, terms_accepted, is_blocked, is_verified FROM users WHERE telegram_id = $1",
@@ -125,14 +129,62 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 payment["account_identifier"], payment["qr_photo_id"],
             )
             order_id = row["id"]
+
+            completed_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
+                user["id"],
+            )
+            auto_approved = bool(await SettingsService.get_bool("auto_approve", False) and completed_count >= 3)
+            if auto_approved:
+                deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)
+                try:
+                    await transition_order(
+                        conn,
+                        order_id,
+                        "waiting_payment",
+                        updates={"approved_at": datetime.now(), "payment_deadline": deadline},
+                    )
+                except InvalidOrderTransition:
+                    logger.exception("Trusted-customer auto approval transition failed for order %s", order_id)
+                    auto_approved = False
+
             customer = await conn.fetchrow("SELECT full_name, username FROM users WHERE id = $1", user["id"])
 
         from aiogram import Bot
         bot = Bot(token=Config.BOT_TOKEN)
         customer_name = (customer["full_name"] if customer else None) or "N/A"
         username = (customer["username"] if customer else None) or "N/A"
+
+        if auto_approved:
+            async with pool.acquire() as conn:
+                order = await conn.fetchrow(
+                    "SELECT o.*, u.telegram_id, u.language, u.full_name, u.username "
+                    "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+                    order_id,
+                )
+            try:
+                delivered = await NotificationService(bot, Config.ADMIN_IDS).notify_order_approved(
+                    callback.from_user.id, dict(order), lang=lang
+                )
+                if not delivered:
+                    raise RuntimeError("auto_approval_payment_delivery_failed")
+            except Exception:
+                logger.exception("Trusted-customer auto approval delivery failed for order %s", order_id)
+                async with pool.acquire() as conn:
+                    try:
+                        await rollback_order(
+                            conn,
+                            order_id,
+                            "pending",
+                            updates={"approved_at": None, "payment_deadline": None},
+                        )
+                    except InvalidOrderTransition:
+                        logger.exception("Failed to rollback auto approval for order %s", order_id)
+                auto_approved = False
+
+        admin_status = "waiting_payment" if auto_approved else "pending"
         admin_text = (
-            f"📦 <b>طلب شراء USDT جديد</b>\n\n"
+            f"📦 <b>{'تم اعتماد طلب USDT تلقائياً' if auto_approved else 'طلب شراء USDT جديد'}</b>\n\n"
             f"📋 الرقم: #{order_number}\n"
             f"👤 العميل: {customer_name}\n"
             f"🆔 المعرف: <code>{callback.from_user.id}</code>\n"
@@ -142,13 +194,18 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"💱 عملة الدفع: {currency}\n"
             f"💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{data['wallet_address']}</code>\n\n"
-            "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع بعد الموافقة."
+            + (
+                "⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع."
+                if auto_approved else
+                "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع بعد الموافقة."
+            )
         )
         for admin_id in Config.ADMIN_IDS:
             try:
                 await bot.send_message(
-                    admin_id, admin_text,
-                    reply_markup=order_admin_keyboard(order_id, "pending"),
+                    admin_id,
+                    admin_text,
+                    reply_markup=order_admin_keyboard(order_id, admin_status),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -158,11 +215,19 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             locale_service.get("order_created", lang, order_number=order_number),
             parse_mode="HTML",
         )
-        status_message = await callback.message.answer(
-            "⏳ تم إرسال طلبك إلى الإدارة للمراجعة. لا ترسل أي مبلغ الآن؛ ستصلك تعليمات الدفع الرسمية بعد الموافقة."
-            if lang == "ar" else
-            "⏳ Your order has been sent to the administration for review. Do not send any payment yet; official payment instructions will appear after approval.",
-        )
+        if auto_approved:
+            status_message = await callback.message.answer(
+                "✅ تمت الموافقة تلقائياً لأن حسابك يحقق متطلبات العميل الموثوق. تم إرسال بيانات ShamCash الرسمية لك. أتمم الدفع ثم ارفع الإثبات."
+                if lang == "ar" else
+                "✅ Your order was automatically approved because your account meets the trusted-customer requirements. Official ShamCash payment details have been sent. Complete payment and upload the proof.",
+                reply_markup=receipt_upload_keyboard(order_id, lang),
+            )
+        else:
+            status_message = await callback.message.answer(
+                "⏳ تم إرسال طلبك إلى الإدارة للمراجعة. لا ترسل أي مبلغ الآن؛ ستصلك تعليمات الدفع الرسمية بعد الموافقة."
+                if lang == "ar" else
+                "⏳ Your order has been sent to the administration for review. Do not send any payment yet; official payment instructions will appear after approval.",
+            )
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
