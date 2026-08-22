@@ -1,15 +1,10 @@
-"""Authoritative receipt-upload implementation retained for compatibility.
-
-Order-list presentation lives in customer_orders_policy. This module owns only
-the receipt-processing callable consumed by receipt_processing_policy and the
-admin notification helper consumed by receipt_transition_policy.
-"""
+"""Authoritative receipt-upload implementation retained for compatibility."""
 import html
 import logging
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from config import Config
 from database import get_pool
@@ -29,6 +24,43 @@ async def _get_user_lang(telegram_id: int) -> str:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", telegram_id)
     return row["language"] if row and row["language"] in ("ar", "en") else "ar"
+
+
+@router.callback_query(F.data.startswith("upload_receipt_"))
+async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
+    """Start a receipt upload only for the owning order in waiting_payment."""
+    order_id = int(callback.data.removeprefix("upload_receipt_"))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            """SELECT o.id, o.order_number, o.status, o.receipt_upload_count, u.language
+               FROM orders o JOIN users u ON o.user_id = u.id
+               WHERE o.id = $1 AND u.telegram_id = $2""",
+            order_id,
+            callback.from_user.id,
+        )
+    lang = (order["language"] if order else "ar") or "ar"
+    if not order:
+        await callback.answer("❌ الطلب غير موجود" if lang == "ar" else "❌ Order not found", show_alert=True)
+        return
+    if order["status"] != "waiting_payment":
+        await callback.answer("❌ لا يمكن رفع إيصال لهذا الطلب حالياً" if lang == "ar" else "❌ This order is not awaiting payment proof", show_alert=True)
+        return
+    if int(order["receipt_upload_count"] or 0) >= MAX_RECEIPT_ATTEMPTS:
+        await callback.answer("❌ استنفدت محاولات الإيصال" if lang == "ar" else "❌ Receipt attempts exhausted", show_alert=True)
+        return
+
+    await state.update_data(receipt_order_id=order_id)
+    prompt = (
+        f"📎 <b>رفع إيصال الطلب #{html.escape(order['order_number'])}</b>\n\n"
+        "أرسل صورة الإيصال الآن. يجب أن تظهر بوضوح: التاريخ، المرسل، المستلم، والمبلغ."
+        if lang == "ar" else
+        f"📎 <b>Upload receipt for order #{html.escape(order['order_number'])}</b>\n\n"
+        "Send the receipt image now. The date, sender, recipient, and amount must be clear."
+    )
+    await callback.message.answer(prompt, parse_mode="HTML")
+    await state.set_state(ReceiptStates.waiting_receipt)
+    await callback.answer()
 
 
 async def _notify_admins_receipt(
@@ -67,12 +99,7 @@ async def _notify_admins_receipt(
     )
     for admin_id in Config.ADMIN_IDS:
         try:
-            await bot.send_message(
-                admin_id,
-                admin_text,
-                reply_markup=order_admin_keyboard(order["id"], "receipt_received"),
-                parse_mode="HTML",
-            )
+            await bot.send_message(admin_id, admin_text, reply_markup=order_admin_keyboard(order["id"], "receipt_received"), parse_mode="HTML")
             if photo_id:
                 await bot.send_photo(admin_id, photo_id, caption=f"📸 إيصال الدفع للطلب #{order['order_number']}")
         except Exception:
@@ -142,10 +169,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
     remaining_attempts = MAX_RECEIPT_ATTEMPTS - attempt_count
 
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = $2 WHERE id = $3",
-            photo_id, attempt_count, order_id,
-        )
+        await conn.execute("UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = $2 WHERE id = $3", photo_id, attempt_count, order_id)
         if auto_verified or remaining_attempts <= 0:
             try:
                 updated = await transition_order(
@@ -174,10 +198,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         return
 
     if remaining_attempts <= 0:
-        await message.answer(
-            "❌ <b>تم استنفاد محاولات التحقق الآلي.</b>\n\nتم إرسال الإيصال إلى الإدارة للمراجعة اليدوية.",
-            parse_mode="HTML",
-        )
+        await message.answer("❌ <b>تم استنفاد محاولات التحقق الآلي.</b>\n\nتم إرسال الإيصال إلى الإدارة للمراجعة اليدوية.", parse_mode="HTML")
         await _notify_admins_receipt(bot, dict(updated), photo_id, verification_result, message.from_user.username or "", False)
         await state.clear()
         return
