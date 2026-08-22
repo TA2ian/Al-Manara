@@ -4,6 +4,8 @@ Keeps the existing order-management handlers intact while presenting the exact
 next state from the customer's perspective, especially when the remaining
 step belongs to the admin.
 """
+from decimal import Decimal, InvalidOperation
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from keyboards.inline import orders_pagination_keyboard, receipt_upload_keyboard
@@ -34,6 +36,14 @@ EN_STATUS = {
 }
 
 
+def _format_usdt(value) -> str:
+    """Format customer-facing USDT amounts consistently to two decimals."""
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
+
+
 async def _render_page(user_id: int, lang: str, page: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -56,7 +66,7 @@ async def _render_page(user_id: int, lang: str, page: int):
         lines.append(
             "\n━━━━━━━━━━━━━━━\n"
             f"📦 <b>#{order['order_number']}</b>\n"
-            f"💰 {order['amount_usdt']} USDT ({order['network']})\n"
+            f"💰 {_format_usdt(order['amount_usdt'])} USDT ({order['network']})\n"
             f"📊 <b>{status}</b>\n"
             f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
         )
