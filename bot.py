@@ -11,6 +11,7 @@ def create_dispatcher() -> Dispatcher:
         payment_currency_policy,
         legacy_wallet_guard,
         wallets,
+        order_amount_policy,
         order,
         profile,
         active_order_policy,
@@ -54,6 +55,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
+    # Amount handling must precede legacy order handlers so only verified saved
+    # wallets are shown and selected during order creation.
+    dp.include_router(order_amount_policy.router)
     # If a verified customer already has an active order, guide them to Orders
     # instead of starting another order flow.
     dp.include_router(active_order_policy.router)
