@@ -59,37 +59,37 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = 'ar'):
-        """Notify user using the payment snapshot stored on the order."""
+        """Notify the customer using only the payment snapshot stored on the order."""
         from services.locale_service import locale_service
         from config import Config
 
         amount = _format_money(order['total_amount'])
         currency = 'NEW.SYP' if order['payment_currency'] == 'SYP' else order['payment_currency']
-        account = order.get('payment_account_snapshot') or (
-            Config.get_shamcash_syp() if currency == 'NEW.SYP' else Config.get_shamcash_usd()
-        )
+        account = (order.get('payment_account_snapshot') or '').strip()
+        qr_photo_id = (order.get('payment_qr_photo_id') or '').strip()
         name = Config.get_shamcash_name()
-        qr_photo_id = order.get('payment_qr_photo_id')
 
-        # The payment method is snapshotted on the order. This prevents a later
-        # admin change from altering the payment instructions of an existing order.
+        # Never substitute the current admin payment destination for an order
+        # that lacks a snapshot. Existing orders must remain isolated from later
+        # ShamCash account/QR changes.
         if not account or not qr_photo_id:
-            # Compatibility fallback for orders created before snapshots existed.
-            from database import get_pool
-            pool = await get_pool()
-            if pool:
-                async with pool.acquire() as conn:
-                    method = await conn.fetchrow(
-                        """SELECT display_name, account_identifier, qr_photo_id
-                           FROM payment_methods
-                           WHERE provider = 'ShamCash' AND currency = $1 AND enabled = TRUE
-                           ORDER BY id ASC LIMIT 1""",
-                        currency,
-                    )
-                if method:
-                    name = method['display_name'] or name
-                    account = method['account_identifier'] or account
-                    qr_photo_id = method['qr_photo_id'] or qr_photo_id
+            logger.error(
+                "Missing immutable payment snapshot for approved order %s",
+                order.get('order_number'),
+            )
+            await self.notify_user(
+                user_id,
+                (
+                    f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order['order_number']}</b>\n\n"
+                    "لم يتم إرسال أي عنوان دفع لأن بيانات الدفع المثبتة لهذا الطلب غير مكتملة. "
+                    "يرجى مراجعة الإدارة قبل الدفع."
+                    if lang == 'ar' else
+                    f"⚠️ <b>Payment details unavailable for order #{order['order_number']}</b>\n\n"
+                    "No payment destination was sent because this order has no complete immutable payment snapshot. "
+                    "Please contact administration before paying."
+                ),
+            )
+            return
 
         text = locale_service.get(
             'order_approved',
@@ -117,25 +117,24 @@ class NotificationService:
             )
             await self.notify_user(user_id, equivalent_line)
 
-        # The QR belongs to the payment account (ShamCash), not to the customer's wallet.
-        if qr_photo_id:
-            caption = (
-                f"💳 <b>بيانات الدفع — {name}</b>\n"
-                f"العملة: <b>{currency}</b>\n"
-                f"الحساب: <code>{account}</code>\n\n"
-                f"📱 استخدم رمز QR أعلاه للدفع.\n"
-                f"📦 الطلب: <b>#{order['order_number']}</b>"
-            ) if lang == 'ar' else (
-                f"💳 <b>Payment details — {name}</b>\n"
-                f"Currency: <b>{currency}</b>\n"
-                f"Account: <code>{account}</code>\n\n"
-                f"📱 Use the QR code above to pay.\n"
-                f"📦 Order: <b>#{order['order_number']}</b>"
-            )
-            try:
-                await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode='HTML')
-            except Exception as e:
-                logger.error(f"Failed to send payment QR for order {order['order_number']}: {e}")
+        # This QR is the admin's ShamCash payment QR, not the customer's wallet QR.
+        caption = (
+            f"💳 <b>بيانات الدفع — {name}</b>\n"
+            f"العملة: <b>{currency}</b>\n"
+            f"الحساب: <code>{account}</code>\n\n"
+            f"📱 استخدم رمز QR أعلاه للدفع.\n"
+            f"📦 الطلب: <b>#{order['order_number']}</b>"
+        ) if lang == 'ar' else (
+            f"💳 <b>Payment details — {name}</b>\n"
+            f"Currency: <b>{currency}</b>\n"
+            f"Account: <code>{account}</code>\n\n"
+            f"📱 Use the QR code above to pay.\n"
+            f"📦 Order: <b>#{order['order_number']}</b>"
+        )
+        try:
+            await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Failed to send payment QR for order {order['order_number']}: {e}")
 
     async def notify_feedback(self, user: dict, message: str):
         """Notify admins of new feedback."""
