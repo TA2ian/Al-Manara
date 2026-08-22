@@ -15,6 +15,7 @@ def create_dispatcher() -> Dispatcher:
         profile,
         active_order_policy,
         receipt_processing_policy,
+        customer_orders_policy,
         my_orders,
         feedback,
         admin_entry,
@@ -57,6 +58,9 @@ def create_dispatcher() -> Dispatcher:
     # Receipt progress must precede my_orders so the temporary processing
     # message appears while the existing OCR/verification handler works.
     dp.include_router(receipt_processing_policy.router)
+    # Precise customer-facing statuses must precede the legacy order-history
+    # handlers, including pagination callbacks.
+    dp.include_router(customer_orders_policy.router)
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin_entry.router)
