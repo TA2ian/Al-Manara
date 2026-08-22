@@ -1,4 +1,6 @@
 """Active-order customer guidance policy."""
+from decimal import Decimal, InvalidOperation
+
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -14,6 +16,14 @@ ACTIVE_STATUSES = (
     "receipt_received",
     "payment_confirmed",
 )
+
+
+def _format_usdt(value) -> str:
+    """Format active-order USDT amounts consistently to two decimals."""
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
@@ -45,6 +55,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         return
 
     lang = user["language"] or "ar"
+    amount_usdt = _format_usdt(active_order["amount_usdt"])
     if lang == "ar":
         status_map = {
             "pending": "بانتظار موافقة الإدارة",
@@ -55,7 +66,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         text = (
             "⚠️ <b>لديك طلب نشط بالفعل</b>\n\n"
             f"📦 الطلب: <b>#{active_order['order_number']}</b>\n"
-            f"💰 المبلغ: <b>{active_order['amount_usdt']} USDT</b>\n"
+            f"💰 المبلغ: <b>{amount_usdt} USDT</b>\n"
             f"📊 الحالة الحالية: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
             "📋 لمتابعة الطلب، افتح <b>📋 طلباتي</b> من القائمة السفلية.\n"
             "هناك لا تحتاج إلى إجراء آخر الآن؛ سيظهر تقدم الطلب حسب آخر إجراء من الإدارة.\n\n"
@@ -71,7 +82,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         text = (
             "⚠️ <b>You already have an active order</b>\n\n"
             f"📦 Order: <b>#{active_order['order_number']}</b>\n"
-            f"💰 Amount: <b>{active_order['amount_usdt']} USDT</b>\n"
+            f"💰 Amount: <b>{amount_usdt} USDT</b>\n"
             f"📊 Current status: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
             "📋 To follow it, open <b>📋 Orders</b> from the bottom menu.\n"
             "You do not need to take another action now; the order progress is updated by the admin.\n\n"
