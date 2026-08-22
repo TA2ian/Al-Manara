@@ -20,6 +20,8 @@ class FakeConnection:
         self.rate = rate
 
     async def fetchrow(self, query, *args):
+        if self.rate is None:
+            return None
         return {"rate": self.rate}
 
 
@@ -75,6 +77,11 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["payment_currency"], "USD")
         self.assertEqual(quote["base_amount"], Decimal("100.00"))
         self.assertEqual(quote["old_syp_amount"], Decimal("0"))
+
+    async def test_missing_rate_blocks_quote(self):
+        service = ExchangeService(FakePool(None))
+        with self.assertRaisesRegex(ValueError, "Exchange rate is unavailable"):
+            await service.calculate_order(Decimal("100"), "NEW.SYP")
 
 
 if __name__ == "__main__":
