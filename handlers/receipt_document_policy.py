@@ -1,9 +1,8 @@
 """Customer receipt-file policy.
 
 ShamCash may prevent screenshots inside its app, so customers can export the
-transaction proof and send it to Telegram as a document. The legacy photo OCR
-flow remains unchanged; this policy adds a safe document path for exported
-proofs, including PDFs and image files shared as documents.
+transaction proof and send it to Telegram as a document. Exported proofs are
+kept as original Telegram files and sent to admins for manual review.
 """
 import html
 import logging
@@ -14,9 +13,8 @@ from aiogram.types import CallbackQuery, Message
 
 from config import Config
 from database import get_pool
-from keyboards.inline import receipt_upload_keyboard
-from services.locale_service import locale_service
 from states import ReceiptStates
+from services.order_state_service import InvalidOrderTransition, transition_order
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -67,7 +65,7 @@ async def start_exported_receipt_upload(callback: CallbackQuery, state: FSMConte
         "⚠️ تأكد من أن الملف يُظهر بوضوح تاريخ العملية والمبلغ وبيانات المرسل والمستلم."
         if lang == "ar" else
         f"📎 <b>Payment proof — order #{order['order_number']}</b>\n\n"
-        "Because ShamCash may block screenshots inside the app, export/download the transaction proof from ShamCash and send it here <b>as a file</b>.\n\n"
+        "Because ShamCash may block screenshots inside its app, export/download the transaction proof from ShamCash and send it here <b>as a file</b>.\n\n"
         "You can also send an image if available.\n\n"
         "⚠️ Make sure the file clearly shows the transaction date, amount, sender, and recipient."
     )
@@ -80,8 +78,10 @@ async def start_exported_receipt_upload(callback: CallbackQuery, state: FSMConte
 async def handle_exported_receipt_document(message: Message, state: FSMContext):
     """Accept exported ShamCash proof as a Telegram document.
 
-    We deliberately preserve the original Telegram file and route it to the
-    admin for review. PDFs are not forced through the image-only OCR path.
+    The original file is retained and routed to admins for review. The order
+    transition is atomic and is allowed only from ``waiting_payment`` so a
+    duplicate/concurrent upload cannot move an order backwards or overwrite a
+    later state.
     """
     data = await state.get_data()
     order_id = data.get("receipt_order_id")
@@ -113,25 +113,33 @@ async def handle_exported_receipt_document(message: Message, state: FSMContext):
     file_name = message.document.file_name or "payment_proof"
     mime_type = message.document.mime_type or "application/octet-stream"
 
-    pool = await get_pool()
     attempt_count = int(order["receipt_upload_count"] or 0) + 1
 
-    # receipt_photo_id is the existing proof-file slot retained for backward
-    # compatibility. Telegram file_id is valid for documents as well as photos.
-    await pool.execute(
-        """UPDATE orders
-           SET receipt_photo_id = $1,
-               receipt_upload_count = receipt_upload_count + 1,
-               status = 'receipt_received'
-           WHERE id = $2 AND status = 'waiting_payment'""",
-        file_id, order_id,
-    )
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            order = await transition_order(
+                conn,
+                order_id,
+                "receipt_received",
+                updates={
+                    "receipt_photo_id": file_id,
+                    "receipt_upload_count": attempt_count,
+                },
+            )
+    except InvalidOrderTransition:
+        await message.answer(
+            "⚠️ لم يعد هذا الطلب بانتظار إثبات الدفع." if lang == "ar"
+            else "⚠️ This order is no longer awaiting payment proof."
+        )
+        await state.clear()
+        return
 
     processing_text = (
         f"⏳ <b>تم استلام إثبات الدفع</b>\n\n"
         f"📦 الطلب: <b>#{order['order_number']}</b>\n"
         f"📄 الملف: <code>{html.escape(file_name)}</code>\n\n"
-        "تم استلام الملف بنجاح. جارٍ إرسال بيانات العملية للمراجعة والتحقق.\n"
+        "تم استلام الملف بنجاح. جارٍ إرساله للمراجعة والتحقق.\n"
         "لا تحتاج إلى إعادة الإرسال الآن."
         if lang == "ar" else
         f"⏳ <b>Payment proof received</b>\n\n"
@@ -142,8 +150,6 @@ async def handle_exported_receipt_document(message: Message, state: FSMContext):
     )
     await message.answer(processing_text, parse_mode="HTML")
 
-    # Send the original exported file to every admin. Keeping the original
-    # document avoids losing information through screenshot/image conversion.
     bot = Bot(token=Config.BOT_TOKEN)
     admin_text = (
         "📎 <b>إثبات دفع مُصدّر من شام كاش</b>\n\n"
