@@ -6,8 +6,8 @@ from typing import Any
 
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"waiting_payment", "rejected", "expired"}),
-    "waiting_payment": frozenset({"receipt_received", "expired"}),
-    "receipt_received": frozenset({"waiting_payment", "payment_confirmed"}),
+    "waiting_payment": frozenset({"receipt_received", "rejected", "expired"}),
+    "receipt_received": frozenset({"waiting_payment", "payment_confirmed", "rejected"}),
     "payment_confirmed": frozenset({"completed"}),
     "completed": frozenset(),
     "rejected": frozenset(),
