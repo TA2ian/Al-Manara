@@ -2,6 +2,7 @@
 import html
 import io
 import logging
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -23,14 +24,27 @@ PAGE_SIZE = 5
 MAX_RECEIPT_ATTEMPTS = 3
 
 
+def _format_amount(value) -> str:
+    """Format monetary values for Telegram display with exactly two decimals."""
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
+
+
+def _format_usdt(value) -> str:
+    """Format USDT consistently across the receipt/admin view."""
+    return _format_amount(value)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _verification_fail_keyboard(order_id: int, lang: str) -> InlineKeyboardMarkup:
-    """Keyboard shown when auto-verification fails — retry or manual review."""
+    """Keyboard shown when auto-verification fails — retry or send to admin."""
     retry_text = "📎 إعادة رفع الإيصال" if lang == 'ar' else "📎 Re-upload Receipt"
-    manual_text = "👨‍💼 مراجعة يدوية" if lang == 'ar' else "👨‍💼 Manual Review"
+    manual_text = "👨‍💼 أرسل للمشرف للمراجعة مباشرة" if lang == 'ar' else "👨‍💼 Send to Admin for Review"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=retry_text, callback_data=f"retry_receipt_{order_id}")],
         [InlineKeyboardButton(text=manual_text, callback_data=f"manual_review_{order_id}")],
@@ -79,19 +93,27 @@ async def _notify_admins_receipt(
         if shamcash_fields.get('recipient_name'):
             ver_block += f"👤 اسم المستلم: {shamcash_fields['recipient_name']}\n"
         if shamcash_fields.get('amount', 0) > 0:
-            ver_block += f"💰 المبلغ المستخرج: {shamcash_fields['amount']:.2f}\n"
+            ver_block += f"💰 المبلغ المستخرج: {_format_amount(shamcash_fields['amount'])}\n"
 
     else:
-        ver_block = "\n━━━ 🤖 التحقق الآلي ـ━━\n"
+        ver_block = "\n━━━ 🤖 التحقق الآلي ━━━\n"
         ver_block += "⚠️ تعذر إجراء التحقق الآلي — يرجى المراجعة اليدوية\n"
 
+    amount_usdt = _format_usdt(order['amount_usdt'])
+    exchange_rate = f"{Decimal(str(order['exchange_rate'])):,.0f}"
+    total_amount = _format_amount(order['total_amount'])
+    base_amount = _format_amount(order['base_amount'])
+    fee_percent = _format_amount(order['fee_percent'])
+    fee_amount = _format_amount(order['fee_amount'])
+    payment_currency = html.escape(order['payment_currency'])
+
     admin_text = (
-        f"📎 <b>إيصال دفع - مراجعة كاملة</b>\n\n"
+        f"📎 <b>إيصال دفع — مراجعة كاملة</b>\n\n"
         f"━━━ 💳 معلومات الدفع ━━━\n"
         f"📦 الطلب: <b>#{order['order_number']}</b>\n"
-        f"💰 المبلغ: {order['amount_usdt']} USDT → {order['network']}\n"
-        f"💱 سعر الصرف: 1 USDT = {order['exchange_rate']:,.0f} {order['payment_currency']}\n"
-        f"💵 الإجمالي المطلوب: {order['total_amount']:.2f} {order['payment_currency']}\n\n"
+        f"💰 المبلغ: <b>{amount_usdt} USDT</b> → {order['network']}\n"
+        f"💱 سعر الصرف: 1 USDT = {exchange_rate} {payment_currency}\n"
+        f"💵 الإجمالي المطلوب: <b>{total_amount} {payment_currency}</b>\n\n"
         f"━━━ 👤 معلومات العميل ━━━\n"
         f"👤 الاسم: <b>{html.escape(order.get('full_name', order.get('customer_name', '') or 'N/A'))}</b>\n"
         f"🆔 المعرف: <code>{order.get('user_telegram_id', '')}</code>\n"
@@ -104,9 +126,9 @@ async def _notify_admins_receipt(
         f"\n━━━ 📋 ملخص الطلب ━━━\n"
         f"📅 تاريخ الإنشاء: {created_at_str}\n"
         f"📊 الحالة: قيد المراجعة{' (تحقق آلي ناجح)' if is_auto_verified else ''}\n"
-        f"💰 USDT: {order['amount_usdt']}\n"
-        f"💱 الأساسي: {order['base_amount']:.2f} {order['payment_currency']}\n"
-        f"📈 رسوم ({order['fee_percent']}%): {order['fee_amount']:.2f} {order['payment_currency']}"
+        f"💰 USDT: {amount_usdt}\n"
+        f"💱 الأساسي: {base_amount} {payment_currency}\n"
+        f"📈 رسوم ({fee_percent}%): {fee_amount} {payment_currency}"
     )
 
     for admin_id in Config.ADMIN_IDS:
@@ -152,7 +174,7 @@ async def _format_orders_page(pool, user_id: int, lang: str, page: int = 1):
         lines.append(
             f"\n━━━━━━━━━━━━━━━\n"
             f"📦 <b>#{order['order_number']}</b>\n"
-            f"💰 {order['amount_usdt']} USDT ({order['network']})\n"
+            f"💰 {_format_usdt(order['amount_usdt'])} USDT ({order['network']})\n"
             f"📊 {status_text}\n"
             f"📅 {order['created_at'].strftime('%Y-%m-%d %H:%M')}"
         )
@@ -314,9 +336,8 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         return
 
     lang = order['language'] or 'ar'
-    attempt_count = order['receipt_upload_count'] + 1  # current attempt
+    attempt_count = order['receipt_upload_count'] + 1
 
-    # Download image for OCR
     bot = Bot(token=Config.BOT_TOKEN)
     try:
         file_info = await bot.get_file(photo_id)
@@ -326,10 +347,8 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         logger.error(f"Failed to download receipt image: {e}")
         image_bytes = None
 
-    # ─── Run ShamCash-specific verification ────────────────────────────────
     verification_result = None
     if image_bytes:
-        # Determine which admin account to use based on payment currency
         admin_account = (
             Config.get_shamcash_syp()
             if order['payment_currency'] == 'SYP'
@@ -350,18 +369,15 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         logger.info(f"ShamCash verification result: score={verification_result.get('score')}, "
                      f"auto_verified={verification_result.get('auto_verified')}")
 
-    # ─── Decision logic ─────────────────────────────────────────────────────
     auto_verified = verification_result and verification_result.get('auto_verified', False)
     remaining_attempts = MAX_RECEIPT_ATTEMPTS - attempt_count
 
-    # Always increment the upload count and store the photo
     await pool.execute(
         "UPDATE orders SET receipt_photo_id = $1, receipt_upload_count = receipt_upload_count + 1 WHERE id = $2",
         photo_id, order_id
     )
 
     if auto_verified:
-        # ── Pass: auto-verified ─────────────────────────────────────────
         await pool.execute(
             "UPDATE orders SET status = 'receipt_received' WHERE id = $1",
             order_id
@@ -384,7 +400,6 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
 
         await message.answer(user_msg, parse_mode='HTML')
 
-        # Notify admins with full verification details
         await _notify_admins_receipt(
             bot=bot,
             order=order,
@@ -397,11 +412,9 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
         await state.clear()
 
     else:
-        # ── Fail: could not auto-verify ─────────────────────────────────
         score = verification_result.get('score', 0) if verification_result else 0
         score_label = verification_result.get('score_label', 'فاشل') if verification_result else 'فاشل'
 
-        # Build a clear message showing what went wrong
         if verification_result and verification_result.get('details'):
             fail_details = "\n".join(verification_result['details'])
         else:
@@ -421,7 +434,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
                 f"• ظهور تاريخ العملية\n"
                 f"• ظهور اسم المرسل والمستلم\n"
                 f"• ظهور المبلغ المحول\n\n"
-                f"📎 يمكنك إعادة رفع الإيصال، أو طلب المراجعة اليدوية."
+                f"📎 يمكنك إعادة رفع الإيصال، أو إرساله للمشرف للمراجعة مباشرة."
             ) if lang == 'ar' else (
                 f"🔄 You have <b>{remaining_attempts}</b> attempts remaining.\n"
                 f"Please ensure:\n"
@@ -429,7 +442,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
                 f"• Transaction date is visible\n"
                 f"• Sender & recipient names are visible\n"
                 f"• Transfer amount is visible\n\n"
-                f"📎 You can re-upload the receipt, or request manual review."
+                f"📎 You can re-upload the receipt, or send it directly to admin for review."
             )
 
             await message.answer(
@@ -437,10 +450,8 @@ async def handle_receipt_upload(message: Message, state: FSMContext):
                 parse_mode='HTML',
                 reply_markup=_verification_fail_keyboard(order_id, lang)
             )
-            # Keep state so user can retry
             await state.update_data(receipt_order_id=order_id)
         else:
-            # No more attempts — forward to admin regardless
             await pool.execute(
                 "UPDATE orders SET status = 'receipt_received' WHERE id = $1",
                 order_id
@@ -494,7 +505,6 @@ async def retry_receipt_upload(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(receipt_order_id=order_id)
     lang = await _get_user_lang(callback.from_user.id)
-    remaining = MAX_RECEIPT_ATTEMPTS - attempts
     prompt = (
         f"📎 أرسل صورة جديدة للإيصال للطلب #{order['order_number']}\n"
         f"🔄 المحاولة {attempts + 1}/{MAX_RECEIPT_ATTEMPTS}\n\n"
@@ -525,7 +535,7 @@ async def retry_receipt_upload(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("manual_review_"))
 async def manual_review_after_fail(callback: CallbackQuery, state: FSMContext):
-    """User requested manual review after failed auto-verification."""
+    """Send the failed receipt directly to admins for review."""
     order_id = int(callback.data.replace("manual_review_", ""))
 
     pool = await get_pool()
@@ -556,11 +566,15 @@ async def manual_review_after_fail(callback: CallbackQuery, state: FSMContext):
     bot = Bot(token=Config.BOT_TOKEN)
 
     user_msg = (
-        "👨‍💼 تم طلب المراجعة اليدوية.\n"
-        "📦 سيتم إرسال الإيصال للإدارة للمراجعة."
+        "👨‍💼 <b>تم إرسال الإيصال للمشرف للمراجعة</b>\n\n"
+        f"📦 الطلب: <b>#{order['order_number']}</b>\n"
+        "📎 تم استلام الإيصال وسيقوم المشرف بمراجعة بيانات التحويل وتحديث حالة الطلب.\n\n"
+        "🔒 لا حاجة لإعادة رفع الإيصال ما لم يطلب منك المشرف ذلك."
     ) if lang == 'ar' else (
-        "👨‍💼 Manual review requested.\n"
-        "📦 The receipt will be sent to admin for review."
+        "👨‍💼 <b>Receipt sent to admin for review</b>\n\n"
+        f"📦 Order: <b>#{order['order_number']}</b>\n"
+        "📎 The receipt has been received. Admin will review the transfer details and update the order status.\n\n"
+        "🔒 No need to re-upload the receipt unless admin asks you to."
     )
 
     try:
@@ -568,9 +582,8 @@ async def manual_review_after_fail(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
-    await callback.message.answer(user_msg)
+    await callback.message.answer(user_msg, parse_mode='HTML')
 
-    # Notify admins with note that user requested manual review
     await _notify_admins_receipt(
         bot=bot,
         order=order,
@@ -580,15 +593,15 @@ async def manual_review_after_fail(callback: CallbackQuery, state: FSMContext):
         is_auto_verified=False,
     )
 
-    # Send a follow-up to admins noting it was a manual review request
     for admin_id in Config.ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                "👨‍💼 <b>طلب مراجعة يدوية</b>\n"
-                "العميل طلب مراجعة يدوية بعد فشل التحقق الآلي.\n"
+                "👨‍💼 <b>طلب مراجعة مباشرة</b>\n"
+                "تم إرسال الإيصال للمشرف بعد تعذر التحقق الآلي.\n\n"
                 f"📦 الطلب: #{order['order_number']}\n"
-                f"👤 العميل: {html.escape(order['full_name'] or 'N/A')}",
+                f"👤 العميل: {html.escape(order['full_name'] or 'N/A')}\n"
+                "🔎 الإجراء المطلوب: مراجعة الإيصال وتحديد حالة الدفع.",
                 parse_mode='HTML'
             )
         except Exception as e:
