@@ -28,6 +28,7 @@ def create_dispatcher() -> Dispatcher:
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
+        admin_payment_confirmation_policy,
         admin_transfer_policy,
         admin_note_policy,
         admin,
@@ -73,6 +74,8 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_rate_policy.router)
     dp.include_router(admin_navigation_policy.router)
     dp.include_router(admin_approval_policy.router)
+    # Payment confirmation must precede the legacy admin.py implementation.
+    dp.include_router(admin_payment_confirmation_policy.router)
     dp.include_router(admin_transfer_policy.router)
     dp.include_router(admin_note_policy.router)
     dp.include_router(payment_methods.router)
