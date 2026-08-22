@@ -8,6 +8,7 @@ import asyncio
 import html
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -16,9 +17,7 @@ from aiogram.types import CallbackQuery
 from aiogram import Bot
 from config import Config
 from database import get_pool
-from keyboards.inline import receipt_upload_keyboard, order_admin_keyboard, admin_menu_keyboard
-from keyboards.reply import compact_reply_keyboard
-from services.locale_service import locale_service
+from keyboards.inline import receipt_upload_keyboard, admin_menu_keyboard
 from services.notification_service import NotificationService
 
 router = Router()
@@ -27,6 +26,20 @@ logger = logging.getLogger(__name__)
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
+
+
+def _format_usdt(value) -> str:
+    try:
+        return f"{Decimal(str(value)):,.3f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.000"
+
+
+def _format_money(value) -> str:
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return "0.00"
 
 
 @router.callback_query(F.data.startswith("admin_approve_"))
@@ -89,13 +102,13 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     try:
         upload_text = (
             f"🔔 <b>تمت الموافقة على طلبك #{order['order_number']}</b>\n\n"
-            f"💳 يمكنك الآن دفع المبلغ المطلوب.\n"
+            "✅ يمكنك الآن تنفيذ إجراء الدفع عبر بيانات الدفع التي سيعرضها لك البوت.\n"
             f"⏱ <b>مهلة الدفع: {Config.PAYMENT_TIMEOUT} دقيقة</b>\n\n"
             "📎 <b>بعد إتمام الدفع، أرسل صورة إيصال التحويل من شام كاش عبر الزر أدناه.</b>\n"
             "يجب أن يكون الإيصال واضحاً ويظهر المبلغ والتاريخ وبيانات العملية."
         ) if lang == "ar" else (
             f"🔔 <b>Your order #{order['order_number']} has been approved</b>\n\n"
-            "💳 You can now make the payment.\n"
+            "✅ You can now complete the payment using the payment details provided by the bot.\n"
             f"⏱ <b>Payment deadline: {Config.PAYMENT_TIMEOUT} minutes</b>\n\n"
             "📎 <b>After payment, send the ShamCash receipt using the button below.</b>\n"
             "Make sure the receipt clearly shows the amount, date, and transaction details."
@@ -108,11 +121,17 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         )
     except Exception as exc:
         logger.exception("Mandatory receipt prompt failed for %s: %s", order_id, exc)
-        # A second minimal attempt without the locale service or other helpers.
+        # The fallback remains in the customer's selected language and exposes
+        # no technical exception details.
         try:
+            fallback_text = (
+                f"📎 بعد إتمام الدفع، اضغط الزر أدناه وارفع إيصال الطلب #{order['order_number']}."
+                if lang == "ar" else
+                f"📎 After completing the payment, use the button below to upload the receipt for order #{order['order_number']}."
+            )
             await bot.send_message(
                 user_id,
-                f"📎 بعد الدفع، اضغط الزر أدناه وارفع إيصال الطلب #{order['order_number']}.",
+                fallback_text,
                 reply_markup=receipt_upload_keyboard(order_id, lang),
             )
         except Exception:
@@ -125,9 +144,9 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"📦 #{html.escape(order['order_number'])}\n"
             f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
             f"🆔 <code>{user_id}</code>\n"
-            f"💰 {order['amount_usdt']} USDT\n"
+            f"💰 { _format_usdt(order['amount_usdt']) } USDT\n"
             f"🌐 {order['network']}\n"
-            f"💵 الإجمالي: {order['total_amount']:.2f} {order['payment_currency']}\n"
+            f"💵 الإجمالي: {_format_money(order['total_amount'])} {order['payment_currency']}\n"
             f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
             "📎 بانتظار إيصال العميل..."
         )
