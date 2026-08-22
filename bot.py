@@ -25,7 +25,6 @@ def create_dispatcher() -> Dispatcher:
         admin_entry,
         admin_broadcast_policy,
         verification_admin_policy,
-        admin_financial_dashboard_policy,
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
@@ -80,7 +79,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_entry.router)
     dp.include_router(admin_broadcast_policy.router)
     dp.include_router(verification_admin_policy.router)
-    dp.include_router(admin_financial_dashboard_policy.router)
     dp.include_router(admin_rate_policy.router)
     dp.include_router(admin_navigation_policy.router)
     dp.include_router(admin_approval_policy.router)
