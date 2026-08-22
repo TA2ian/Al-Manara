@@ -1,38 +1,6 @@
-"""Handlers package."""
-from . import (
-    start,
-    order,
-    profile,
-    my_orders,
-    feedback,
-    admin,
-    verification,
-    menu,
-    receipt_transition_policy,
-    admin_rate_policy,
-    admin_order_list_policy,
-    admin_user_management_policy,
-    admin_utility_policy,
-    admin_maintenance_policy,
-    admin_settings_policy,
-    admin_rejection_policy,
-)
+"""Handlers package.
 
-__all__ = [
-    "start",
-    "order",
-    "profile",
-    "my_orders",
-    "feedback",
-    "admin",
-    "verification",
-    "menu",
-    "receipt_transition_policy",
-    "admin_rate_policy",
-    "admin_order_list_policy",
-    "admin_user_management_policy",
-    "admin_utility_policy",
-    "admin_maintenance_policy",
-    "admin_settings_policy",
-    "admin_rejection_policy",
-]
+Submodules are imported explicitly by ``bot.create_dispatcher``. Keeping this
+package initializer side-effect free prevents retired/legacy routers from
+being imported merely because the package is loaded.
+"""
