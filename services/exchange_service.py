@@ -31,33 +31,34 @@ class ExchangeService:
         self._cache_time = None
 
     async def get_current_rate(self) -> Optional[Decimal]:
-        """Get the current USD/NEW.SYP rate as Decimal."""
+        """Return the canonical USD/NEW.SYP rate; convert only explicitly legacy rows."""
         if self._cache_time and (datetime.now() - self._cache_time).total_seconds() < 3600:
             return self._cache.get("rate")
 
         async with self._db.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT rate FROM exchange_rates ORDER BY updated_at DESC LIMIT 1"
+                "SELECT rate, COALESCE(rate_currency, 'NEW.SYP') AS rate_currency "
+                "FROM exchange_rates ORDER BY updated_at DESC LIMIT 1"
             )
+            if not row:
+                return None
 
-            if row:
-                rate = to_decimal(row["rate"])
-                if rate > Decimal("1000"):
-                    rate = (rate / OLD_SYP_PER_NEW_SYP).quantize(
-                        RATE_QUANT, rounding=ROUND_HALF_UP
-                    )
-                if rate <= 0:
-                    return None
-                self._cache["rate"] = rate
-                self._cache_time = datetime.now()
-                return rate
+            rate = to_decimal(row["rate"])
+            currency = (row["rate_currency"] or "NEW.SYP").upper()
+            if currency == "SYP":
+                rate = (rate / OLD_SYP_PER_NEW_SYP).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
+            elif currency != "NEW.SYP":
+                logger.error("Unsupported exchange-rate currency in DB: %s", currency)
+                return None
 
-            # A financial quote must never be generated from a hard-coded
-            # fallback rate. The caller must surface the unavailable-rate state.
-            return None
+            if rate <= 0:
+                return None
+            self._cache["rate"] = rate
+            self._cache_time = datetime.now()
+            return rate
 
     async def update_rate(self, rate, admin_id: int) -> bool:
-        """Update the USD/NEW.SYP rate after strict positive-value validation."""
+        """Persist a canonical USD/NEW.SYP rate for future quotes."""
         try:
             value = to_decimal(rate)
             if value <= 0:
@@ -69,26 +70,22 @@ class ExchangeService:
                     value,
                     admin_id,
                 )
-
             self._cache = {}
             self._cache_time = None
             return True
-        except Exception as e:
-            logger.error("Rate update failed: %s", e)
+        except Exception as exc:
+            logger.error("Rate update failed: %s", exc)
             return False
 
     @staticmethod
     def old_syp_equivalent(new_syp_amount) -> Decimal:
         """Return the legacy SYP display equivalent; never use it for payment calculations."""
-        return (to_decimal(new_syp_amount) * OLD_SYP_PER_NEW_SYP).quantize(
-            MONEY_QUANT, rounding=ROUND_HALF_UP
-        )
+        return (to_decimal(new_syp_amount) * OLD_SYP_PER_NEW_SYP).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
     async def calculate_order(self, amount_usdt, currency: str) -> dict:
         """Create a quote using the current rate exactly once."""
         if currency == "SYP":
             currency = "NEW.SYP"
-
         amount = to_decimal(amount_usdt)
         if amount <= 0:
             raise ValueError("amount_usdt must be positive")
@@ -105,13 +102,9 @@ class ExchangeService:
             base_amount = (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
         from config import Config
-        # The DB-backed setting is authoritative after an admin changes fees;
-        # Config remains the fallback for first boot/backward compatibility.
         try:
             from services.settings_service import SettingsService
-            stored_fee = await SettingsService.get(
-                "service_fee_percent", str(Config.SERVICE_FEE_PERCENT)
-            )
+            stored_fee = await SettingsService.get("service_fee_percent", str(Config.SERVICE_FEE_PERCENT))
             fee_percent = to_decimal(stored_fee, str(Config.SERVICE_FEE_PERCENT))
         except Exception:
             fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
@@ -119,9 +112,7 @@ class ExchangeService:
         if fee_percent < 0 or fee_percent > 100:
             fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
 
-        fee_amount = (
-            base_amount * fee_percent / Decimal("100")
-        ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        fee_amount = (base_amount * fee_percent / Decimal("100")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         total = (base_amount + fee_amount).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
         old_syp_amount = Decimal("0")
