@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import receipt_upload_keyboard, admin_menu_keyboard
+from keyboards.inline import receipt_upload_keyboard
 from services.formatters import money, usdt
 from services.notification_service import NotificationService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
@@ -97,9 +97,6 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
             return
 
-    # transition_order intentionally returns only the orders row. Re-fetch the
-    # joined customer fields before notification; otherwise telegram_id/language
-    # disappear and approval crashes after the state transition.
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
             "SELECT o.*, u.full_name, u.username, u.telegram_id, u.language "
@@ -173,4 +170,3 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         f"✅ تمت الموافقة على طلب #{order['order_number']}\n\n📎 تم إرسال بيانات الدفع وتعليمات رفع إثبات الدفع للعميل.",
         parse_mode="HTML",
     )
-    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
