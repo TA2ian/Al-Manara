@@ -8,7 +8,8 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard, compact_reply_keyboard, receipt_upload_keyboard
+from keyboards.inline import admin_menu_keyboard, receipt_upload_keyboard
+from keyboards.reply import compact_reply_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -27,8 +28,7 @@ async def reject_receipt(callback: CallbackQuery):
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id, u.full_name, u.language FROM orders o "
-            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1", order_id,
         )
         if not order:
             await callback.answer("الطلب غير موجود", show_alert=True); return
@@ -41,22 +41,19 @@ async def reject_receipt(callback: CallbackQuery):
         seconds = int((order["payment_deadline"] - datetime.now()).total_seconds())
         if seconds > 0:
             remaining = f"⏱ الوقت المتبقي: <b>{seconds // 60} دقيقة و{seconds % 60} ثانية</b>"
-
     bot = Bot(token=Config.BOT_TOKEN)
     try:
         await bot.send_message(
             order["telegram_id"],
             "⚠️ <b>تم رفض الإيصال</b>\n\n"
-            f"عذراً {html.escape(order['full_name'] or 'عميلنا العزيز')}، الإيصال الذي أرسلته غير مطابق أو غير واضح.\n\n"
-            "📌 نرجو إرسال إيصال جديد وصحيح مع ظهور المبلغ واسم المستفيد والتاريخ.\n\n"
+            f"عذراً {html.escape(order['full_name'] or 'عميلنا العزيز')}، الإيصال غير مطابق أو غير واضح.\n\n"
+            "📌 أرسل إيصالاً جديداً يظهر المبلغ واسم المستفيد والتاريخ.\n\n"
             f"📎 اضغط لإعادة رفع الإيصال.\n{remaining}\n\n"
             "⚠️ إذا انتهت المهلة سيتم إلغاء الطلب تلقائياً.",
-            reply_markup=receipt_upload_keyboard(order_id),
-            parse_mode="HTML",
+            reply_markup=receipt_upload_keyboard(order_id), parse_mode="HTML",
         )
     except Exception:
         logger.exception("Failed to notify receipt rejection for order %s", order_id)
-
     await callback.answer("❌ تم رفض الإيصال!")
     await callback.message.edit_text(f"❌ تم رفض إيصال الطلب #{order['order_number']}", parse_mode="HTML")
     await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
@@ -71,8 +68,7 @@ async def reject_order(callback: CallbackQuery):
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id AS user_tg, u.full_name, u.language FROM orders o "
-            "JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
+            "JOIN users u ON o.user_id = u.id WHERE o.id = $1", order_id,
         )
         if not order:
             await callback.answer("الطلب غير موجود", show_alert=True); return
@@ -82,21 +78,17 @@ async def reject_order(callback: CallbackQuery):
             "UPDATE orders SET status = 'rejected', wallet_qr_photo_id = NULL, receipt_photo_id = NULL WHERE id = $1",
             order_id,
         )
-
     bot = Bot(token=Config.BOT_TOKEN)
     try:
         lang = order["language"] or "ar"
         text = (
-            f"❌ <b>تم رفض طلبك</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n\n"
-            "يمكنك إنشاء طلب جديد من القائمة السفلية."
+            f"❌ <b>تم رفض طلبك</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {order['amount_usdt']} USDT\n\nيمكنك إنشاء طلب جديد من القائمة السفلية."
         ) if lang == "ar" else (
-            f"❌ <b>Your order was rejected</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {order['amount_usdt']} USDT\n\n"
-            "You can create a new order from the bottom menu."
+            f"❌ <b>Your order was rejected</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {order['amount_usdt']} USDT\n\nYou can create a new order from the bottom menu."
         )
         await bot.send_message(order["user_tg"], text, parse_mode="HTML", reply_markup=compact_reply_keyboard(lang))
     except Exception:
         logger.exception("Failed to notify order rejection for %s", order_id)
-
     await callback.answer("❌ تم رفض الطلب!")
     await callback.message.edit_text(f"❌ تم رفض الطلب #{order['order_number']}", parse_mode="HTML")
     await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
