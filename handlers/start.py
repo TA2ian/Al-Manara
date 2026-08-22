@@ -15,57 +15,28 @@ router = Router()
 
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    """Handle /start and keep the Telegram username current.
-
-    Telegram's numeric user ID is the stable identity key. The username is
-    treated only as mutable profile data and is refreshed whenever the user
-    starts the bot.
-    """
+    """Handle /start and keep the Telegram username current."""
     pool = await get_pool()
     username = message.from_user.username or ''
-
     async with pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT * FROM users WHERE telegram_id = $1",
-            message.from_user.id
-        )
+        user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", message.from_user.id)
         if user:
-            await conn.execute(
-                "UPDATE users SET username=$1 WHERE telegram_id=$2",
-                username,
-                message.from_user.id,
-            )
-
+            await conn.execute("UPDATE users SET username=$1 WHERE telegram_id=$2", username, message.from_user.id)
     if user and user['terms_accepted']:
         lang = user['language'] or 'ar'
-        await message.answer(
-            locale_service.get('welcome', lang, name=message.from_user.first_name),
-            reply_markup=main_menu_inline(lang),
-            parse_mode='HTML'
-        )
-        await message.answer(
-            "👇",
-            reply_markup=compact_reply_keyboard(lang)
-        )
+        await message.answer(locale_service.get('welcome', lang, name=message.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode='HTML')
+        await message.answer("👇", reply_markup=compact_reply_keyboard(lang))
         return
-
-    # The language is not known yet, so do not send Arabic-only customer copy.
-    # The selected language is used for every following screen.
     await message.answer("🌐", reply_markup=language_select_keyboard())
     await state.set_state(TermsStates.waiting_acceptance)
 
 
 @router.callback_query(TermsStates.waiting_acceptance, F.data.in_(["lang_ar", "lang_en"]))
 async def select_start_language(callback: CallbackQuery, state: FSMContext):
-    """Handle language selection at start."""
     lang = callback.data.replace("lang_", "")
     await callback.message.edit_text(
-        locale_service.get('terms_text', lang,
-                          min_order=Config.MIN_ORDER,
-                          max_order=Config.MAX_ORDER,
-                          timeout=Config.PAYMENT_TIMEOUT),
-        reply_markup=terms_keyboard(lang),
-        parse_mode='HTML'
+        locale_service.get('terms_text', lang, min_order=Config.MIN_ORDER, max_order=Config.MAX_ORDER, timeout=Config.PAYMENT_TIMEOUT),
+        reply_markup=terms_keyboard(lang), parse_mode='HTML'
     )
     await state.update_data(language=lang)
     await callback.answer()
@@ -73,12 +44,10 @@ async def select_start_language(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(TermsStates.waiting_acceptance, F.data == "accept_terms")
 async def accept_terms(callback: CallbackQuery, state: FSMContext):
-    """Handle terms acceptance."""
     data = await state.get_data()
     lang = data.get('language', 'ar')
     pool = await get_pool()
     username = callback.from_user.username or ''
-
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO users (telegram_id, username, language, terms_accepted, terms_accepted_at)
@@ -89,26 +58,22 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
                 terms_accepted = TRUE,
                 terms_accepted_at = NOW()
         """, callback.from_user.id, username, lang)
-
     await callback.message.delete()
-    await callback.message.answer(
-        locale_service.get('welcome', lang, name=callback.from_user.first_name),
-        reply_markup=main_menu_inline(lang),
-        parse_mode='HTML'
-    )
+    await callback.message.answer(locale_service.get('welcome', lang, name=callback.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode='HTML')
     await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang))
     await state.clear()
     await callback.answer()
 
 
-@router.callback_query(TermsStates.waiting_acceptance, F.data == "decline_terms")
+@router.callback_query(F.data == "decline_terms")
 async def decline_terms(callback: CallbackQuery, state: FSMContext):
-    """Handle terms decline."""
+    """Reject terms reliably even if the FSM state was lost."""
     data = await state.get_data()
-    lang = data.get('language', 'ar')
-    await callback.message.edit_text(
-        locale_service.get('declined_message', lang),
-        parse_mode='HTML'
-    )
+    lang = data.get('language')
+    if not lang:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            lang = await conn.fetchval("SELECT language FROM users WHERE telegram_id=$1", callback.from_user.id) or 'ar'
+    await callback.message.edit_text(locale_service.get('declined_message', lang), parse_mode='HTML')
     await state.clear()
-    await callback.answer()
+    await callback.answer("❌ تم الرفض" if lang == 'ar' else "❌ Declined")
