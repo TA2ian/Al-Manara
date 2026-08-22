@@ -3,7 +3,7 @@ from aiogram import Dispatcher
 
 
 def create_dispatcher() -> Dispatcher:
-    """Create dispatcher with all authoritative handlers."""
+    """Create dispatcher with authoritative handlers in precedence order."""
     from handlers import (
         start,
         saved_wallets,
@@ -28,6 +28,7 @@ def create_dispatcher() -> Dispatcher:
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
+        admin_rejection_policy,
         admin_payment_confirmation_policy,
         admin_transfer_policy,
         admin_note_policy,
@@ -53,8 +54,12 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
+
+    # Dedicated input routers must precede broad legacy catch-alls.
+    dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
+
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
     dp.include_router(payment_currency_policy.router)
@@ -77,9 +82,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_rate_policy.router)
     dp.include_router(admin_navigation_policy.router)
     dp.include_router(admin_approval_policy.router)
+    dp.include_router(admin_rejection_policy.router)
     dp.include_router(admin_payment_confirmation_policy.router)
     dp.include_router(admin_transfer_policy.router)
-    dp.include_router(admin_note_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     dp.include_router(language_policy.router)
