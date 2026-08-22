@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from keyboards.inline import (
     admin_menu_keyboard,
     order_admin_keyboard,
@@ -59,3 +61,36 @@ def test_settings_and_auto_approve_have_back_control():
     assert "setting_rate" in data
     assert "setting_fees" in data
     assert "admin_menu" in callback_data(auto_approve_keyboard(False))
+
+
+def test_order_lifecycle_never_auto_sends_admin_dashboard():
+    """The admin dashboard is explicit navigation, never a lifecycle side effect."""
+    root = Path(__file__).resolve().parents[1]
+    lifecycle_files = (
+        "handlers/admin_approval_policy.py",
+        "handlers/admin_rejection_policy.py",
+        "handlers/admin_payment_confirmation_policy.py",
+        "handlers/admin_transfer_policy.py",
+        "services/order_completion_service.py",
+        "handlers/verification_admin_policy.py",
+    )
+    forbidden = 'reply_markup=admin_menu_keyboard()'
+    for relative_path in lifecycle_files:
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert forbidden not in source, f"automatic admin dashboard found in {relative_path}"
+
+
+def test_lifecycle_handlers_do_not_import_admin_dashboard_for_side_effects():
+    root = Path(__file__).resolve().parents[1]
+    lifecycle_files = (
+        "handlers/admin_approval_policy.py",
+        "handlers/admin_rejection_policy.py",
+        "handlers/admin_payment_confirmation_policy.py",
+        "handlers/admin_transfer_policy.py",
+        "services/order_completion_service.py",
+        "handlers/verification_admin_policy.py",
+    )
+    for relative_path in lifecycle_files:
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert "from keyboards.inline import admin_menu_keyboard" not in source, relative_path
+        assert "from keyboards.inline import (" not in source or "admin_menu_keyboard" not in source, relative_path
