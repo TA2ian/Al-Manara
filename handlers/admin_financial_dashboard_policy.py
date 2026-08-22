@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import Config
 from database import get_pool
-from keyboards.inline import admin_menu_keyboard
 
 router = Router()
 
@@ -23,6 +22,40 @@ def _fmt_money(value) -> str:
         return f"{Decimal(str(value)):,.2f}"
     except (InvalidOperation, TypeError, ValueError):
         return "0.00"
+
+
+async def _financial_rows():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        completed = await conn.fetchrow(
+            """SELECT COUNT(*) AS count,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt,
+                      COALESCE(SUM(fee_amount), 0) AS fees
+               FROM orders WHERE status = 'completed'"""
+        )
+        active = await conn.fetchrow(
+            """SELECT COUNT(*) AS count,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt
+               FROM orders
+               WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')"""
+        )
+        today = await conn.fetchrow(
+            """SELECT COUNT(*) AS count,
+                      COALESCE(SUM(amount_usdt), 0) AS usdt,
+                      COALESCE(SUM(fee_amount), 0) AS fees
+               FROM orders
+               WHERE created_at >= CURRENT_DATE AND status = 'completed'"""
+        )
+        currency_rows = await conn.fetch(
+            """SELECT payment_currency,
+                      COUNT(*) AS count,
+                      COALESCE(SUM(total_amount), 0) AS total
+               FROM orders
+               WHERE status = 'completed'
+               GROUP BY payment_currency
+               ORDER BY payment_currency"""
+        )
+    return completed, active, today, currency_rows
 
 
 async def _dashboard(callback: CallbackQuery):
@@ -109,7 +142,50 @@ async def _dashboard(callback: CallbackQuery):
     await callback.answer()
 
 
+async def _analytics(callback: CallbackQuery):
+    if callback.from_user.id not in Config.ADMIN_IDS:
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    completed, active, today, currency_rows = await _financial_rows()
+    currency_lines = [
+        f"• {row['payment_currency']}: {row['count']} طلب — {_fmt_money(row['total'])}"
+        for row in currency_rows
+    ]
+    currency_text = "\n".join(currency_lines) if currency_lines else "• لا توجد بيانات مكتملة بعد"
+    text = (
+        "📈 <b>التحليل المالي</b>\n\n"
+        "━━━ الأداء المالي ━━━\n"
+        f"💰 USDT المسلم: <b>{_fmt_usdt(completed['usdt'])}</b>\n"
+        f"💵 رسوم محققة: <b>{_fmt_money(completed['fees'])}</b>\n"
+        f"📦 طلبات مكتملة: <b>{completed['count']}</b>\n\n"
+        "━━━ اليوم ━━━\n"
+        f"📦 مكتمل: <b>{today['count']}</b>\n"
+        f"💰 USDT: <b>{_fmt_usdt(today['usdt'])}</b>\n"
+        f"💵 رسوم: <b>{_fmt_money(today['fees'])}</b>\n\n"
+        "━━━ قيد التنفيذ ━━━\n"
+        f"⏳ الطلبات النشطة: <b>{active['count']}</b>\n"
+        f"💰 قيمتها: <b>{_fmt_usdt(active['usdt'])} USDT</b>\n\n"
+        "━━━ حسب عملة الدفع ━━━\n"
+        f"{currency_text}"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")]
+        ]),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_dashboard")
 async def financial_dashboard(callback: CallbackQuery):
     """Replace the legacy customer-metrics dashboard with financial metrics."""
     await _dashboard(callback)
+
+
+@router.callback_query(F.data == "admin_analytics")
+async def financial_analytics(callback: CallbackQuery):
+    """Show financial analytics with the same precision as the main dashboard."""
+    await _analytics(callback)
