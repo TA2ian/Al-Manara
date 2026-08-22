@@ -27,6 +27,7 @@ def create_dispatcher() -> Dispatcher:
         admin,
         payment_methods,
         verification,
+        language_policy,
         menu,
     )
     from middleware.rate_limit import RateLimitMiddleware
@@ -75,6 +76,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_transfer_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
+    # Language switching must precede the legacy menu language callbacks so
+    # the prompt and result always use the user's selected language.
+    dp.include_router(language_policy.router)
     dp.include_router(verification.router)
     dp.include_router(menu.router)
 
