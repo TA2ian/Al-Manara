@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 def _format_usdt(value) -> str:
     """Format USDT consistently for customer-facing notifications."""
     try:
-        return f"{Decimal(str(value)):,.2f}"
+        return f"{Decimal(str(value)):,.3f}"
     except (InvalidOperation, TypeError, ValueError):
-        return "0.00"
+        return "0.000"
 
 
 async def send_expiry_reminders(bot: Bot):
