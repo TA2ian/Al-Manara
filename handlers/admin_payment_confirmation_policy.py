@@ -10,6 +10,7 @@ from config import Config
 from database import get_pool
 from keyboards.inline import order_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
+from services.order_state_service import InvalidOrderTransition, transition_order
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -46,36 +47,41 @@ async def confirm_payment(callback: CallbackQuery):
             await callback.answer("الطلب غير موجود", show_alert=True)
             return
         if order["status"] != "receipt_received":
-            await callback.answer(
-                f"⚠️ حالة الطلب الحالية: {order['status']}", show_alert=True
-            )
+            await callback.answer(f"⚠️ حالة الطلب الحالية: {order['status']}", show_alert=True)
             return
-        updated = await conn.execute(
-            "UPDATE orders SET status = 'payment_confirmed' "
-            "WHERE id = $1 AND status = 'receipt_received'",
+        try:
+            order = await transition_order(
+                conn,
+                order_id,
+                "payment_confirmed",
+                admin_id=callback.from_user.id,
+            )
+        except InvalidOrderTransition:
+            await callback.answer("⚠️ تم تحديث الطلب مسبقاً أو تغيرت حالته", show_alert=True)
+            return
+        order = await conn.fetchrow(
+            """
+            SELECT o.*, u.telegram_id, u.full_name, u.username, u.language
+            FROM orders o JOIN users u ON o.user_id = u.id
+            WHERE o.id = $1
+            """,
             order_id,
         )
-        if updated != "UPDATE 1":
-            await callback.answer("⚠️ تم تحديث الطلب مسبقاً", show_alert=True)
-            return
 
     lang = order["language"] or "ar"
     bot = Bot(token=Config.BOT_TOKEN)
-
     try:
         await bot.send_message(
             order["telegram_id"],
             f"✅ <b>تم تأكيد الدفع!</b>\n\n"
             f"📦 الطلب: #{order['order_number']}\n"
             f"💰 المبلغ: {order['amount_usdt']} USDT\n"
-            "🚀 جاري إرسال USDT إلى محفظتك...\n"
-            "⏱ يستغرق وصول USDT عادة من 5-30 دقيقة حسب شبكة التحويل."
+            "⏳ تم تحويل الطلب إلى مرحلة إرسال USDT. سيقوم المشرف بإتمام التحويل إلى محفظتك."
             if lang == "ar" else
             f"✅ <b>Payment confirmed!</b>\n\n"
             f"📦 Order: #{order['order_number']}\n"
             f"💰 Amount: {order['amount_usdt']} USDT\n"
-            "🚀 Your USDT is being sent to your wallet...\n"
-            "⏱ Delivery usually takes 5-30 minutes depending on the network.",
+            "⏳ Your order is now queued for USDT transfer. The admin will complete the transfer to your wallet.",
             parse_mode="HTML",
             reply_markup=compact_reply_keyboard(lang),
         )
@@ -118,10 +124,7 @@ async def confirm_payment(callback: CallbackQuery):
 
     if wallet_qr_id:
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE orders SET wallet_qr_photo_id = NULL WHERE id = $1",
-                order_id,
-            )
+            await conn.execute("UPDATE orders SET wallet_qr_photo_id = NULL WHERE id = $1", order_id)
 
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
