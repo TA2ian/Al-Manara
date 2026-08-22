@@ -3,7 +3,6 @@ import asyncio
 import html
 import logging
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
@@ -12,6 +11,7 @@ from aiogram.types import CallbackQuery
 from config import Config
 from database import get_pool
 from keyboards.inline import receipt_upload_keyboard, admin_menu_keyboard
+from services.formatters import money, usdt
 from services.notification_service import NotificationService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
 
@@ -23,70 +23,39 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-def _format_usdt(value) -> str:
-    try:
-        return f"{Decimal(str(value)):,.3f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return "0.000"
-
-
-def _format_money(value) -> str:
-    try:
-        return f"{Decimal(str(value)):,.2f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return "0.00"
-
-
 async def _sync_customer_status_message(bot: Bot, order: dict, approved: bool) -> bool:
     """Replace the customer's stale approval-status message after delivery succeeds."""
     message_id = order.get("customer_status_message_id")
     user_id = order.get("telegram_id")
     if not message_id or not user_id:
         return False
-
     lang = order.get("language") or "ar"
-    if approved:
-        text = (
-            f"✅ <b>تمت الموافقة على الطلب #{html.escape(order['order_number'])}</b>\n\n"
-            "💳 تم إرسال بيانات الدفع الرسمية إلى هذه المحادثة.\n"
-            "⏱ يرجى إتمام الدفع ضمن المهلة المحددة ثم رفع الإيصال.\n\n"
-            "⚠️ لا تعتمد على أي بيانات دفع خارج رسالة الموافقة الرسمية."
-            if lang == "ar" else
-            f"✅ <b>Order #{html.escape(order['order_number'])} approved</b>\n\n"
-            "💳 The official payment details have been sent to this chat.\n"
-            "⏱ Complete the payment within the stated deadline, then upload the receipt.\n\n"
-            "⚠️ Do not use payment details from outside the official approval message."
-        )
-    else:
-        text = (
-            f"⏳ <b>الطلب #{html.escape(order['order_number'])} بانتظار موافقة الإدارة.</b>\n\n"
-            "لا ترسل أي مبلغ قبل وصول تعليمات الدفع الرسمية."
-            if lang == "ar" else
-            f"⏳ <b>Order #{html.escape(order['order_number'])} is awaiting admin approval.</b>\n\n"
-            "Do not send any funds before the official payment instructions arrive."
-        )
-
+    text = (
+        f"✅ <b>تمت الموافقة على الطلب #{html.escape(order['order_number'])}</b>\n\n"
+        "💳 تم إرسال بيانات الدفع الرسمية إلى هذه المحادثة.\n"
+        "⏱ يرجى إتمام الدفع ضمن المهلة المحددة ثم رفع الإيصال.\n\n"
+        "⚠️ لا تعتمد على أي بيانات دفع خارج رسالة الموافقة الرسمية."
+        if lang == "ar" else
+        f"✅ <b>Order #{html.escape(order['order_number'])} approved</b>\n\n"
+        "💳 The official payment details have been sent to this chat.\n"
+        "⏱ Complete the payment within the stated deadline, then upload the receipt.\n\n"
+        "⚠️ Do not use payment details from outside the official approval message."
+    ) if approved else (
+        f"⏳ <b>الطلب #{html.escape(order['order_number'])} بانتظار موافقة الإدارة.</b>\n\nلا ترسل أي مبلغ قبل وصول تعليمات الدفع الرسمية."
+        if lang == "ar" else
+        f"⏳ <b>Order #{html.escape(order['order_number'])} is awaiting admin approval.</b>\n\nDo not send any funds before the official payment instructions arrive."
+    )
     try:
-        await bot.edit_message_text(
-            chat_id=user_id,
-            message_id=int(message_id),
-            text=text,
-            parse_mode="HTML",
-        )
+        await bot.edit_message_text(chat_id=user_id, message_id=int(message_id), text=text, parse_mode="HTML")
         return True
     except Exception as exc:
-        # The message may be too old/deleted or the bot may be unable to edit it.
-        # This must never invalidate a successfully delivered payment notification.
-        logger.warning(
-            "Could not synchronize customer status message for order %s: %s",
-            order.get("order_number"), exc,
-        )
+        logger.warning("Could not synchronize customer status message for order %s: %s", order.get("order_number"), exc)
         return False
 
 
 @router.callback_query(F.data.startswith("admin_approve_"))
 async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext):
-    """Approve an order only when the complete payment destination can be delivered."""
+    """Approve only after the complete immutable payment destination is deliverable."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -103,7 +72,6 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         if not order:
             await callback.answer("الطلب غير موجود", show_alert=True)
             return
-
         if order["status"] != "pending":
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
             return
@@ -121,16 +89,27 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
 
         deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)
         try:
-            order = await transition_order(
-                conn,
-                order_id,
-                "waiting_payment",
-                admin_id=callback.from_user.id,
+            await transition_order(
+                conn, order_id, "waiting_payment", admin_id=callback.from_user.id,
                 updates={"approved_at": datetime.now(), "payment_deadline": deadline},
             )
         except InvalidOrderTransition:
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
             return
+
+    # transition_order intentionally returns only the orders row. Re-fetch the
+    # joined customer fields before notification; otherwise telegram_id/language
+    # disappear and approval crashes after the state transition.
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT o.*, u.full_name, u.username, u.telegram_id, u.language "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id,
+        )
+
+    if not order:
+        await callback.answer("❌ تعذر قراءة الطلب بعد الموافقة", show_alert=True)
+        return
 
     user_id = order["telegram_id"]
     lang = order["language"] or "ar"
@@ -145,71 +124,48 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         logger.exception("Payment details delivery failed for order %s", order_id)
         async with pool.acquire() as conn:
             try:
-                await rollback_order(
-                    conn,
-                    order_id,
-                    "pending",
-                    admin_id=callback.from_user.id,
-                    updates={"approved_at": None, "payment_deadline": None},
-                )
+                await rollback_order(conn, order_id, "pending", admin_id=callback.from_user.id, updates={"approved_at": None, "payment_deadline": None})
             except InvalidOrderTransition:
                 logger.exception("Failed to rollback approval for order %s", order_id)
         try:
             await bot.send_message(
                 user_id,
-                (
-                    f"⚠️ تعذر إرسال بيانات الدفع للطلب #{order['order_number']} كاملة. <b>لا ترسل أي مبلغ حالياً.</b> ستتم إعادة المحاولة بعد تصحيح بيانات الدفع."
-                    if lang == "ar" else
-                    f"⚠️ The complete payment details for order #{order['order_number']} could not be delivered. <b>Do not send any funds yet.</b> We will retry after the payment details are corrected."
-                ),
+                (f"⚠️ تعذر إرسال بيانات الدفع للطلب #{order['order_number']} كاملة. <b>لا ترسل أي مبلغ حالياً.</b> ستتم إعادة المحاولة بعد تصحيح بيانات الدفع." if lang == "ar" else f"⚠️ The complete payment details for order #{order['order_number']} could not be delivered. <b>Do not send any funds yet.</b> We will retry after the payment details are corrected."),
                 parse_mode="HTML",
             )
         except Exception:
             logger.exception("Failed to send payment delivery failure notice for %s", order_id)
-        await callback.answer(
-            "⚠️ تعذر إرسال بيانات الدفع كاملة. لم يتم تثبيت الموافقة." if lang == "ar" else
-            "⚠️ Complete payment details could not be delivered. Approval was not finalized.",
-            show_alert=True,
-        )
+        await callback.answer("⚠️ تعذر إرسال بيانات الدفع كاملة. لم يتم تثبيت الموافقة." if lang == "ar" else "⚠️ Complete payment details could not be delivered. Approval was not finalized.", show_alert=True)
         return
 
-    # The payment destination is now confirmed delivered. Synchronize the
-    # original customer-facing status message so it can never remain visually
-    # stuck on "awaiting admin approval" while the database is waiting_payment.
     await _sync_customer_status_message(bot, dict(order), approved=True)
 
+    upload_text = (
+        f"📎 <b>بعد إتمام الدفع للطلب #{order['order_number']}، أرسل إثبات العملية.</b>\n\n"
+        "يمكنك إرسال ملف الإثبات الذي تصدّره من شام كاش مباشرة، أو صورة إذا كانت متاحة.\n"
+        "سيتم إرسال الإثبات للمراجعة قبل تأكيد الدفع."
+    ) if lang == "ar" else (
+        f"📎 <b>After completing payment for order #{order['order_number']}, send your proof.</b>\n\n"
+        "You can send the proof file exported from ShamCash directly, or an image if available.\n"
+        "The proof will be reviewed before payment is confirmed."
+    )
     try:
-        upload_text = (
-            f"📎 <b>بعد إتمام الدفع للطلب #{order['order_number']}، أرسل إثبات العملية.</b>\n\n"
-            "يمكنك إرسال ملف الإثبات الذي تصدّره من شام كاش مباشرة، أو صورة إذا كانت متاحة.\n"
-            "سيتم إرسال الإثبات للمراجعة قبل تأكيد الدفع."
-        ) if lang == "ar" else (
-            f"📎 <b>After completing payment for order #{order['order_number']}, send your proof.</b>\n\n"
-            "You can send the proof file exported from ShamCash directly, or an image if available.\n"
-            "The proof will be reviewed before payment is confirmed."
-        )
         await bot.send_message(user_id, upload_text, parse_mode="HTML", reply_markup=receipt_upload_keyboard(order_id, lang))
     except Exception:
         logger.exception("Receipt prompt delivery failed for %s", order_id)
 
-    try:
-        admin_update_text = (
-            f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
-            f"📦 #{html.escape(order['order_number'])}\n"
-            f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
-            f"🆔 <code>{user_id}</code>\n"
-            f"💰 {_format_usdt(order['amount_usdt'])} USDT\n"
-            f"🌐 {order['network']}\n"
-            f"💵 الإجمالي: {_format_money(order['total_amount'])} {order['payment_currency']}\n"
-            f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
-            "📎 بانتظار إثبات دفع العميل..."
-        )
-        await asyncio.gather(*[
-            bot.send_message(admin_id, admin_update_text, parse_mode="HTML")
-            for admin_id in Config.ADMIN_IDS
-        ], return_exceptions=True)
-    except Exception:
-        logger.exception("Admin approval update failed for %s", order_id)
+    admin_update_text = (
+        f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
+        f"📦 #{html.escape(order['order_number'])}\n"
+        f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
+        f"🆔 <code>{user_id}</code>\n"
+        f"💰 {usdt(order['amount_usdt'])} USDT\n"
+        f"🌐 {html.escape(order['network'] or '')}\n"
+        f"💵 الإجمالي: {money(order['total_amount'])} {html.escape(order['payment_currency'])}\n"
+        f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
+        "📎 بانتظار إثبات دفع العميل..."
+    )
+    await asyncio.gather(*[bot.send_message(admin_id, admin_update_text, parse_mode="HTML") for admin_id in Config.ADMIN_IDS], return_exceptions=True)
 
     await state.clear()
     await callback.answer("✅ تمت الموافقة!")
