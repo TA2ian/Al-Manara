@@ -34,6 +34,7 @@ def create_dispatcher() -> Dispatcher:
         verification,
         language_policy,
         customer_navigation_policy,
+        customer_settings_policy,
         menu,
     )
     from middleware.rate_limit import RateLimitMiddleware
@@ -54,8 +55,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
     dp.include_router(order_amount_policy.router)
-    # Confirmation must precede the legacy order router so an incomplete or
-    # stale FSM snapshot can never be submitted through the old handler.
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
     dp.include_router(order.router)
@@ -78,6 +77,8 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(language_policy.router)
     dp.include_router(verification.router)
     dp.include_router(customer_navigation_policy.router)
+    # Customer settings entry must precede the legacy menu handler.
+    dp.include_router(customer_settings_policy.router)
     dp.include_router(menu.router)
 
     return dp
