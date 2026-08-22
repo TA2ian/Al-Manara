@@ -31,7 +31,9 @@ async def start_verification(callback: CallbackQuery, state: FSMContext):
     async with pool.acquire() as conn:
         user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", callback.from_user.id)
     if not user:
-        await callback.answer("الرجاء البدء أولاً: /start", show_alert=True)
+        lang = await _user_lang(callback.from_user.id)
+        alert = "❌ الرجاء البدء أولاً: /start" if lang == 'ar' else "❌ Please start the bot first: /start"
+        await callback.answer(alert, show_alert=True)
         return
 
     lang = user['language'] or 'ar'
@@ -43,11 +45,11 @@ async def start_verification(callback: CallbackQuery, state: FSMContext):
         "1️⃣ <b>رقم هاتفك</b>\n"
         "يجب مشاركته من حساب Telegram نفسه عبر زر مشاركة رقم الهاتف.\n\n"
         "2️⃣ <b>الاسم الكامل</b>\n"
-        "يجب أن يكون الاسم المرتبط بحسابك في ShamCash.\n\n"
-        "3️⃣ <b>حساب ShamCash</b>\n"
-        "اسم المستخدم أو رقم/معرّف الحساب كما يظهر في ShamCash.\n\n"
+        "يجب أن يكون الاسم مطابقاً للاسم المرتبط بحسابك في ShamCash.\n\n"
+        "3️⃣ <b>رقم حساب ShamCash — عنوان الاستلام</b>\n"
+        "أدخل رقم/معرّف حسابك في ShamCash، أي عنوان الاستلام الذي تستقبل عليه التحويلات. لا تعِد إدخال اسمك هنا.\n\n"
         "4️⃣ <b>صورة QR لحساب ShamCash</b>\n"
-        "يجب أن تكون واضحة وتخص الحساب نفسه، وهي مطلوبة لمطابقة الحساب أثناء المراجعة.\n\n"
+        "يجب أن تكون واضحة وتخص حساب الاستلام نفسه، وهي مطلوبة لمطابقة الحساب أثناء المراجعة.\n\n"
         "⚠️ <b>مهم:</b> لا يمكن تخطي أي من هذه المتطلبات.\n"
         "📋 بعد إرسال البيانات، تتم مراجعتها من الإدارة قبل تفعيل الحساب.\n\n"
         "إذا كانت هذه المتطلبات جاهزة لديك، سنبدأ التوثيق الآن."
@@ -58,10 +60,10 @@ async def start_verification(callback: CallbackQuery, state: FSMContext):
         "It must be shared from this Telegram account using the Share Phone Number button.\n\n"
         "2️⃣ <b>Full name</b>\n"
         "It must match the name associated with your ShamCash account.\n\n"
-        "3️⃣ <b>ShamCash account</b>\n"
-        "Your ShamCash username or account identifier as shown in ShamCash.\n\n"
+        "3️⃣ <b>ShamCash account number — receiving address</b>\n"
+        "Enter your ShamCash account number/identifier: the receiving address where you receive transfers. Do not enter your name again here.\n\n"
         "4️⃣ <b>ShamCash account QR image</b>\n"
-        "It must be clear, belong to the same account, and is required for account matching during review.\n\n"
+        "It must be clear, belong to the same receiving account, and is required for account matching during review.\n\n"
         "⚠️ <b>Important:</b> None of these requirements can be skipped.\n"
         "📋 After submission, the information is reviewed by the admin before the account is activated.\n\n"
         "If you have everything ready, we will start verification now."
@@ -136,15 +138,19 @@ async def _ask_full_name(message: Message, state: FSMContext, lang: str):
 @router.message(VerificationStates.waiting_full_name)
 async def enter_full_name(message: Message, state: FSMContext):
     name = (message.text or '').strip()
+    lang = await _user_lang(message.from_user.id)
     if len(name) < 3 or len(name) > 100:
-        await message.answer("📛 الاسم يجب أن يكون بين 3 و100 حرف. أعد المحاولة:")
+        await message.answer(
+            "📛 الاسم يجب أن يكون بين 3 و100 حرف. أعد المحاولة:"
+            if lang == 'ar' else
+            "📛 The name must be between 3 and 100 characters. Please try again:"
+        )
         return
     await state.update_data(full_name=name)
-    lang = await _user_lang(message.from_user.id)
     await message.answer(
-        "💳 <b>الخطوة 3 من 4: حساب ShamCash</b>\n\nأدخل اسم المستخدم/رقم الحساب كما يظهر في ShamCash."
+        "💳 <b>الخطوة 3 من 4: رقم حساب ShamCash — عنوان الاستلام</b>\n\nأدخل رقم/معرّف حسابك في ShamCash، أي عنوان الاستلام الذي تستقبل عليه التحويلات. هذا ليس اسمك."
         if lang == 'ar' else
-        "💳 <b>Step 3 of 4: ShamCash account</b>\n\nEnter the ShamCash username/account identifier.",
+        "💳 <b>Step 3 of 4: ShamCash account number — receiving address</b>\n\nEnter your ShamCash account number/identifier, the receiving address where you receive transfers. This is not your name.",
         parse_mode='HTML'
     )
     await state.set_state(VerificationStates.waiting_shamcash_account)
@@ -155,13 +161,17 @@ async def enter_shamcash(message: Message, state: FSMContext):
     account = (message.text or '').strip()
     lang = await _user_lang(message.from_user.id)
     if len(account) < 5 or len(account) > 100:
-        await message.answer("❌ بيانات حساب ShamCash غير صالحة. أعد إدخالها." if lang == 'ar' else "❌ Invalid ShamCash account data. Please enter it again.")
+        await message.answer(
+            "❌ رقم/معرّف حساب ShamCash غير صالح. أدخل عنوان الاستلام الصحيح كما يظهر في ShamCash."
+            if lang == 'ar' else
+            "❌ Invalid ShamCash account number/identifier. Enter the correct receiving address as shown in ShamCash."
+        )
         return
     await state.update_data(shamcash_account=account)
     await message.answer(
-        "📸 <b>الخطوة 4 من 4: QR شام كاش</b>\n\nأرسل QR لحساب ShamCash نفسه. هذا الحقل إلزامي للتحقق من تطابق الحساب.\n\n❗ لا يوجد خيار تخطي."
+        "📸 <b>الخطوة 4 من 4: QR لحساب الاستلام في ShamCash</b>\n\nأرسل صورة QR المرتبطة بنفس عنوان الاستلام الذي أدخلته في الخطوة السابقة.\n\n❗ لا يمكن تخطي هذه الخطوة."
         if lang == 'ar' else
-        "📸 <b>Step 4 of 4: ShamCash QR</b>\n\nSend the QR for the same ShamCash account. This is mandatory for account matching.\n\n❗ Skipping is not allowed.",
+        "📸 <b>Step 4 of 4: ShamCash receiving-account QR</b>\n\nSend the QR image linked to the same receiving address you entered in the previous step.\n\n❗ This step cannot be skipped.",
         parse_mode='HTML'
     )
     await state.set_state(VerificationStates.waiting_shamcash_qr)
@@ -178,9 +188,9 @@ async def upload_shamcash_qr(message: Message, state: FSMContext):
 async def reject_missing_shamcash_qr(message: Message, state: FSMContext):
     lang = await _user_lang(message.from_user.id)
     await message.answer(
-        "❌ يجب إرسال صورة QR لحساب ShamCash. لا يمكن تخطي هذه الخطوة."
+        "❌ يجب إرسال صورة QR لحساب الاستلام في ShamCash. لا يمكن تخطي هذه الخطوة."
         if lang == 'ar' else
-        "❌ You must send a ShamCash QR image. This step cannot be skipped."
+        "❌ You must send a QR image for the ShamCash receiving account. This step cannot be skipped."
     )
 
 
@@ -190,8 +200,14 @@ async def submit_verification(msg: Message, state: FSMContext):
     shamcash_account = data['shamcash_account']
     shamcash_qr_photo_id = data.get('shamcash_qr_photo_id')
     phone_number = data.get('phone_number')
+    lang = await _user_lang(msg.chat.id)
+
     if not shamcash_qr_photo_id:
-        await msg.answer("❌ لا يمكن إرسال طلب التوثيق بدون QR شام كاش.")
+        await msg.answer(
+            "❌ لا يمكن إرسال طلب التوثيق بدون QR لحساب الاستلام في ShamCash."
+            if lang == 'ar' else
+            "❌ The verification request cannot be submitted without the ShamCash receiving-account QR."
+        )
         return
 
     pool = await get_pool()
@@ -199,7 +215,11 @@ async def submit_verification(msg: Message, state: FSMContext):
         user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", msg.chat.id)
         if user:
             if not user['phone_verified'] or not user['phone_number']:
-                await msg.answer("❌ يجب توثيق رقم الهاتف أولاً.")
+                await msg.answer(
+                    "❌ يجب توثيق رقم الهاتف أولاً."
+                    if lang == 'ar' else
+                    "❌ Your phone number must be verified first."
+                )
                 return
             await conn.execute(
                 """UPDATE users SET full_name=$1, shamcash_account=$2, shamcash_qr_photo_id=$3,
@@ -226,12 +246,12 @@ async def submit_verification(msg: Message, state: FSMContext):
         f"📱 الهاتف: <code>{html.escape(phone_number)}</code>\n"
         f"📛 الاسم: {html.escape(full_name)}\n"
         f"💳 شام كاش: <code>{html.escape(shamcash_account)}</code>\n\n"
-        "⚠️ تحقق يدوي: طابق اسم الحساب مع QR قبل الموافقة."
+        "⚠️ تحقق يدوي: طابق رقم/عنوان الاستلام مع QR قبل الموافقة."
     )
     for admin_id in Config.ADMIN_IDS:
         try:
             await bot.send_message(admin_id, admin_text, reply_markup=verify_kb, parse_mode='HTML')
-            await bot.send_photo(admin_id, shamcash_qr_photo_id, caption=f"📸 QR لحساب شام كاش للمستخدم {html.escape(full_name)}")
+            await bot.send_photo(admin_id, shamcash_qr_photo_id, caption=f"📸 QR لحساب الاستلام في ShamCash للمستخدم {html.escape(full_name)}")
         except Exception as e:
             logger.error("Failed to notify admin %s: %s", admin_id, e)
 
