@@ -14,6 +14,7 @@ from . import admin_user_management_policy
 from . import admin_utility_policy
 from . import admin_maintenance_policy
 from . import admin_settings_policy
+from . import admin_settings_alias_policy
 from . import admin_rejection_policy
 
 router = Router()
@@ -24,6 +25,7 @@ for policy_router in (
     admin_utility_policy.router,
     admin_maintenance_policy.router,
     admin_settings_policy.router,
+    admin_settings_alias_policy.router,
     admin_rejection_policy.router,
 ):
     router.include_router(policy_router)
