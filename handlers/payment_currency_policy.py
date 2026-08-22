@@ -7,16 +7,18 @@ from database import get_pool
 from keyboards.inline import order_confirmation_keyboard
 from services.exchange_service import ExchangeService
 from services.formatters import money, percent, rate, usdt
-from states import OrderStates
+from states import OrderStates, WalletStates
 
 logger = logging.getLogger(__name__)
 router = Router()
+
 
 async def _user_lang(telegram_id: int) -> str:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", telegram_id)
     return (row["language"] if row else "ar") or "ar"
+
 
 def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -> str:
     currency = calculation["payment_currency"]
@@ -44,6 +46,7 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
         "⚠️ لا ترسل أي مبلغ قبل ظهور تعليمات الدفع الرسمية داخل البوت."
     )
 
+
 def _build_english_summary(data: dict, calculation: dict, network_display: str) -> str:
     currency = calculation["payment_currency"]
     unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
@@ -69,6 +72,7 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
         "⚠️ Do not send any money until the official payment instructions appear inside the bot."
     )
 
+
 @router.callback_query(OrderStates.waiting_currency, F.data.startswith("currency_"))
 async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
     """Calculate a quote only for an enabled and complete ShamCash method."""
@@ -79,6 +83,36 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
     lang = await _user_lang(callback.from_user.id)
     try:
         pool = await get_pool()
+        data = await state.get_data()
+
+        # Orders are database-enforced to use a verified wallet with a stored QR.
+        # A legacy wallet-skip session may still reach currency selection, so stop
+        # it here and return to the QR verification step instead of creating a
+        # quote that will later fail at the database guard.
+        if data.get("wallet_qr_skipped") or not data.get("wallet_qr_photo_id"):
+            wallet = data.get("wallet_address")
+            network = data.get("network")
+            if not wallet or not network:
+                await callback.message.answer(
+                    "❌ بيانات المحفظة غير مكتملة. أعد إضافة المحفظة قبل متابعة الطلب." if lang == "ar" else
+                    "❌ Wallet data is incomplete. Register the wallet again before continuing."
+                )
+                await state.clear()
+                return
+            await state.update_data(return_to_order=True, wallet_qr_skipped=False)
+            await state.set_state(WalletStates.waiting_qr)
+            await callback.message.edit_text(
+                "🔐 <b>يلزم QR للمحفظة قبل متابعة الطلب</b>\n\n"
+                f"🌐 الشبكة: <b>{network}</b>\n📍 العنوان: <code>{wallet}</code>\n\n"
+                "لأمان الطلب، لا يمكن إنشاء طلب شراء بدون QR مطابق محفوظ للمحفظة. أرسل صورة QR لنفس العنوان الآن."
+                if lang == "ar" else
+                "🔐 <b>Wallet QR is required before continuing</b>\n\n"
+                f"🌐 Network: <b>{network}</b>\n📍 Address: <code>{wallet}</code>\n\n"
+                "For order safety, a purchase order cannot be created without a matching stored wallet QR. Send the QR image for this address now.",
+                parse_mode="HTML",
+            )
+            return
+
         async with pool.acquire() as conn:
             method = await conn.fetchrow(
                 """SELECT code, account_identifier, qr_photo_id, enabled
@@ -95,7 +129,6 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
             )
             return
 
-        data = await state.get_data()
         amount = data.get("amount_usdt")
         wallet = data.get("wallet_address")
         network = data.get("network")
@@ -103,6 +136,7 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer("❌ بيانات الطلب غير مكتملة. أعد إنشاء الطلب من القائمة الرئيسية." if lang == "ar" else "❌ The order data is incomplete. Please start the order again from the main menu.")
             await state.clear()
             return
+
         calculation = await ExchangeService(pool).calculate_order(amount, currency)
         await state.update_data(payment_currency=calculation["payment_currency"], calculation=calculation)
         network_display = {"TRC20": "🔷 TRC20 (TRX)", "BEP20": "🟡 BEP20 (BNB)"}.get(network, network)
