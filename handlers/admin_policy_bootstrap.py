@@ -6,9 +6,14 @@ Extracted policy routers are inserted before legacy handlers, making the new
 implementation authoritative for their callback/state flows.
 """
 from . import admin
+from . import admin_order_list_policy
 from . import admin_user_management_policy
 
 
 # Register once when the handlers package is imported.
-if admin_user_management_policy.router not in admin.router.sub_routers:
-    admin.router.include_router(admin_user_management_policy.router)
+for extracted_router in (
+    admin_order_list_policy.router,
+    admin_user_management_policy.router,
+):
+    if extracted_router not in admin.router.sub_routers:
+        admin.router.include_router(extracted_router)
