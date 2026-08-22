@@ -6,11 +6,13 @@ step belongs to the admin.
 """
 from decimal import Decimal, InvalidOperation
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from keyboards.inline import orders_pagination_keyboard, receipt_upload_keyboard
 from services.locale_service import locale_service
+from services.notification_service import NotificationService
 from database import get_pool
+from config import Config
 
 router = Router()
 PAGE_SIZE = 5
@@ -83,6 +85,41 @@ async def _get_user(message_or_callback):
         )
 
 
+async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
+    """Recover an older approved order whose customer status message was not tracked.
+
+    This is deliberately limited to orders in waiting_payment with no stored
+    customer status message. It prevents duplicate payment instructions for
+    newly created orders while allowing pre-fix orders to recover immediately.
+    """
+    if order["status"] != "waiting_payment" or order.get("customer_status_message_id"):
+        return
+
+    try:
+        bot = Bot(token=Config.BOT_TOKEN)
+        notification = NotificationService(bot, Config.ADMIN_IDS)
+        delivered = await notification.notify_order_approved(
+            order["user_id"] if False else message.from_user.id,
+            dict(order),
+            lang=lang,
+        )
+        if delivered:
+            prompt = (
+                f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
+                if lang == "ar" else
+                f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
+            )
+            await message.answer(
+                prompt,
+                parse_mode="HTML",
+                reply_markup=receipt_upload_keyboard(order["id"], lang),
+            )
+    except Exception:
+        # The order remains waiting_payment; this is only a visibility repair.
+        # The normal approval/delivery path remains authoritative.
+        return
+
+
 @router.message(F.text.in_(["📋 طلباتي", "📋 Orders"]))
 async def show_precise_orders(message: Message):
     user = await _get_user(message)
@@ -105,16 +142,18 @@ async def show_precise_orders(message: Message):
     # Only the payment-awaiting state requires an immediate customer action.
     for order in orders:
         if order["status"] == "waiting_payment":
-            prompt = (
-                f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
-                if lang == "ar" else
-                f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
-            )
-            await message.answer(
-                prompt,
-                parse_mode="HTML",
-                reply_markup=receipt_upload_keyboard(order["id"], lang),
-            )
+            await _repair_waiting_payment_visibility(message, order, lang)
+            if order.get("customer_status_message_id"):
+                prompt = (
+                    f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
+                    if lang == "ar" else
+                    f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
+                )
+                await message.answer(
+                    prompt,
+                    parse_mode="HTML",
+                    reply_markup=receipt_upload_keyboard(order["id"], lang),
+                )
 
 
 @router.callback_query(F.data.startswith("orders_page_"))
