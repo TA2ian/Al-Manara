@@ -13,6 +13,8 @@ def create_dispatcher() -> Dispatcher:
         wallets,
         order,
         profile,
+        active_order_policy,
+        receipt_processing_policy,
         my_orders,
         feedback,
         admin_entry,
@@ -20,6 +22,7 @@ def create_dispatcher() -> Dispatcher:
         verification_admin_policy,
         admin_navigation_policy,
         admin_approval_policy,
+        admin_transfer_policy,
         admin,
         payment_methods,
         verification,
@@ -46,8 +49,14 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
+    # If a verified customer already has an active order, guide them to Orders
+    # instead of starting another order flow.
+    dp.include_router(active_order_policy.router)
     dp.include_router(order.router)
     dp.include_router(profile.router)
+    # Receipt progress must precede my_orders so the temporary processing
+    # message appears while the existing OCR/verification handler works.
+    dp.include_router(receipt_processing_policy.router)
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
     dp.include_router(admin_entry.router)
@@ -57,6 +66,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(verification_admin_policy.router)
     dp.include_router(admin_navigation_policy.router)
     dp.include_router(admin_approval_policy.router)
+    # Admin transfer-proof input must precede the legacy TXID handlers so a
+    # screenshot can safely be submitted before or together with its TXID.
+    dp.include_router(admin_transfer_policy.router)
     dp.include_router(payment_methods.router)
     dp.include_router(admin.router)
     dp.include_router(verification.router)
