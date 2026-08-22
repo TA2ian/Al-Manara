@@ -53,11 +53,11 @@ class NotificationService:
         )
         await self.notify_admins(text)
 
-    async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar"):
-        """Send the complete immutable payment snapshot after approval.
+    async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
+        """Send the immutable payment snapshot after approval.
 
-        This deliberately does not depend on a locale key: missing translation
-        keys must never reduce a financial payment message to a key name.
+        The payment account and QR are both mandatory. A successful return
+        means the customer received the complete payment destination.
         """
         from config import Config
         from services.exchange_service import ExchangeService
@@ -70,8 +70,6 @@ class NotificationService:
         timeout = Config.PAYMENT_TIMEOUT
         name = Config.get_shamcash_name().strip() or "ShamCash"
 
-        # An approved order must always have the immutable payment snapshot.
-        # Never substitute a live/current payment method here.
         if not account or not qr_photo_id:
             logger.error(
                 "Incomplete payment snapshot for approved order %s: account=%r qr=%r",
@@ -127,11 +125,9 @@ class NotificationService:
                 "After payment, use the receipt-upload button to submit your proof."
             )
 
-        # The text message is mandatory and contains the account + exact amount.
+        # Send the text first so the customer has the exact account and amount.
         await self.notify_user(user_id, text)
 
-        # QR is supplemental. If Telegram rejects the photo, the account details
-        # have already reached the customer and the failure is logged.
         caption = (
             f"💳 <b>QR الدفع — {name}</b>\n"
             f"📦 الطلب: <b>#{order_number}</b>\n"
@@ -143,6 +139,9 @@ class NotificationService:
             f"💰 Amount: <b>{amount} {currency}</b>\n"
             f"📱 Account: <code>{account}</code>"
         )
+
+        # QR is part of the agreed payment destination, not an optional extra.
+        # If Telegram rejects it, approval must not be treated as fully delivered.
         try:
             await self._bot.send_photo(
                 user_id,
@@ -151,6 +150,7 @@ class NotificationService:
                 parse_mode="HTML",
             )
         except Exception as exc:
-            logger.exception("Failed to send payment QR for order %s: %s", order_number, exc)
+            logger.exception("Failed to send mandatory payment QR for order %s", order_number)
+            raise RuntimeError("payment_qr_delivery_failed") from exc
 
         return True
