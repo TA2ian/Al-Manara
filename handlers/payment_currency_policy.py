@@ -1,5 +1,6 @@
 """Authoritative payment-currency selection for the customer order flow."""
 import logging
+from decimal import Decimal
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -20,6 +21,94 @@ async def _user_lang(telegram_id: int) -> str:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", telegram_id)
     return (row["language"] if row else "ar") or "ar"
+
+
+def _money(value) -> str:
+    return f"{Decimal(str(value)):,.2f}"
+
+
+def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -> str:
+    """Build an explicit financial summary with a clear amount-to-send hierarchy."""
+    currency = calculation["payment_currency"]
+    rate = calculation["exchange_rate"]
+    base = calculation["base_amount"]
+    fee_pct = calculation["fee_percent"]
+    fee = calculation["fee_amount"]
+    total = calculation["total_amount"]
+    amount_usdt = data["amount_usdt"]
+
+    if currency == "NEW.SYP":
+        payment_currency = "🇸🇾 الليرة السورية الجديدة (NEW.SYP)"
+        unit = "NEW.SYP"
+    else:
+        payment_currency = "🇺🇸 الدولار الأمريكي (USD)"
+        unit = "USD"
+
+    return (
+        "📋 <b>ملخص طلبك #PENDING</b>\n\n"
+        "──── 💳 معلومات USDT ────\n"
+        f"💰 المبلغ المطلوب: <b>{_money(amount_usdt)} USDT</b>\n"
+        f"🌐 الشبكة: {network_display}\n"
+        f"📍 العنوان: <code>{data['wallet']}</code>\n\n"
+        "──── 💱 سعر الصرف ────\n"
+        "🇺🇸 <b>الدولار الأمريكي (USD): 1.00 USD</b>\n"
+        f"🇸🇾 <b>الليرة السورية الجديدة (NEW.SYP): {_money(rate)} NEW.SYP</b>\n"
+        f"🔄 <b>1 USD = {_money(rate)} NEW.SYP</b>\n\n"
+        f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
+        "👇 <b>المبلغ الذي سيصل إلى محفظتك:</b>\n"
+        f"<b>💰 {_money(amount_usdt)} USDT</b>\n\n"
+        "──── 💵 المبلغ الأساسي ────\n"
+        f"💵 <b>{_money(base)} {unit}</b>\n\n"
+        "──── 💰 رسوم الخدمة ────\n"
+        f"📊 النسبة: <b>{_money(fee_pct)}%</b>\n"
+        f"💵 قيمة الرسوم: <b>{_money(fee)} {unit}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💸 <b>المجموع الإجمالي — المبلغ المطلوب إرساله:</b>\n"
+        f"<b>💰 {_money(total)} {unit}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ <b>مهم:</b> أرسل المجموع الإجمالي أعلاه.\n"
+        "إذا أرسلت المبلغ الأساسي فقط، فسيتم اقتطاع رسوم الخدمة منه.\n\n"
+        "⏱ المدة المتوقعة: 15 دقيقة - 24 ساعة"
+    )
+
+
+def _build_english_summary(data: dict, calculation: dict, network_display: str) -> str:
+    """Keep the English path consistent with the authoritative quote."""
+    currency = calculation["payment_currency"]
+    rate = calculation["exchange_rate"]
+    base = calculation["base_amount"]
+    fee_pct = calculation["fee_percent"]
+    fee = calculation["fee_amount"]
+    total = calculation["total_amount"]
+    amount_usdt = data["amount_usdt"]
+    unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
+
+    return (
+        "📋 <b>Order Summary #PENDING</b>\n\n"
+        "──── 💳 USDT Details ────\n"
+        f"💰 Requested: <b>{_money(amount_usdt)} USDT</b>\n"
+        f"🌐 Network: {network_display}\n"
+        f"📍 Address: <code>{data['wallet']}</code>\n\n"
+        "──── 💱 Exchange Rate ────\n"
+        "🇺🇸 <b>US Dollar (USD): 1.00 USD</b>\n"
+        f"🇸🇾 <b>New Syrian Pound (NEW.SYP): {_money(rate)} NEW.SYP</b>\n"
+        f"🔄 <b>1 USD = {_money(rate)} NEW.SYP</b>\n\n"
+        f"💳 Payment currency: <b>{unit}</b>\n\n"
+        "👇 <b>Amount that will arrive in your wallet:</b>\n"
+        f"<b>💰 {_money(amount_usdt)} USDT</b>\n\n"
+        "──── 💵 Base Amount ────\n"
+        f"💵 <b>{_money(base)} {unit}</b>\n\n"
+        "──── 💰 Service Fee ────\n"
+        f"📊 Rate: <b>{_money(fee_pct)}%</b>\n"
+        f"💵 Fee: <b>{_money(fee)} {unit}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💸 <b>Total — Amount to Send:</b>\n"
+        f"<b>💰 {_money(total)} {unit}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ <b>Important:</b> Send the total amount shown above.\n"
+        "If you send only the base amount, the service fee will be deducted from it.\n\n"
+        "⏱ Expected duration: 15 minutes - 24 hours"
+    )
 
 
 @router.callback_query(OrderStates.waiting_currency, F.data.startswith("currency_"))
@@ -45,40 +134,33 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
             return
 
         pool = await get_pool()
-        exchange = ExchangeService(pool)
-        calculation = await exchange.calculate_order(amount, currency)
-        await state.update_data(payment_currency=calculation["payment_currency"], calculation=calculation)
+        calculation = await ExchangeService(pool).calculate_order(amount, currency)
+        await state.update_data(
+            payment_currency=calculation["payment_currency"],
+            calculation=calculation,
+        )
 
         network_display = {
             "TRC20": "🔷 TRC20 (TRX)",
             "BEP20": "🟡 BEP20 (BNB)",
         }.get(network, network)
 
-        new_syr_line = ""
-        new_syr_fee_line = ""
-        new_syr_total_line = ""
-        if calculation["payment_currency"] == "NEW.SYP":
-            new_syr_line = f"🇸🇾 بما يعادل: <b>{calculation['base_amount']:,.2f} ل.ج.س</b> (ليرة سورية جديدة)\n"
-            new_syr_fee_line = f"🇸🇾 رسوم الخدمة: <b>{calculation['fee_amount']:,.2f} ل.ج.س</b>\n"
-            new_syr_total_line = f"🇸🇾 الإجمالي بل.ج.س: <b>{calculation['total_amount']:,.2f} ل.ج.س</b>\n"
-
-        summary = locale_service.get(
-            "order_summary",
-            lang,
-            order_number="PENDING",
-            amount_usdt=data["amount_usdt"],
-            network=network_display,
-            wallet=wallet,
-            currency=calculation["payment_currency"],
-            rate=calculation["exchange_rate"],
-            base_amount=calculation["base_amount"],
-            fee_percent=calculation["fee_percent"],
-            fee_amount=calculation["fee_amount"],
-            total=calculation["total_amount"],
-            new_syr_line=new_syr_line,
-            new_syr_fee_line=new_syr_fee_line,
-            new_syr_total_line=new_syr_total_line,
-        )
+        data_for_summary = {
+            "amount_usdt": amount,
+            "wallet": wallet,
+        }
+        if lang == "ar":
+            summary = _build_arabic_summary(
+                data_for_summary,
+                calculation,
+                network_display,
+            )
+        else:
+            summary = _build_english_summary(
+                data_for_summary,
+                calculation,
+                network_display,
+            )
 
         await callback.message.edit_text(summary, parse_mode="HTML")
         await callback.message.answer(
