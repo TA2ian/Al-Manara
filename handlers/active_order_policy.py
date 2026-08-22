@@ -47,32 +47,34 @@ async def guide_active_order(message: Message, state: FSMContext):
     lang = user["language"] or "ar"
     if lang == "ar":
         status_map = {
-            "pending": "في انتظار موافقة المشرف",
-            "waiting_payment": "في انتظار الدفع",
-            "receipt_received": "الإيصال قيد المراجعة",
-            "payment_confirmed": "تم تأكيد الدفع ويجري تجهيز الإرسال",
+            "pending": "بانتظار موافقة الإدارة",
+            "waiting_payment": "بانتظار دفع المبلغ ورفع الإيصال",
+            "receipt_received": "تم استلام الإيصال — بانتظار مراجعة الإدارة",
+            "payment_confirmed": "تم تأكيد الدفع — بانتظار إرسال USDT من الإدارة",
         }
         text = (
             "⚠️ <b>لديك طلب نشط بالفعل</b>\n\n"
             f"📦 الطلب: <b>#{active_order['order_number']}</b>\n"
             f"💰 المبلغ: <b>{active_order['amount_usdt']} USDT</b>\n"
-            f"📊 الحالة: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
+            f"📊 الحالة الحالية: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
             "📋 لمتابعة الطلب، افتح <b>📋 طلباتي</b> من القائمة السفلية.\n"
+            "هناك لا تحتاج إلى إجراء آخر الآن؛ سيظهر تقدم الطلب حسب آخر إجراء من الإدارة.\n\n"
             "لا يمكنك إنشاء طلب شراء جديد حتى يكتمل الطلب الحالي."
         )
     else:
         status_map = {
             "pending": "Awaiting admin approval",
-            "waiting_payment": "Awaiting payment",
-            "receipt_received": "Receipt under review",
-            "payment_confirmed": "Payment confirmed; transfer is being prepared",
+            "waiting_payment": "Awaiting payment and receipt upload",
+            "receipt_received": "Receipt received — awaiting admin review",
+            "payment_confirmed": "Payment confirmed — awaiting USDT transfer by admin",
         }
         text = (
             "⚠️ <b>You already have an active order</b>\n\n"
             f"📦 Order: <b>#{active_order['order_number']}</b>\n"
             f"💰 Amount: <b>{active_order['amount_usdt']} USDT</b>\n"
-            f"📊 Status: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
+            f"📊 Current status: <b>{status_map.get(active_order['status'], active_order['status'])}</b>\n\n"
             "📋 To follow it, open <b>📋 Orders</b> from the bottom menu.\n"
+            "You do not need to take another action now; the order progress is updated by the admin.\n\n"
             "You cannot create another order until the current one is completed."
         )
 
