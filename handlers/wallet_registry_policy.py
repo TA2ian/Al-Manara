@@ -5,6 +5,8 @@ wallet registration and supports QR images sent as Telegram photos or image
 documents, using the shared robust QR decoder.
 """
 import io
+import re
+from urllib.parse import unquote, urlparse
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -25,13 +27,26 @@ async def _user(telegram_id: int):
         )
 
 
-def _normalize_wallet_qr(value: str) -> str:
-    normalized = (value or "").strip()
+def _wallet_qr_candidates(value: str) -> set[str]:
+    """Extract address candidates from plain or URI-style wallet QR payloads."""
+    raw = unquote((value or "").strip())
+    if not raw:
+        return set()
+    candidates = {raw.casefold()}
     for prefix in ("ethereum:", "tron:", "trc20:", "bep20:", "usdt:"):
-        if normalized.lower().startswith(prefix):
-            normalized = normalized[len(prefix):].strip()
-            break
-    return normalized
+        if raw.lower().startswith(prefix):
+            payload = raw[len(prefix):].strip()
+            candidates.add(payload.casefold())
+            parsed = urlparse(payload)
+            if parsed.path:
+                candidates.add(parsed.path.strip("/").casefold())
+            if "?" in payload:
+                candidates.add(payload.split("?", 1)[0].casefold())
+    # Some QR providers embed a raw 0x address inside a URI.
+    match = re.search(r"0x[a-fA-F0-9]{40}", raw)
+    if match:
+        candidates.add(match.group(0).casefold())
+    return {item for item in candidates if item}
 
 
 async def _lang(telegram_id: int) -> str:
@@ -71,8 +86,8 @@ async def _accept_qr(message: Message, state: FSMContext, file_id: str):
         )
         return
 
-    normalized = _normalize_wallet_qr(qr_text)
-    if normalized.casefold() != address.casefold():
+    candidates = _wallet_qr_candidates(qr_text)
+    if address.casefold() not in candidates:
         await message.answer(
             "❌ QR لا يطابق العنوان المدخل. أرسل QR المطابق لنفس العنوان."
             if lang == "ar" else
