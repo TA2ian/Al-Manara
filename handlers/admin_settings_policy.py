@@ -97,7 +97,7 @@ async def setting_shamcash_syp(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await callback.message.edit_text(
-        f"📱 <b>حساب شام كاش SYP الحالي:</b>\n<code>{Config.get_shamcash_syp()}</code>\n\nأرسل رقم الحساب الجديد:",
+        f"📱 <b>حساب شام كاش NEW.SYP الحالي:</b>\n<code>{Config.get_shamcash_syp()}</code>\n\nأرسل رقم الحساب الجديد لعملة NEW.SYP:",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_shamcash_syp)
@@ -117,7 +117,7 @@ async def admin_set_shamcash_syp(message: Message, state: FSMContext):
     Config.SHAMCASH_SYP_ACCOUNT = account
     Config.set_shamcash_syp(account)
     await SettingsService.set("shamcash_syp", account)
-    await message.answer(f"✅ تم تحديث حساب شام كاش SYP:\n<code>{account}</code>", parse_mode="HTML")
+    await message.answer(f"✅ تم تحديث حساب شام كاش NEW.SYP:\n<code>{account}</code>", parse_mode="HTML")
     await state.clear()
     await _back_to_admin(message)
 
