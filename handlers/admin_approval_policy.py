@@ -1,20 +1,14 @@
-"""Authoritative order-approval notification policy.
-
-Ensures that once an admin approves an order, the customer always receives a
-clear payment deadline and an explicit receipt-upload action, even if an
-optional notification component fails.
-"""
+"""Authoritative order-approval notification policy."""
 import asyncio
 import html
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
-from aiogram import Bot
 from config import Config
 from database import get_pool
 from keyboards.inline import receipt_upload_keyboard, admin_menu_keyboard
@@ -44,7 +38,7 @@ def _format_money(value) -> str:
 
 @router.callback_query(F.data.startswith("admin_approve_"))
 async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext):
-    """Approve an order and guarantee the customer gets receipt instructions."""
+    """Approve an order only when the complete payment destination can be delivered."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -66,9 +60,6 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
             return
 
-        # Payment must be configured by the admin before an order can be
-        # approved. New orders are also blocked at the database boundary when
-        # this snapshot is missing, but this protects legacy orders as well.
         account = (order["payment_account_snapshot"] or "").strip()
         qr_photo_id = (order["payment_qr_photo_id"] or "").strip()
         if not account or not qr_photo_id:
@@ -78,8 +69,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             )
             await callback.message.answer(
                 "⚠️ <b>لا يمكن اعتماد الطلب بعد.</b>\n\n"
-                "بيانات الدفع الخاصة بالعملة المختارة غير مكتملة."
-                " يجب على الأدمن تثبيت حساب ShamCash وQR الخاصين به من <b>وسائل الدفع</b> ثم إعادة المحاولة.",
+                "بيانات الدفع الخاصة بالعملة المختارة غير مكتملة. يجب على الأدمن تثبيت حساب ShamCash وQR الخاصين به من <b>وسائل الدفع</b> ثم إعادة المحاولة.",
                 parse_mode="HTML",
             )
             return
@@ -91,9 +81,6 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             deadline,
             order_id,
         )
-
-        # Re-read the order so notification services receive the authoritative
-        # waiting-payment state and deadline.
         order = await conn.fetchrow(
             "SELECT o.*, u.full_name, u.username, u.telegram_id, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
@@ -104,32 +91,53 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     lang = order["language"] or "ar"
     bot = Bot(token=Config.BOT_TOKEN)
 
-    # Optional detailed notification. Its failure must never prevent the
-    # mandatory receipt-upload prompt below.
+    # Payment account + exact amount + QR are one delivery unit. If delivery
+    # fails, revert the order so the admin can safely retry after fixing it.
     try:
         notification = NotificationService(bot, Config.ADMIN_IDS)
-        await notification.notify_order_approved(
+        delivered = await notification.notify_order_approved(
             user_id,
             dict(order),
             lang=lang,
         )
-    except Exception as exc:
-        logger.exception("Order approval notification failed for %s: %s", order_id, exc)
+        if not delivered:
+            raise RuntimeError("payment_details_delivery_failed")
+    except Exception:
+        logger.exception("Payment details delivery failed for order %s", order_id)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET status = 'pending', approved_at = NULL, payment_deadline = NULL WHERE id = $1 AND status = 'waiting_payment'",
+                order_id,
+            )
 
-    # Mandatory customer-facing payment/receipt action.
+        try:
+            await bot.send_message(
+                user_id,
+                (
+                    f"⚠️ تعذر إرسال بيانات الدفع للطلب #{order['order_number']} كاملة. <b>لا ترسل أي مبلغ حالياً.</b> ستتم إعادة المحاولة بعد تصحيح بيانات الدفع."
+                    if lang == "ar" else
+                    f"⚠️ The complete payment details for order #{order['order_number']} could not be delivered. <b>Do not send any funds yet.</b> We will retry after the payment details are corrected."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.exception("Failed to send payment delivery failure notice for %s", order_id)
+
+        await callback.answer(
+            "⚠️ تعذر إرسال بيانات الدفع كاملة. لم يتم تثبيت الموافقة." if lang == "ar" else
+            "⚠️ Complete payment details could not be delivered. Approval was not finalized.",
+            show_alert=True,
+        )
+        return
+
+    # Only after complete payment delivery is confirmed do we expose receipt upload.
     try:
         upload_text = (
-            f"🔔 <b>تمت الموافقة على طلبك #{order['order_number']}</b>\n\n"
-            "تم تثبيت بيانات الدفع الخاصة بهذا الطلب. يمكنك الآن تنفيذ الدفع عبر بيانات ShamCash التي وصلتك في رسالة الدفع المنفصلة.\n"
-            f"⏱ <b>مهلة الدفع: {Config.PAYMENT_TIMEOUT} دقيقة</b>\n\n"
-            "📎 <b>بعد إتمام الدفع، أرسل إثبات العملية عبر الزر أدناه.</b>\n"
+            f"📎 <b>بعد إتمام الدفع للطلب #{order['order_number']}، أرسل إثبات العملية.</b>\n\n"
             "يمكنك إرسال ملف الإثبات الذي تصدّره من شام كاش مباشرة، أو صورة إذا كانت متاحة.\n"
             "سيتم إرسال الإثبات للمراجعة قبل تأكيد الدفع."
         ) if lang == "ar" else (
-            f"🔔 <b>Your order #{order['order_number']} has been approved</b>\n\n"
-            "The payment details for this order are fixed. You can now complete the payment using the separate ShamCash payment message.\n"
-            f"⏱ <b>Payment deadline: {Config.PAYMENT_TIMEOUT} minutes</b>\n\n"
-            "📎 <b>After payment, send the transaction proof using the button below.</b>\n"
+            f"📎 <b>After completing payment for order #{order['order_number']}, send your proof.</b>\n\n"
             "You can send the proof file exported from ShamCash directly, or an image if available.\n"
             "The proof will be reviewed before payment is confirmed."
         )
@@ -139,25 +147,11 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             parse_mode="HTML",
             reply_markup=receipt_upload_keyboard(order_id, lang),
         )
-    except Exception as exc:
-        logger.exception("Mandatory receipt prompt failed for %s", order_id)
-        # The fallback remains in the customer's selected language and exposes
-        # no technical exception details.
-        try:
-            fallback_text = (
-                f"📎 بعد إتمام الدفع، اضغط الزر أدناه وارفع إثبات الطلب #{order['order_number']}."
-                if lang == "ar" else
-                f"📎 After completing the payment, use the button below to upload proof for order #{order['order_number']}."
-            )
-            await bot.send_message(
-                user_id,
-                fallback_text,
-                reply_markup=receipt_upload_keyboard(order_id, lang),
-            )
-        except Exception:
-            logger.exception("Fallback receipt prompt failed for %s", order_id)
+    except Exception:
+        logger.exception("Receipt prompt delivery failed for %s", order_id)
+        # The order remains waiting_payment because payment details were already delivered.
+        # The customer can still use the order flow to retry receipt submission.
 
-    # Admin-side state confirmation; failures here must not affect the customer.
     try:
         admin_update_text = (
             f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
@@ -174,7 +168,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             bot.send_message(admin_id, admin_update_text, parse_mode="HTML")
             for admin_id in Config.ADMIN_IDS
         ], return_exceptions=True)
-    except Exception as exc:
+    except Exception:
         logger.exception("Admin approval update failed for %s", order_id)
 
     await state.clear()
