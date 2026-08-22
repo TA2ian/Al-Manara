@@ -22,7 +22,6 @@ def test_admin_facade_registers_only_nested_policies():
     for marker in (
         "admin_rejection_policy.router",
         "admin_broadcast_policy.router",
-        "admin_financial_dashboard_policy.router",
         "admin_rate_policy.router",
         "admin_navigation_policy.router",
         "admin_approval_policy.router",
@@ -31,6 +30,16 @@ def test_admin_facade_registers_only_nested_policies():
         "admin_note_policy.router",
     ):
         assert marker not in admin
+
+
+def test_removed_financial_dashboard_module_is_not_referenced():
+    bot = (ROOT / "bot.py").read_text(encoding="utf-8")
+    navigation = (ROOT / "handlers" / "admin_navigation_policy.py").read_text(encoding="utf-8")
+
+    assert not (ROOT / "handlers" / "admin_financial_dashboard_policy.py").exists()
+    assert "admin_financial_dashboard_policy" not in bot
+    assert 'F.data == "admin_dashboard"' in navigation
+    assert 'F.data == "admin_analytics"' in navigation
 
 
 def test_handler_package_initializer_is_side_effect_free():
