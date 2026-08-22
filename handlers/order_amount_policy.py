@@ -7,7 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import Config
 from database import get_pool
-from keyboards.inline import cancel_keyboard
+from keyboards.inline import cancel_keyboard, preset_amounts_keyboard, start_verification_keyboard
+from middleware.rate_limit import rate_limiter as global_rate_limiter
 from states import OrderStates, WalletStates
 from services.locale_service import locale_service
 
@@ -25,7 +26,10 @@ def _usdt(value) -> str:
 async def _user(telegram_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
+        return await conn.fetchrow(
+            "SELECT id, language, terms_accepted, is_blocked, is_verified FROM users WHERE telegram_id = $1",
+            telegram_id,
+        )
 
 
 async def _active_order(user_id: int):
@@ -69,8 +73,47 @@ async def _show_verified_wallets(message: Message, state: FSMContext, user_id: i
     )
 
 
+@router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
+async def start_order_authoritative(message: Message, state: FSMContext):
+    """Start a new order through the authoritative customer gates."""
+    user = await _user(message.from_user.id)
+    if not user:
+        await message.answer("يرجى بدء البوت أولاً: /start" if True else "Please start the bot first: /start")
+        return
+
+    lang = user["language"] or "ar"
+    if not user["terms_accepted"]:
+        await message.answer("يرجى قبول الشروط أولاً: /start" if lang == "ar" else "Please accept the terms first: /start")
+        return
+    if user["is_blocked"]:
+        await message.answer(locale_service.get("user_blocked", lang), parse_mode="HTML")
+        return
+    if not user["is_verified"]:
+        await message.answer(
+            "🔒 <b>يرجى إكمال التوثيق أولاً</b>\n\nلإنشاء طلب، يجب توثيق حسابك أولاً." if lang == "ar" else
+            "🔒 <b>Verification required</b>\n\nYou must verify your account before creating an order.",
+            parse_mode="HTML",
+            reply_markup=start_verification_keyboard(lang),
+        )
+        return
+
+    active = await _active_order(user["id"])
+    if active:
+        await message.answer(
+            "⚠️ <b>لديك طلب نشط بالفعل.</b> افتح طلباتي لمتابعته ولا يمكنك إنشاء طلب جديد قبل اكتماله." if lang == "ar" else
+            "⚠️ <b>You already have an active order.</b> Open Orders to follow it; a new order cannot be created until it is completed.",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer(
+        locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER),
+        reply_markup=preset_amounts_keyboard(lang),
+    )
+    await state.set_state(OrderStates.waiting_amount)
+
+
 async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, lang: str, user_id: int):
-    from handlers.order import global_rate_limiter
     allowed, _ = global_rate_limiter.check(user_id, "order_amount")
     if not allowed:
         return
