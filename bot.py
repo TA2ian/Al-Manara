@@ -8,6 +8,7 @@ def create_dispatcher() -> Dispatcher:
         start,
         saved_wallets,
         order_wallet_policy,
+        order_wallet_qr_policy,
         payment_currency_policy,
         legacy_wallet_guard,
         wallets,
@@ -62,6 +63,7 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
+    dp.include_router(order_wallet_qr_policy.router)
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
