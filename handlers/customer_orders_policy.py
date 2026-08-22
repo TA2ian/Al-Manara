@@ -88,7 +88,7 @@ async def _get_user(message_or_callback):
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
     """Recover an older approved order whose customer status message was not tracked."""
     if order["status"] != "waiting_payment" or order.get("customer_status_message_id"):
-        return
+        return False
 
     try:
         bot = Bot(token=Config.BOT_TOKEN)
@@ -98,20 +98,30 @@ async def _repair_waiting_payment_visibility(message: Message, order, lang: str)
             dict(order),
             lang=lang,
         )
-        if delivered:
-            prompt = (
-                f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
-                if lang == "ar" else
-                f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
+        if not delivered:
+            return False
+
+        prompt = (
+            f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
+            if lang == "ar" else
+            f"📎 <b>#{order['order_number']}</b> — upload your payment receipt after the transfer:"
+        )
+        prompt_message = await message.answer(
+            prompt,
+            parse_mode="HTML",
+            reply_markup=receipt_upload_keyboard(order["id"], lang),
+        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET customer_status_message_id = $1 WHERE id = $2",
+                prompt_message.message_id,
+                order["id"],
             )
-            await message.answer(
-                prompt,
-                parse_mode="HTML",
-                reply_markup=receipt_upload_keyboard(order["id"], lang),
-            )
+        return True
     except Exception:
         # The order remains waiting_payment; this is only a visibility repair.
-        return
+        return False
 
 
 @router.message(F.text.in_(["📋 طلباتي", "📋 Orders"]))
@@ -135,8 +145,8 @@ async def show_precise_orders(message: Message):
 
     for order in orders:
         if order["status"] == "waiting_payment":
-            await _repair_waiting_payment_visibility(message, order, lang)
-            if order.get("customer_status_message_id"):
+            repaired = await _repair_waiting_payment_visibility(message, order, lang)
+            if not repaired:
                 prompt = (
                     f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
                     if lang == "ar" else
