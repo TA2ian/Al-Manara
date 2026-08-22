@@ -41,7 +41,6 @@ class FeedbackStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_rate = State()
-    waiting_admin_note = State()
     waiting_typing_txid = State()
     waiting_transfer_screenshot = State()
     waiting_broadcast = State()
