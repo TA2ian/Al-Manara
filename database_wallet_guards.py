@@ -106,6 +106,12 @@ async def install_order_wallet_guard(conn):
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'no enabled ShamCash payment method for order currency' USING ERRCODE='23514';
             END IF;
+            IF method_row.account_identifier IS NULL OR btrim(method_row.account_identifier) = '' THEN
+                RAISE EXCEPTION 'ShamCash payment account is not configured' USING ERRCODE='23514';
+            END IF;
+            IF method_row.qr_photo_id IS NULL OR btrim(method_row.qr_photo_id) = '' THEN
+                RAISE EXCEPTION 'ShamCash payment QR is not configured' USING ERRCODE='23514';
+            END IF;
             NEW.payment_method_code := method_row.code;
             NEW.payment_account_snapshot := method_row.account_identifier;
             NEW.payment_qr_photo_id := method_row.qr_photo_id;
