@@ -212,9 +212,9 @@ async def init_db():
             BEGIN
                 IF NEW.status IS DISTINCT FROM OLD.status THEN
                     IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR
-                            (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','expired')) OR
-                            (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed')) OR
-                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed','expired'))) THEN
+                            (OLD.status='waiting_payment' AND NEW.status IN ('pending','receipt_received','rejected','expired')) OR
+                            (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR
+                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed'))) THEN
                         RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001';
                     END IF;
                     INSERT INTO audit_logs (user_id, admin_id, action, details, previous_value, new_value, severity)
