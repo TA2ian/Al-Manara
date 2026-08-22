@@ -4,10 +4,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_admin_entry_points_are_admin_guarded():
+    # These are the authoritative admin entry-point policies currently
+    # registered by the dispatcher. Do not reference legacy/non-existent
+    # modules here: this test is about the actual production routing surface.
     for relative_path in (
         "handlers/admin_tools_policy.py",
         "handlers/admin_settings_policy.py",
-        "handlers/admin_payment_methods_policy.py",
         "handlers/admin_approval_policy.py",
         "handlers/admin_rejection_policy.py",
         "handlers/admin_payment_confirmation_policy.py",
