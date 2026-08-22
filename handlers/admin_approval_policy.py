@@ -120,16 +120,18 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     try:
         upload_text = (
             f"🔔 <b>تمت الموافقة على طلبك #{order['order_number']}</b>\n\n"
-            "✅ يمكنك الآن تنفيذ الدفع عبر بيانات ShamCash الظاهرة أعلاه.\n"
+            "تم تثبيت بيانات الدفع الخاصة بهذا الطلب. يمكنك الآن تنفيذ الدفع عبر بيانات ShamCash التي وصلتك في رسالة الدفع المنفصلة.\n"
             f"⏱ <b>مهلة الدفع: {Config.PAYMENT_TIMEOUT} دقيقة</b>\n\n"
-            "📎 <b>بعد إتمام الدفع، أرسل صورة إيصال التحويل من شام كاش عبر الزر أدناه.</b>\n"
-            "يجب أن يكون الإيصال واضحاً ويظهر المبلغ والتاريخ وبيانات العملية."
+            "📎 <b>بعد إتمام الدفع، أرسل إثبات العملية عبر الزر أدناه.</b>\n"
+            "يمكنك إرسال ملف الإثبات الذي تصدّره من شام كاش مباشرة، أو صورة إذا كانت متاحة.\n"
+            "سيتم إرسال الإثبات للمراجعة قبل تأكيد الدفع."
         ) if lang == "ar" else (
             f"🔔 <b>Your order #{order['order_number']} has been approved</b>\n\n"
-            "✅ You can now complete the payment using the ShamCash details shown above.\n"
+            "The payment details for this order are fixed. You can now complete the payment using the separate ShamCash payment message.\n"
             f"⏱ <b>Payment deadline: {Config.PAYMENT_TIMEOUT} minutes</b>\n\n"
-            "📎 <b>After payment, send the ShamCash receipt using the button below.</b>\n"
-            "Make sure the receipt clearly shows the amount, date, and transaction details."
+            "📎 <b>After payment, send the transaction proof using the button below.</b>\n"
+            "You can send the proof file exported from ShamCash directly, or an image if available.\n"
+            "The proof will be reviewed before payment is confirmed."
         )
         await bot.send_message(
             user_id,
@@ -138,14 +140,14 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             reply_markup=receipt_upload_keyboard(order_id, lang),
         )
     except Exception as exc:
-        logger.exception("Mandatory receipt prompt failed for %s: %s", order_id, exc)
+        logger.exception("Mandatory receipt prompt failed for %s", order_id)
         # The fallback remains in the customer's selected language and exposes
         # no technical exception details.
         try:
             fallback_text = (
-                f"📎 بعد إتمام الدفع، اضغط الزر أدناه وارفع إيصال الطلب #{order['order_number']}."
+                f"📎 بعد إتمام الدفع، اضغط الزر أدناه وارفع إثبات الطلب #{order['order_number']}."
                 if lang == "ar" else
-                f"📎 After completing the payment, use the button below to upload the receipt for order #{order['order_number']}."
+                f"📎 After completing the payment, use the button below to upload proof for order #{order['order_number']}."
             )
             await bot.send_message(
                 user_id,
@@ -166,20 +168,20 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"🌐 {order['network']}\n"
             f"💵 الإجمالي: {_format_money(order['total_amount'])} {order['payment_currency']}\n"
             f"⏱ المهلة: {Config.PAYMENT_TIMEOUT} دقيقة\n\n"
-            "📎 بانتظار إيصال العميل..."
+            "📎 بانتظار إثبات دفع العميل..."
         )
         await asyncio.gather(*[
             bot.send_message(admin_id, admin_update_text, parse_mode="HTML")
             for admin_id in Config.ADMIN_IDS
         ], return_exceptions=True)
     except Exception as exc:
-        logger.exception("Admin approval update failed for %s: %s", order_id, exc)
+        logger.exception("Admin approval update failed for %s", order_id)
 
     await state.clear()
     await callback.answer("✅ تمت الموافقة!")
     await callback.message.edit_text(
         f"✅ تمت الموافقة على طلب #{order['order_number']}\n\n"
-        "📎 تم إرسال بيانات الدفع وتعليمات رفع الإيصال للعميل.",
+        "📎 تم إرسال بيانات الدفع وتعليمات رفع إثبات الدفع للعميل.",
         parse_mode="HTML",
     )
     await callback.message.answer(
