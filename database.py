@@ -1,4 +1,3 @@
-"""Database initialization and compatibility migrations for Al-Manara."""
 import asyncpg
 import logging
 from config import Config
@@ -39,6 +38,7 @@ async def init_db():
                 payment_method_code TEXT, payment_account_snapshot TEXT, payment_qr_photo_id TEXT,
                 status TEXT DEFAULT 'pending', receipt_photo_id TEXT, receipt_upload_count INTEGER DEFAULT 0,
                 txid TEXT, admin_notes TEXT, customer_rating INTEGER, customer_comment TEXT,
+                customer_status_message_id BIGINT,
                 created_at TIMESTAMP DEFAULT NOW(), approved_at TIMESTAMP, payment_deadline TIMESTAMP,
                 completed_at TIMESTAMP
             )
@@ -99,6 +99,7 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method_code TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_status_message_id BIGINT")
         await conn.execute("ALTER TABLE exchange_rates ADD COLUMN IF NOT EXISTS rate_currency TEXT DEFAULT 'NEW.SYP'")
 
         await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
@@ -212,9 +213,9 @@ async def init_db():
             BEGIN
                 IF NEW.status IS DISTINCT FROM OLD.status THEN
                     IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR
-                            (OLD.status='waiting_payment' AND NEW.status IN ('pending','receipt_received','rejected','expired')) OR
+                            (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired')) OR
                             (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR
-                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed'))) THEN
+                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed','expired'))) THEN
                         RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001';
                     END IF;
                     INSERT INTO audit_logs (user_id, admin_id, action, details, previous_value, new_value, severity)
