@@ -18,6 +18,7 @@ def create_dispatcher() -> Dispatcher:
         active_order_policy,
         receipt_processing_policy,
         receipt_document_policy,
+        receipt_transition_policy,
         customer_orders_policy,
         my_orders,
         feedback,
@@ -63,6 +64,9 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(profile.router)
     dp.include_router(receipt_processing_policy.router)
     dp.include_router(receipt_document_policy.router)
+    # Retry/manual-review callbacks must precede their legacy equivalents so
+    # state changes go through order_state_service atomically.
+    dp.include_router(receipt_transition_policy.router)
     dp.include_router(customer_orders_policy.router)
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
