@@ -1,8 +1,4 @@
-"""Authoritative exchange-rate admin flow.
-
-Completes the FSM transaction in-place: after a successful update the
-input prompt is replaced by a confirmation screen and the FSM is cleared.
-"""
+"""Authoritative exchange-rate admin flow."""
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
@@ -35,7 +31,9 @@ async def _current_rate() -> Decimal:
     return await ExchangeService(pool).get_current_rate()
 
 
-async def _start_rate_input(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "setting_rate")
+@router.callback_query(F.data == "admin_update_rate")
+async def rate_settings_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -48,21 +46,14 @@ async def _start_rate_input(callback: CallbackQuery, state: FSMContext):
         reply_markup=_cancel_keyboard(),
         parse_mode="HTML",
     )
-    # Keep the prompt message ID so the transaction closes visually in-place.
     await state.update_data(rate_prompt_message_id=callback.message.message_id)
     await state.set_state(AdminStates.waiting_rate)
     await callback.answer()
 
 
-@router.callback_query(F.data == "setting_rate")
-@router.callback_query(F.data == "admin_update_rate")
-async def rate_settings_start(callback: CallbackQuery, state: FSMContext):
-    await _start_rate_input(callback, state)
-
-
 @router.message(AdminStates.waiting_rate)
 async def rate_settings_save(message: Message, state: FSMContext):
-    """Validate, persist, and immediately close the rate-input transaction."""
+    """Validate, persist, and immediately close the rate-input flow."""
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
@@ -90,15 +81,19 @@ async def rate_settings_save(message: Message, state: FSMContext):
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                await message.answer(
+                    "❌ سعر غير صالح. أرسل رقماً أكبر من صفر.",
+                    reply_markup=_cancel_keyboard(),
+                )
         else:
-            await message.answer("❌ سعر غير صالح. أرسل رقماً أكبر من صفر.", reply_markup=_cancel_keyboard())
+            await message.answer(
+                "❌ سعر غير صالح. أرسل رقماً أكبر من صفر.",
+                reply_markup=_cancel_keyboard(),
+            )
         return
 
     pool = await get_pool()
-    service = ExchangeService(pool)
-    success = await service.update_rate(value, message.from_user.id)
-
+    success = await ExchangeService(pool).update_rate(value, message.from_user.id)
     data = await state.get_data()
     prompt_id = data.get("rate_prompt_message_id")
     await state.clear()
@@ -108,27 +103,13 @@ async def rate_settings_save(message: Message, state: FSMContext):
             "❌ <b>تعذر تحديث سعر الصرف</b>\n\n"
             "لم يتم تغيير السعر. حاول مرة أخرى من لوحة التحكم."
         )
-        if prompt_id:
-            try:
-                await message.bot.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=prompt_id,
-                    text=text,
-                    reply_markup=admin_menu_keyboard(),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                await message.answer(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-        else:
-            await message.answer(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-        return
-
-    formatted = f"{value:,.8f}".rstrip("0").rstrip(".")
-    text = (
-        "✅ <b>تم تحديث سعر الصرف بنجاح</b>\n\n"
-        f"💱 1 USDT = <b>{formatted} NEW.SYP</b>\n\n"
-        "تم حفظ السعر وتطبيقه على عروض الأسعار الجديدة."
-    )
+    else:
+        # Exchange rates are displayed as monetary values with two decimals.
+        text = (
+            "✅ <b>تم تحديث سعر الصرف بنجاح</b>\n\n"
+            f"💱 1 USDT = <b>{value:,.2f} NEW.SYP</b>\n\n"
+            "تم حفظ السعر وتطبيقه على عروض الأسعار الجديدة."
+        )
 
     if prompt_id:
         try:
