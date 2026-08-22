@@ -2,7 +2,6 @@
 from aiogram import Router, F
 from aiogram.types import Message
 
-from config import Config
 from database import get_pool
 from keyboards.reply import compact_reply_keyboard
 
@@ -17,8 +16,12 @@ ACTIVE_STATUSES = (
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
-async def guide_active_order(message: Message):
-    """If a verified customer already has an active order, point to its tracker."""
+async def guide_active_order(message: Message, state=None):
+    """Guide active customers; otherwise delegate to the normal order flow."""
+    # The normal order handler must remain the source of truth for terms,
+    # blocking, verification and new-order initialization.
+    from handlers.order import start_order
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -27,9 +30,8 @@ async def guide_active_order(message: Message):
             message.from_user.id,
         )
 
-        # Do not interfere with the normal order handler for users who have not
-        # passed its prerequisites; it remains responsible for those messages.
         if not user or not user["terms_accepted"] or user["is_blocked"] or not user["is_verified"]:
+            await start_order(message, state)
             return
 
         active_order = await conn.fetchrow(
@@ -40,6 +42,7 @@ async def guide_active_order(message: Message):
         )
 
     if not active_order:
+        await start_order(message, state)
         return
 
     lang = user["language"] or "ar"
