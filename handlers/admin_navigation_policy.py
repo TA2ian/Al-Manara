@@ -100,8 +100,8 @@ async def financial_analytics(callback: CallbackQuery, state: FSMContext):
         "━━━ اليوم ━━━\n"
         f"📦 مكتمل: <b>{today['count']}</b>\n"
         f"💰 USDT: <b>{today['usdt']:,.2f}</b>\n"
-        f"💵 رسوم: <b>{today['fees']:,.2f}</b>\n\n"
-        "━━━ قيد التنفيذ ━━━\n"
+        f"💵 رسوم: <b>{today['fees']:,.2f}"
+        f"\n\n━━━ قيد التنفيذ ━━━\n"
         f"⏳ الطلبات النشطة: <b>{active['count']}</b>\n"
         f"💰 قيمتها: <b>{active['usdt']:,.2f} USDT</b>\n\n"
         "━━━ حسب عملة الدفع ━━━\n"
@@ -289,8 +289,79 @@ async def rate_settings_start(callback: CallbackQuery, state: FSMContext):
         reply_markup=_cancel_keyboard(),
         parse_mode="HTML",
     )
+    await state.update_data(admin_rate_prompt_message_id=callback.message.message_id)
     await state.set_state(AdminStates.waiting_rate)
     await callback.answer()
+
+
+@router.message(AdminStates.waiting_rate)
+async def rate_settings_save(message: Message, state: FSMContext):
+    """Save the exchange rate and immediately terminate the input flow."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        await message.answer("⛔ Access denied")
+        return
+
+    try:
+        new_rate = float((message.text or "").strip().replace(",", ""))
+        if new_rate <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(
+            "❌ سعر غير صالح. أرسل رقماً موجباً (مثال: 15000):",
+            reply_markup=_cancel_keyboard(),
+        )
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO exchange_rates (rate, updated_by) VALUES ($1, $2)",
+            new_rate,
+            message.from_user.id,
+        )
+
+    data = await state.get_data()
+    prompt_message_id = data.get("admin_rate_prompt_message_id")
+
+    # Clear the FSM before any UI transition so no later message is consumed by
+    # the old rate-entry state.
+    await state.clear()
+
+    # Replace the original input prompt instead of leaving a stale/blurred
+    # message open in the chat. This follows the system's edit-in-place pattern.
+    if prompt_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=prompt_message_id,
+                text=(
+                    f"✅ <b>تم تحديث سعر الصرف</b>\n\n"
+                    f"1 USDT = <b>{new_rate:,.0f} NEW.SYP</b>"
+                ),
+                reply_markup=admin_menu_keyboard(),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.warning("Could not replace exchange-rate prompt: %s", exc)
+            await message.answer(
+                f"✅ تم تحديث سعر الصرف: 1 USDT = {new_rate:,.0f} NEW.SYP",
+                reply_markup=admin_menu_keyboard(),
+                parse_mode="HTML",
+            )
+    else:
+        await message.answer(
+            f"✅ تم تحديث سعر الصرف: 1 USDT = {new_rate:,.0f} NEW.SYP",
+            reply_markup=admin_menu_keyboard(),
+            parse_mode="HTML",
+        )
+
+    # Remove the raw rate input from the admin chat when possible; the final
+    # result remains visible in the edited prompt above.
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "setting_timeout")
