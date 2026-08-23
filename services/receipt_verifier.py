@@ -154,7 +154,7 @@ class ReceiptVerifier:
         if date_match:
             result["date"] = date_match.group(1)
         sender_name_labels = r"اسم\s*المرسل|المرسل|sender|from"
-        recipient_name_labels = r"اسم\s*المستلم|المستلم|المستفيد|recipient|beneficiary|to"
+        recipient_name_labels = r"اسم\s*المستلم|اسم\s*المستفيد|المستلم|المستفيد|recipient|beneficiary|to"
         sender_account_labels = r"حساب\s*المرسل|رقم\s*المرسل|حساب\s*الدافع|sender\s*(?:account|id)|from\s*(?:account|id)"
         recipient_account_labels = r"حساب\s*المستلم|رقم\s*المستلم|حساب\s*المستفيد|recipient\s*(?:account|id)|beneficiary\s*(?:account|id)|to\s*(?:account|id)"
         amount_labels = r"المبلغ|القيمة|الإجمالي|المجموع|amount|total|payment|value"
