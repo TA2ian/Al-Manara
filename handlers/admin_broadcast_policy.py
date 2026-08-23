@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import Config
 from database import get_pool
+from keyboards.inline import admin_menu_keyboard
 from states import AdminStates
 
 router = Router()
@@ -41,7 +42,6 @@ def broadcast_start_keyboard() -> InlineKeyboardMarkup:
 async def _show_admin_menu(callback: CallbackQuery, state: FSMContext, notice: str | None = None):
     """Return to the admin menu and always terminate the broadcast FSM."""
     await state.clear()
-    from keyboards.inline import admin_menu_keyboard
     await callback.message.edit_text(
         notice or "⚙️ <b>لوحة التحكم</b>",
         parse_mode="HTML",
@@ -78,54 +78,34 @@ async def capture_broadcast(message: Message, state: FSMContext):
 
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ أرسل نصاً فعلياً للرسالة.")
+        await message.answer("❌ أرسل نص الإشعار أولاً.")
         return
     if len(text) > MAX_BROADCAST_LENGTH:
         await message.answer(f"❌ الرسالة طويلة جداً. الحد الأقصى {MAX_BROADCAST_LENGTH} حرف.")
         return
 
     await state.update_data(broadcast_text=text)
-    await state.set_state(AdminStates.waiting_broadcast_preview)
-
-    await message.answer(
-        "👁 <b>معاينة الإشعار</b>\n\n"
-        "━━━━━━━━━━━━━━\n"
-        f"{html.escape(text)}\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "⚠️ لم يتم الإرسال بعد. اختر إجراءً:",
-        parse_mode="HTML",
-        reply_markup=broadcast_preview_keyboard(),
+    await state.set_state(AdminStates.waiting_broadcast_confirm)
+    preview = (
+        "👁️ <b>معاينة الإشعار الجماعي</b>\n\n"
+        f"{html.escape(text)}\n\n"
+        "⚠️ لن يتم الإرسال حتى تضغط «إرسال للجميع»."
     )
+    await message.answer(preview, parse_mode="HTML", reply_markup=broadcast_preview_keyboard())
 
 
-@router.callback_query(AdminStates.waiting_broadcast_preview, F.data == "admin_broadcast_edit")
+@router.callback_query(F.data == "admin_broadcast_edit")
 async def edit_broadcast(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await state.set_state(AdminStates.waiting_broadcast)
     await callback.message.edit_text(
-        "✏️ <b>تعديل الإشعار</b>\n\nأرسل النص الجديد.\nلم يتم إرسال أي شيء حتى الآن.",
+        "✏️ <b>تعديل الإشعار</b>\n\nأرسل النص الجديد.",
         parse_mode="HTML",
         reply_markup=broadcast_start_keyboard(),
     )
     await callback.answer()
-
-
-@router.callback_query(AdminStates.waiting_broadcast, F.data == "admin_menu")
-async def back_from_broadcast_composer(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await _show_admin_menu(callback, state)
-
-
-@router.callback_query(AdminStates.waiting_broadcast_preview, F.data == "admin_menu")
-async def back_from_broadcast_preview(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await _show_admin_menu(callback, state)
 
 
 @router.callback_query(F.data == "admin_broadcast_cancel")
@@ -133,64 +113,39 @@ async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    await _show_admin_menu(callback, state, "❌ تم إلغاء الإشعار. لم يتم إرسال أي رسالة.")
+    await _show_admin_menu(callback, state, "❌ <b>تم إلغاء الإشعار الجماعي.</b>")
 
 
-@router.callback_query(AdminStates.waiting_broadcast_preview, F.data == "admin_broadcast_send")
+@router.callback_query(F.data == "admin_broadcast_send")
 async def send_broadcast(callback: CallbackQuery, state: FSMContext):
-    """Send the confirmed draft to eligible users and report delivery counts."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
     data = await state.get_data()
-    text = data.get("broadcast_text")
+    text = (data.get("broadcast_text") or "").strip()
     if not text:
-        await state.clear()
-        await callback.answer("❌ لا توجد رسالة جاهزة للإرسال", show_alert=True)
+        await _show_admin_menu(callback, state, "❌ لم توجد مسودة صالحة للإرسال.")
         return
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         users = await conn.fetch(
-            "SELECT telegram_id FROM users "
-            "WHERE terms_accepted = TRUE AND is_blocked = FALSE "
-            "ORDER BY id ASC"
+            "SELECT telegram_id FROM users WHERE terms_accepted = TRUE AND is_blocked = FALSE"
         )
 
-    await callback.message.edit_text(
-        f"📤 <b>جارٍ إرسال الإشعار...</b>\n\nالمستلمون: {len(users)}\n\n"
-        "لا تغلق المحادثة حتى تظهر النتيجة.",
-        parse_mode="HTML",
-    )
-    await callback.answer("📤 بدأ الإرسال")
-
-    sent = 0
-    failed = 0
-    bot = callback.bot
+    bot = callback.message.bot
+    sent = failed = 0
     for user in users:
         try:
             await bot.send_message(user["telegram_id"], text)
             sent += 1
-        except Exception as exc:
+        except Exception:
             failed += 1
-            logger.warning("Broadcast delivery failed for %s: %s", user["telegram_id"], exc)
         await asyncio.sleep(BROADCAST_DELAY_SECONDS)
-
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO audit_logs (admin_id, action, details, severity) "
-            "VALUES ($1, 'broadcast_sent', $2, $3)",
-            callback.from_user.id,
-            f"recipients={len(users)};sent={sent};failed={failed}",
-            "info" if failed == 0 else "warning",
-        )
 
     await _show_admin_menu(
         callback,
         state,
-        "✅ <b>اكتمل الإرسال</b>\n\n"
-        f"👥 المستهدفون: <b>{len(users)}</b>\n"
-        f"📤 تم الإرسال: <b>{sent}</b>\n"
-        f"⚠️ فشل: <b>{failed}</b>",
+        f"📨 <b>اكتمل الإرسال الجماعي</b>\n\n✅ تم الإرسال: <b>{sent}</b>\n❌ فشل: <b>{failed}</b>\n📊 الإجمالي: <b>{len(users)}</b>",
     )
