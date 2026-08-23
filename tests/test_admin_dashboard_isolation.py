@@ -3,8 +3,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# These handlers are executed while an admin is processing a user/order flow.
-# The dashboard must never be pushed back automatically after an action.
 FLOW_HANDLERS = (
     "handlers/admin_approval_policy.py",
     "handlers/admin_rejection_policy.py",
@@ -31,4 +29,5 @@ def test_dashboard_keyboard_is_only_a_controlled_navigation_target():
 
 def test_admin_entry_owns_dashboard_message_creation():
     entry = (ROOT / "handlers/admin_entry.py").read_text(encoding="utf-8")
-    assert "reply_markup=admin_menu_keyboard()" in entry
+    assert "reply_markup=enhanced_admin_menu_keyboard()" in entry
+    assert "reply_markup=admin_menu_keyboard()" not in entry
