@@ -32,7 +32,10 @@ def test_admin_policies_are_registered_directly():
         assert f"dp.include_router({router_name}.router)" in source
 
 
-def test_admin_menu_callback_has_one_authoritative_runtime_owner():
+def test_admin_dashboard_always_uses_payment_methods_keyboard():
+    entry_source = (ROOT / "handlers" / "admin_entry.py").read_text(encoding="utf-8")
     payment_source = (ROOT / "handlers" / "payment_methods.py").read_text(encoding="utf-8")
+    assert "from handlers.payment_methods import enhanced_admin_menu_keyboard" in entry_source
+    assert "reply_markup=enhanced_admin_menu_keyboard()" in entry_source
     assert '@router.callback_query(F.data == "admin_menu")' in payment_source
     assert "enhanced_admin_menu_keyboard" in payment_source
