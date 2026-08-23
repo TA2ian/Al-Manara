@@ -1,0 +1,19 @@
+"""Regression coverage for canonical ShamCash payment-method storage."""
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_database_migrates_legacy_syp_method_into_canonical_new_syp():
+    source = (ROOT / "database.py").read_text(encoding="utf-8")
+    assert "code = 'shamcash_syp'" in source
+    assert "code = 'shamcash_new_syp'" in source
+    assert "DELETE FROM payment_methods WHERE id = $1" in source
+
+
+def test_database_keeps_only_canonical_payment_method_codes_for_shamcash():
+    source = (ROOT / "database.py").read_text(encoding="utf-8")
+    assert "shamcash_usd" in source
+    assert "shamcash_new_syp" in source
+    assert "currency = 'SYP'" not in source
