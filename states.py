@@ -44,8 +44,6 @@ class AdminStates(StatesGroup):
     waiting_transfer_screenshot = State()
     waiting_broadcast = State()
     waiting_broadcast_preview = State()
-    waiting_shamcash_usd = State()
-    waiting_shamcash_syp = State()
     waiting_min_order = State()
     waiting_max_order = State()
     waiting_daily_limit = State()
@@ -54,4 +52,3 @@ class AdminStates(StatesGroup):
     waiting_search = State()
     waiting_timeout = State()
     waiting_note_text = State()
-    waiting_shamcash_name = State()
