@@ -9,6 +9,7 @@ from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
 from services.legal_policy import get_terms_text
 from database import get_pool
+from config import Config
 
 router = Router()
 
