@@ -1,10 +1,11 @@
-"""Static checks for accidental duplicate callback handlers."""
+"""Static checks for accidental duplicate callback and infrastructure handlers."""
 
 import re
 from pathlib import Path
 
 
-HANDLERS_DIR = Path(__file__).resolve().parents[1] / "handlers"
+ROOT = Path(__file__).resolve().parents[1]
+HANDLERS_DIR = ROOT / "handlers"
 CALLBACK_RE = re.compile(r"@router\.callback_query\((.*?)\)", re.DOTALL)
 
 
@@ -30,7 +31,6 @@ def test_no_exact_duplicate_callback_decorators_across_handlers():
 
 
 def test_retired_compatibility_modules_are_absent():
-    root = HANDLERS_DIR.parent
     for relative_path in (
         "handlers/order.py",
         "handlers/menu.py",
@@ -39,4 +39,12 @@ def test_retired_compatibility_modules_are_absent():
         "handlers/legacy_wallet_guard.py",
         "services/order_wallet_guard.py",
     ):
-        assert not (root / relative_path).exists()
+        assert not (ROOT / relative_path).exists()
+
+
+def test_payment_snapshot_trigger_has_one_authority():
+    database_source = (ROOT / "database.py").read_text(encoding="utf-8")
+    guard_source = (ROOT / "database_wallet_guards.py").read_text(encoding="utf-8")
+    assert "CREATE OR REPLACE FUNCTION snapshot_order_payment_method" not in database_source
+    assert "CREATE OR REPLACE FUNCTION snapshot_order_payment_method" in guard_source
+    assert "install_order_wallet_guard(conn)" in database_source
