@@ -49,6 +49,7 @@ class AdminStates(StatesGroup):
     waiting_shamcash_syp = State()
     waiting_min_order = State()
     waiting_max_order = State()
+    waiting_daily_limit = State()
     waiting_fee_percent = State()
     waiting_fee_fixed = State()
     waiting_search = State()
