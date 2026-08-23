@@ -1,5 +1,6 @@
 """Customer wallet registry: verify, label, lock, and delete addresses."""
 import io
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -82,10 +83,26 @@ async def wallet_add(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
     await state.set_state(WalletStates.waiting_address)
-    await callback.message.edit_text(
-        "➕ <b>إضافة عنوان استلام</b>\n\nأرسل عنوان BEP20 أو TRC20.\n\n🔒 بعد التحقق لا يمكن تعديل العنوان. التغيير يكون بالحذف ثم إضافة عنوان جديد.\n📸 مطابقة QR مع العنوان مطلوبة للتحقق الكامل. يمكن طلب تخطيها فقط بعد قراءة تنبيه المسؤولية." if lang == "ar" else
-        "➕ <b>Add receiving address</b>\n\nSend a BEP20 or TRC20 address.\n\n🔒 A verified address cannot be edited. Changes require delete + add.\n📸 QR/address matching is required for full verification. Skipping is available only after reading the responsibility warning.",
-        parse_mode="HTML")
+    text = (
+        "➕ <b>إضافة محفظة استلام</b>\n\n"
+        "📌 <b>ما الذي يحدث عند إرسال العنوان؟</b>\n"
+        "• أرسل عنوان USDT على شبكة <b>BEP20</b> أو <b>TRC20</b>.\n"
+        "• لن يتم حفظ العنوان بمجرد إرساله؛ سيتحقق البوت أولاً من صحة العنوان ويتعرف على الشبكة تلقائياً.\n"
+        "• بعد قبول العنوان، سيطلب منك إرسال <b>QR لنفس العنوان</b> ومطابقته معه.\n"
+        "• بعد نجاح مطابقة QR، سيطلب منك اسمًا للعنوان ثم يُحفظ كعنوان <b>موثق</b> ويمكن استخدامه لاحقاً.\n\n"
+        "🔒 <b>العنوان الموثق لا يمكن تعديله.</b> إذا أردت تغييره، احذف العنوان الحالي ثم أضف العنوان الجديد.\n"
+        "⚠️ أثناء إنشاء طلب شراء، يجب إكمال تحقق QR المطابق ولا يمكن تخطيه."
+    ) if lang == "ar" else (
+        "➕ <b>Add receiving wallet</b>\n\n"
+        "📌 <b>What happens after you send the address?</b>\n"
+        "• Send a USDT address on <b>BEP20</b> or <b>TRC20</b>.\n"
+        "• The address is not saved immediately; the bot first validates it and detects the network automatically.\n"
+        "• After the address is accepted, you will be asked for a <b>QR of the same address</b> and it will be matched against it.\n"
+        "• After a successful QR match, you will choose a label and the address will be saved as <b>verified</b> for future use.\n\n"
+        "🔒 <b>A verified address cannot be edited.</b> Delete it and add a new address if you need to change it.\n"
+        "⚠️ During order creation, matching QR verification must be completed and cannot be skipped."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML")
     await callback.answer()
 
 
@@ -103,10 +120,10 @@ async def wallet_address(message: Message, state: FSMContext):
     await state.update_data(wallet_address=address, network=network)
     await state.set_state(WalletStates.waiting_qr)
     await message.answer(
-        "📸 <b>الخطوة الأخيرة للتحقق من المحفظة</b>\n\nأرسل صورة QR لنفس عنوان الاستلام.\n\n🔐 مطابقة QR مع العنوان تساعدنا على تقليل أخطاء النسخ والتحقق من العنوان قبل استخدامه في الطلب.\n\nإذا لم ترسل QR، سيظهر لك تنبيه يوضح مسؤوليتك قبل أن تتمكن من تأكيد التخطي." if lang == "ar" and not data.get("return_to_order") else
-        "📸 <b>الخطوة الأخيرة للتحقق من المحفظة</b>\n\nأرسل صورة QR لنفس عنوان الاستلام.\n\n🔐 مطابقة QR مع العنوان تساعدنا على تقليل أخطاء النسخ والتحقق من العنوان قبل استخدامه في الطلب.\n\n🔒 أثناء إنشاء الطلب يجب إرسال QR المطابق؛ لا يمكن تخطي التحقق." if lang == "ar" else
-        "📸 <b>Final wallet verification step</b>\n\nSend a QR image for the same receiving address.\n\n🔐 Matching the QR to the address helps reduce copying errors and verify the address before it is used in an order.\n\nIf you do not send QR, you will see a responsibility warning before you can confirm the skip." if not data.get("return_to_order") else
-        "📸 <b>Final wallet verification step</b>\n\nSend a QR image for the same receiving address.\n\n🔐 The QR must match the entered address before the wallet can be used for this order.\n\n🔒 QR verification cannot be skipped during order creation.",
+        "📸 <b>الخطوة الأخيرة للتحقق من المحفظة</b>\n\nأرسل صورة QR لنفس عنوان الاستلام.\n\n🔐 سيستخرج البوت العنوان من QR ويقارنه حرفياً بالعنوان الذي أرسلته. لا يتم قبول QR لعنوان مختلف.\n\nإذا لم ترسل QR، سيظهر لك تنبيه يوضح مسؤوليتك قبل أن تتمكن من تأكيد التخطي." if lang == "ar" and not data.get("return_to_order") else
+        "📸 <b>الخطوة الأخيرة للتحقق من المحفظة</b>\n\nأرسل صورة QR لنفس عنوان الاستلام.\n\n🔐 سيستخرج البوت العنوان من QR ويقارنه بالعنوان الذي أرسلته. لا يتم قبول QR لعنوان مختلف.\n\n🔒 أثناء إنشاء الطلب يجب إرسال QR المطابق؛ لا يمكن تخطي التحقق." if lang == "ar" else
+        "📸 <b>Final wallet verification step</b>\n\nSend a QR image for the same receiving address.\n\n🔐 The bot extracts the address from the QR and compares it with the address you entered. A QR for a different address is not accepted.\n\nIf you do not send QR, you will see a responsibility warning before you can confirm the skip." if not data.get("return_to_order") else
+        "📸 <b>Final wallet verification step</b>\n\nSend a QR image for the same receiving address.\n\n🔐 The bot extracts the address from the QR and compares it with the address you entered. A QR for a different address is not accepted.\n\n🔒 QR verification cannot be skipped during order creation.",
         reply_markup=_qr_prompt_keyboard(lang, allow_skip=not data.get("return_to_order")),
         parse_mode="HTML"
     )
@@ -130,10 +147,7 @@ async def wallet_qr_skip_prompt(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
     if data.get("return_to_order"):
-        await callback.answer(
-            "❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.",
-            show_alert=True,
-        )
+        await callback.answer("❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.", show_alert=True)
         return
     text = (
         "⚠️ <b>تنبيه مهم قبل تخطي QR</b>\n\n"
@@ -158,16 +172,12 @@ async def wallet_qr_skip_confirm(callback: CallbackQuery, state: FSMContext):
     lang = (user["language"] or "ar") if user else "ar"
     data = await state.get_data()
     if data.get("return_to_order"):
-        await callback.answer(
-            "❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.",
-            show_alert=True,
-        )
+        await callback.answer("❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.", show_alert=True)
         return
     await callback.message.edit_text(
         "⚠️ تم تأكيد التخطي، لكن لم يتم حفظ المحفظة في محافظي لأنها غير موثقة بـQR. إذا أردت حفظها وإعادة استخدامها، أعد الإضافة وأرسل QR المطابق." if lang == "ar" else
         "⚠️ Skip confirmed, but the wallet was not saved to My Wallets because it is not fully verified with a QR. To save and reuse it, add it again and provide the matching QR.",
-        reply_markup=_menu(lang),
-        parse_mode="HTML"
+        reply_markup=_menu(lang), parse_mode="HTML"
     )
     await state.clear()
     await callback.answer()
@@ -220,8 +230,7 @@ async def wallet_qr_required(message: Message):
     await message.answer(
         "📸 أرسل صورة QR لنفس العنوان، أو استخدم زر <b>تأكيد التخطي</b> بعد قراءة تنبيه المسؤولية." if lang == "ar" else
         "📸 Send the QR image for the same address, or use <b>Confirm skip</b> after reading the responsibility warning.",
-        reply_markup=_qr_prompt_keyboard(lang),
-        parse_mode="HTML"
+        reply_markup=_qr_prompt_keyboard(lang), parse_mode="HTML"
     )
 
 
@@ -253,16 +262,7 @@ async def wallet_label(message: Message, state: FSMContext):
         """, user["id"], data["wallet_address"], data["network"], label, data["wallet_qr_photo_id"])
 
     return_to_order = bool(data.get("return_to_order"))
-    order_context = {
-        key: data.get(key)
-        for key in (
-            "amount_usdt",
-            "order_amount_usdt",
-            "calculation",
-            "payment_currency",
-        )
-        if data.get(key) is not None
-    }
+    order_context = {key: data.get(key) for key in ("amount_usdt", "order_amount_usdt", "calculation", "payment_currency") if data.get(key) is not None}
     await state.clear()
 
     if return_to_order:
@@ -276,10 +276,7 @@ async def wallet_label(message: Message, state: FSMContext):
             address_from_saved=False,
             wallet_qr_skipped=False,
         )
-        await message.answer(
-            "✅ تم حفظ المحفظة وQR وتوثيقهما. سيتم استخدامهما تلقائياً في هذا الطلب والطلبات القادمة." if lang == "ar" else
-            "✅ The wallet and QR were saved and verified. They will be used automatically for this and future orders."
-        )
+        await message.answer("✅ تم حفظ المحفظة وQR وتوثيقهما. سيتم استخدامهما تلقائياً في هذا الطلب والطلبات القادمة." if lang == "ar" else "✅ The wallet and QR were saved and verified. They will be used automatically for this and future orders.")
         from handlers.order_wallet_policy import _continue_to_currency
         await _continue_to_currency(message, state, lang)
         return
