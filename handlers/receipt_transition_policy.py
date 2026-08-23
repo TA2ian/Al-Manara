@@ -1,15 +1,15 @@
 """Safe receipt retry and manual-review callbacks."""
 import logging
 
-from aiogram import Bot, Router, F
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from states import ReceiptStates
 from services.order_state_service import InvalidOrderTransition, transition_order
-from handlers.my_orders import _notify_admins_receipt
+from services.receipt_service import notify_admins_receipt
+from states import ReceiptStates
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -58,7 +58,7 @@ async def retry_receipt(callback: CallbackQuery, state: FSMContext):
     try:
         await callback.message.delete()
     except Exception:
-        pass
+        logger.debug("Could not delete receipt retry prompt", exc_info=True)
     await callback.message.answer(prompt)
     await state.set_state(ReceiptStates.waiting_receipt)
     await callback.answer()
@@ -111,7 +111,7 @@ async def manual_review(callback: CallbackQuery, state: FSMContext):
             "Please wait while the payment is reviewed.",
             parse_mode="HTML",
         )
-        await _notify_admins_receipt(
+        await notify_admins_receipt(
             bot=bot,
             order=dict(updated),
             photo_id=order["receipt_photo_id"] or "",
