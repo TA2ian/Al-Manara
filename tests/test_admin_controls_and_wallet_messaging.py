@@ -25,17 +25,23 @@ def test_customer_search_exposes_delete_action_and_execute_path():
     assert "action, details, severity" in source
 
 
-def test_order_rejection_is_exposed_for_all_rejectable_active_states():
-    for status in ("pending", "waiting_payment", "receipt_received", "payment_confirmed"):
+def test_order_rejection_is_exposed_only_for_rejectable_active_states():
+    for status in ("pending", "waiting_payment", "receipt_received"):
         callbacks = _callbacks(order_admin_keyboard(123, status))
         assert "admin_reject_123" in callbacks
 
+    payment_confirmed_callbacks = _callbacks(order_admin_keyboard(123, "payment_confirmed"))
+    assert "admin_reject_123" not in payment_confirmed_callbacks
+    assert "admin_send_usdt_123" in payment_confirmed_callbacks
 
-def test_order_rejection_uses_authoritative_transition():
+
+def test_order_rejection_uses_authoritative_transition_and_preserves_wallet_snapshot():
     source = inspect.getsource(admin_rejection_policy.reject_order)
     assert "transition_order" in source
     assert '"rejected"' in source
     assert "admin_id=callback.from_user.id" in source
+    assert '"receipt_photo_id": None' in source
+    assert '"wallet_qr_photo_id": None' not in source
 
 
 def test_wallet_add_message_describes_all_supported_inputs_and_matching():
