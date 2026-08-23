@@ -18,7 +18,8 @@ def test_new_user_terms_acceptance_sets_not_verified():
 
 
 def test_verification_submission_still_notifies_admins():
-    source = (ROOT / "handlers/verification.py").read_text(encoding="utf-8")
+    source = (ROOT / "handlers/verification_policy.py").read_text(encoding="utf-8")
     assert "verification_status='pending'" in source
     assert "for admin_id in Config.ADMIN_IDS" in source
     assert "طلب توثيق جديد" in source
+    assert "shamcash_address_from_qr=true" in source
