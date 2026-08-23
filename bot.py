@@ -25,6 +25,7 @@ def create_dispatcher() -> Dispatcher:
         admin_broadcast_policy,
         verification_admin_policy,
         verification_pending_policy,
+        verification_policy,
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
@@ -38,7 +39,6 @@ def create_dispatcher() -> Dispatcher:
         admin_maintenance_policy,
         admin_settings_policy,
         payment_methods,
-        verification,
         language_policy,
         customer_navigation_policy,
         customer_settings_policy,
@@ -95,7 +95,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_settings_policy.router)
 
     dp.include_router(verification_pending_policy.router)
-    dp.include_router(verification.router)
+    dp.include_router(verification_policy.router)
     dp.include_router(language_policy.router)
     dp.include_router(customer_navigation_policy.router)
     dp.include_router(customer_settings_policy.router)
