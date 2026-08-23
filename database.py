@@ -6,6 +6,7 @@ from database_wallet_guards import install_order_wallet_guard
 logger = logging.getLogger(__name__)
 _pool = None
 
+
 async def init_db():
     """Initialize database connection pool and apply additive schema changes."""
     global _pool
@@ -114,6 +115,42 @@ async def init_db():
             await conn.execute("UPDATE exchange_rates SET rate = rate / 100, rate_currency = 'NEW.SYP' WHERE rate > 1000")
             await conn.execute("UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() WHERE currency = 'SYP'")
             await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v1', 'done')")
+
+        legacy_method = await conn.fetchrow(
+            """SELECT id, account_identifier, qr_photo_id, enabled
+               FROM payment_methods
+              WHERE provider = 'ShamCash' AND code = 'shamcash_syp'
+              LIMIT 1"""
+        )
+        canonical_syp = await conn.fetchrow(
+            """SELECT id, account_identifier, qr_photo_id
+               FROM payment_methods
+              WHERE provider = 'ShamCash' AND code = 'shamcash_new_syp'
+              LIMIT 1"""
+        )
+        if legacy_method:
+            if canonical_syp:
+                if not canonical_syp["account_identifier"] and legacy_method["account_identifier"]:
+                    await conn.execute(
+                        "UPDATE payment_methods SET account_identifier = $1, updated_at = NOW() WHERE id = $2",
+                        legacy_method["account_identifier"],
+                        canonical_syp["id"],
+                    )
+                if not canonical_syp["qr_photo_id"] and legacy_method["qr_photo_id"]:
+                    await conn.execute(
+                        "UPDATE payment_methods SET qr_photo_id = $1, updated_at = NOW() WHERE id = $2",
+                        legacy_method["qr_photo_id"],
+                        canonical_syp["id"],
+                    )
+                await conn.execute("DELETE FROM payment_methods WHERE id = $1", legacy_method["id"])
+            else:
+                await conn.execute(
+                    """UPDATE payment_methods
+                          SET code = 'shamcash_new_syp', currency = 'NEW.SYP',
+                              display_name = 'ShamCash الليرة السورية الجديدة', updated_at = NOW()
+                        WHERE id = $1""",
+                    legacy_method["id"],
+                )
 
         await conn.execute("""INSERT INTO payment_methods
             (code, provider, currency, display_name, account_identifier, enabled)
@@ -230,8 +267,10 @@ async def init_db():
         if count == 0:
             await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", "150.00", 0)
 
+
 async def get_pool():
     return _pool
+
 
 async def close_db():
     global _pool
