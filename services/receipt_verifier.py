@@ -1,25 +1,46 @@
 """OCR-based ShamCash receipt verification."""
+import asyncio
 import io
 import logging
 import re
 from datetime import datetime
 
-from PIL import Image
+from PIL import Image, ImageOps
 import pytesseract
 
 from services.formatters import money
 
 logger = logging.getLogger(__name__)
+OCR_TIMEOUT_SECONDS = 20
+OCR_MAX_DIMENSION = 1800
 
 
 class ReceiptVerifier:
     """Analyze receipts and calculate a review confidence score."""
 
     @staticmethod
+    def _ocr_sync(image_bytes: bytes) -> str:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image = ImageOps.exif_transpose(image)
+        image.thumbnail((OCR_MAX_DIMENSION, OCR_MAX_DIMENSION), Image.Resampling.LANCZOS)
+        grayscale = ImageOps.grayscale(image)
+        grayscale = ImageOps.autocontrast(grayscale)
+        return pytesseract.image_to_string(
+            grayscale,
+            lang="ara+eng",
+            config="--psm 6 --oem 3",
+            timeout=OCR_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    async def _ocr(image_bytes: bytes) -> str:
+        """Run CPU-bound Tesseract work outside the asyncio event loop."""
+        return await asyncio.to_thread(ReceiptVerifier._ocr_sync, image_bytes)
+
+    @staticmethod
     async def analyze_receipt(image_bytes: bytes, expected_amount: float) -> dict:
         try:
-            image = Image.open(io.BytesIO(image_bytes))
-            text = pytesseract.image_to_string(image, lang="ara+eng", config="--psm 6 --oem 3")
+            text = await ReceiptVerifier._ocr(image_bytes)
             amounts = ReceiptVerifier._extract_amounts(text)
             has_text = bool(text.strip())
             tolerance = float(expected_amount) * 0.02
@@ -68,8 +89,7 @@ class ReceiptVerifier:
     async def verify_shamcash_receipt(image_bytes: bytes, order_date: datetime, customer_name: str, customer_shamcash_account: str, admin_name: str, admin_shamcash_account: str, expected_amount: float, payment_currency: str = "USD") -> dict:
         """Compare receipt date, identities, accounts and amount without auto-completing payment."""
         try:
-            image = Image.open(io.BytesIO(image_bytes))
-            text = pytesseract.image_to_string(image, lang="ara+eng", config="--psm 6 --oem 3")
+            text = await ReceiptVerifier._ocr(image_bytes)
             extracted = ReceiptVerifier._extract_shamcash_fields(text)
             expected_date = order_date.strftime("%Y-%m-%d") if order_date else ""
             matches = {
