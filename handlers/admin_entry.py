@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from config import Config
-from keyboards.inline import admin_menu_keyboard
+from handlers.payment_methods import enhanced_admin_menu_keyboard
 
 router = Router()
 
@@ -12,7 +12,7 @@ router = Router()
 async def _send_admin_menu(message: Message) -> None:
     await message.answer(
         "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
-        reply_markup=admin_menu_keyboard(),
+        reply_markup=enhanced_admin_menu_keyboard(),
         parse_mode="HTML",
     )
 
