@@ -23,7 +23,7 @@ def test_payment_method_admin_updates_are_audited_and_persisted():
 
 
 def test_order_payment_snapshot_is_captured_from_enabled_shamcash_method():
-    source = (ROOT / "database_wallet_guards.py").read_text(encoding="utf-8")
+    source = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
     assert "snapshot_order_payment_method" in source
     assert "provider='ShamCash'" in source
     assert "enabled=TRUE" in source
