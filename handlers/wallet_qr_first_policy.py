@@ -8,15 +8,18 @@ If Telegram provides a caption with the QR image, it is treated as an
 independent address input and must match the decoded QR address.
 """
 import io
+import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from PIL import Image
 
+from services.media_security import validate_image_payload
 from services.wallet_validator import WalletValidator
 from states import WalletStates
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -53,14 +56,33 @@ async def wallet_qr_first(message: Message, state: FSMContext):
     """Decode a QR-first wallet registration and continue to label entry."""
     lang = await _lang(message.from_user.id)
     raw = io.BytesIO()
-    await message.bot.download(file=message.photo[-1].file_id, destination=raw)
-    raw.seek(0)
+
+    try:
+        await message.bot.download(file=message.photo[-1].file_id, destination=raw)
+        payload = raw.getvalue()
+        validate_image_payload(payload, file_name="telegram-photo")
+    except ValueError:
+        await message.answer(
+            "❌ صورة QR غير صالحة أو غير آمنة. أرسل صورة QR واضحة بصيغة مدعومة."
+            if lang == "ar" else
+            "❌ The QR image is invalid or unsafe. Send a clear QR image in a supported format."
+        )
+        return
+    except Exception:
+        logger.exception("Failed to download or validate wallet QR")
+        await message.answer(
+            "❌ تعذر معالجة صورة QR. أعد إرسالها من فضلك."
+            if lang == "ar" else
+            "❌ The QR image could not be processed. Please send it again."
+        )
+        return
 
     try:
         from pyzbar.pyzbar import decode as qr_decode
-        decoded = qr_decode(Image.open(raw))
-        qr_text = decoded[0].data.decode("utf-8").strip() if decoded else ""
+        decoded = qr_decode(Image.open(io.BytesIO(payload)))
+        qr_text = decoded[0].data.decode("utf-8", errors="strict").strip() if decoded else ""
     except Exception:
+        logger.exception("Failed to decode wallet QR")
         qr_text = ""
 
     qr_address = _normalize_qr_value(qr_text)
