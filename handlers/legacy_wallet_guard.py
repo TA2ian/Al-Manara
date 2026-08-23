@@ -1,4 +1,4 @@
-"""Safety guard for stale per-order wallet QR FSM sessions.
+"""Legacy safety guard for stale per-order wallet QR FSM sessions.
 
 Wallet registration now belongs to the verified wallet registry. This router
 runs before the retired per-order QR flow so users who still have an old
