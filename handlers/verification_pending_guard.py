@@ -40,20 +40,32 @@ async def block_duplicate_verification_start(callback: CallbackQuery, state: FSM
     if status == "pending":
         await state.clear()
         await callback.answer(
-            "⏳ لديك طلب توثيق قيد المراجعة بالفعل. لا يمكنك إرسال طلب توثيق جديد حتى تنتهي الإدارة من مراجعة الطلب الحالي."
+            "⏳ <b>طلب التوثيق قيد المراجعة</b>\n\n"
+            "تم استلام بياناتك بالفعل وهي الآن لدى الإدارة للمراجعة.\n"
+            "لا تحتاج إلى إعادة إرسال أي بيانات أو إنشاء طلب توثيق جديد.\n\n"
+            "🔒 لحماية حسابك ومنع تكرار الطلبات، لن يسمح النظام بإرسال طلب توثيق آخر حتى تنتهي مراجعة الطلب الحالي.\n\n"
+            "📩 سيتم إبلاغك عند اعتماد الحساب أو رفض الطلب."
             if lang == "ar" else
-            "⏳ You already have a verification request under review. You cannot submit another request until the current review is completed.",
+            "⏳ <b>Verification is under review</b>\n\n"
+            "Your verification details have already been received and are now being reviewed by the admin team.\n"
+            "You do not need to resend any information or create another verification request.\n\n"
+            "🔒 To protect your account and prevent duplicate requests, another verification request cannot be submitted until the current review is completed.\n\n"
+            "📩 You will be notified when your account is approved or your request is rejected.",
             show_alert=True,
+            parse_mode="HTML",
         )
         return
 
     if user["is_verified"] or status == "approved":
         await state.clear()
         await callback.answer(
-            "✅ حسابك موثق بالفعل. لا تحتاج إلى إرسال طلب توثيق جديد."
+            "✅ حسابك موثق بالفعل. لا تحتاج إلى إرسال طلب توثيق جديد.\n\n"
+            "يمكنك الآن استخدام الخدمات المتاحة لحسابك."
             if lang == "ar" else
-            "✅ Your account is already verified. You do not need to submit another verification request.",
+            "✅ Your account is already verified. You do not need to submit a new verification request.\n\n"
+            "You can now use the services available to your account.",
             show_alert=True,
+            parse_mode="HTML",
         )
         return
 
@@ -74,9 +86,16 @@ async def guard_verification_qr_submission(message: Message, state: FSMContext):
     if status == "pending":
         await state.clear()
         await message.answer(
-            "⏳ تم إرسال طلب التوثيق بالفعل وهو قيد المراجعة. لا يمكن إرسال طلب توثيق ثانٍ قبل انتهاء المراجعة."
+            "⏳ <b>تم استلام طلب التوثيق</b>\n\n"
+            "طلبك الحالي قيد المراجعة لدى الإدارة، لذلك لا حاجة لإرسال صورة QR أو أي بيانات مرة أخرى.\n\n"
+            "🔒 تم منع إنشاء طلب توثيق ثانٍ حتى تنتهي مراجعة الطلب الحالي.\n\n"
+            "📩 سنبلغك بالنتيجة عند انتهاء المراجعة."
             if lang == "ar" else
-            "⏳ Your verification request has already been submitted and is under review. A second request cannot be submitted before the review is completed."
+            "⏳ <b>Verification request already received</b>\n\n"
+            "Your current request is under admin review, so there is no need to send the QR image or any information again.\n\n"
+            "🔒 A second verification request is blocked until the current review is completed.\n\n"
+            "📩 We will notify you when the review is complete.",
+            parse_mode="HTML",
         )
         return
 
