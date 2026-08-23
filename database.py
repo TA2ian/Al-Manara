@@ -196,34 +196,6 @@ async def init_db():
             FOR EACH ROW EXECUTE FUNCTION protect_verified_wallet()""")
 
         await conn.execute("""
-            CREATE OR REPLACE FUNCTION snapshot_order_payment_method()
-            RETURNS TRIGGER AS $$
-            DECLARE method_row RECORD;
-            BEGIN
-                IF NEW.payment_currency = 'SYP' THEN NEW.payment_currency := 'NEW.SYP'; END IF;
-                IF NEW.payment_currency IN ('USD', 'NEW.SYP') AND NEW.payment_method_code IS NULL THEN
-                    SELECT code, account_identifier, qr_photo_id INTO method_row
-                    FROM payment_methods
-                    WHERE provider = 'ShamCash'
-                      AND currency = NEW.payment_currency
-                      AND code IN ('shamcash_usd', 'shamcash_new_syp')
-                      AND enabled = TRUE
-                    ORDER BY id ASC LIMIT 1;
-                    IF FOUND THEN
-                        NEW.payment_method_code := method_row.code;
-                        NEW.payment_account_snapshot := method_row.account_identifier;
-                        NEW.payment_qr_photo_id := method_row.qr_photo_id;
-                    END IF;
-                END IF;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
-        await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_payment_method ON orders")
-        await conn.execute("""CREATE TRIGGER trg_snapshot_order_payment_method
-            BEFORE INSERT ON orders FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()""")
-
-        await conn.execute("""
             CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
             RETURNS TRIGGER AS $$
             BEGIN
