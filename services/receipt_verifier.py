@@ -44,6 +44,39 @@ class ReceiptVerifier:
             logger.info("receipt_ocr_completed elapsed_seconds=%.3f bytes=%d", elapsed, len(image_bytes))
 
     @staticmethod
+    def _normalize_ocr_text(text: str) -> str:
+        """Normalize OCR output without changing semantic receipt content."""
+        if not text:
+            return ""
+        translation = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+        text = text.translate(translation)
+        text = text.replace("٫", ".").replace("٬", ",").replace("：", ":")
+        return text
+
+    @staticmethod
+    def _numeric_value(value: str) -> float | None:
+        if not value:
+            return None
+        normalized = ReceiptVerifier._normalize_ocr_text(value)
+        normalized = normalized.replace(" ", "")
+        if normalized.count(",") == 1 and normalized.count(".") == 0:
+            left, right = normalized.split(",")
+            if len(right) <= 2:
+                normalized = f"{left}.{right}"
+            else:
+                normalized = normalized.replace(",", "")
+        else:
+            normalized = normalized.replace(",", "")
+        normalized = re.sub(r"[^0-9.]", "", normalized)
+        if not normalized:
+            return None
+        try:
+            number = float(normalized)
+        except ValueError:
+            return None
+        return number if 0.1 <= number <= 1_000_000 else None
+
+    @staticmethod
     async def analyze_receipt(image_bytes: bytes, expected_amount: float) -> dict:
         try:
             text = await ReceiptVerifier._ocr(image_bytes)
@@ -74,21 +107,19 @@ class ReceiptVerifier:
 
     @staticmethod
     def _extract_amounts(text: str) -> list[float]:
-        amounts = []
+        text = ReceiptVerifier._normalize_ocr_text(text)
+        amounts: list[float] = []
         patterns = [
             r"\b\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\b",
-            r"(?:USDT|USD|SYP|ل\.س|دولار|ليرة|ريال|₪|\$)\s*[:\s]*([\d,]+\.?\d*)",
-            r"(?:المجموع|الإجمالي|المبلغ|total|amount|مجموع|payment|قيمة)\D*([\d,]+\.?\d*)",
+            r"(?:USDT|USD|SYP|NEW\.SYP|ل\.س|دولار|ليرة|ريال|₪|\$)\s*[:\s]*([\d,]+(?:\.\d+)?)",
+            r"(?:المجموع|الإجمالي|المبلغ|total|amount|مجموع|payment|قيمة|القيمة)\D*([\d,]+(?:\.\d+)?)",
         ]
         for pattern in patterns:
             for match in re.findall(pattern, text, re.IGNORECASE):
                 value = match if isinstance(match, str) else match[-1]
-                try:
-                    number = float(value.replace(",", ""))
-                    if 0.1 <= number <= 1_000_000:
-                        amounts.append(number)
-                except (TypeError, ValueError):
-                    continue
+                number = ReceiptVerifier._numeric_value(value)
+                if number is not None:
+                    amounts.append(number)
         return sorted(set(round(a, 2) for a in amounts))
 
     @staticmethod
@@ -96,7 +127,7 @@ class ReceiptVerifier:
         """Compare receipt date, identities, accounts and amount without auto-completing payment."""
         started = time.perf_counter()
         try:
-            text = await ReceiptVerifier._ocr(image_bytes)
+            text = ReceiptVerifier._normalize_ocr_text(await ReceiptVerifier._ocr(image_bytes))
             extracted = ReceiptVerifier._extract_shamcash_fields(text)
             expected_date = order_date.strftime("%Y-%m-%d") if order_date else ""
             matches = {
@@ -123,8 +154,10 @@ class ReceiptVerifier:
             weights = {"date": 20, "sender_name": 15, "sender_account": 15, "recipient_name": 10, "recipient_account": 10, "amount": 30}
             score = sum(weight for key, weight in weights.items() if matches.get(key))
             score_label = "عالية" if score >= 80 else "متوسطة" if score >= 50 else "منخفضة" if score > 0 else "فاشل"
+            core_matches = all(matches[key] for key in ("date", "sender_account", "recipient_account", "amount"))
+            auto_verified = score >= 80 and core_matches
             summary = "━━━ 🔍 نتيجة التحقق الآلي من إيصال شام كاش ━━━\n\n" f"✅ المطابقة: {sum(matches.values())}/{len(matches)} حقلاً\n" f"📊 نسبة الثقة: {score}% ({score_label})\n\n" + "\n".join(details)
-            return {"success": True, "text": text[:1000], "fields": extracted, "matches": matches, "score": score, "score_label": score_label, "summary": summary, "details": details, "auto_verified": score >= 80, "matched_amount": extracted_amount if matches["amount"] else None, "payment_currency": payment_currency}
+            return {"success": True, "text": text[:1000], "fields": extracted, "matches": matches, "score": score, "score_label": score_label, "summary": summary, "details": details, "auto_verified": auto_verified, "matched_amount": extracted_amount if matches["amount"] else None, "payment_currency": payment_currency}
         except Exception as exc:
             logger.exception("ShamCash receipt verification failed")
             return {"success": False, "text": "", "fields": {}, "matches": {}, "score": 0, "score_label": "فاشل", "summary": f"❌ فشل تحليل الإيصال: {exc}", "details": [f"❌ خطأ تقني: {exc}"], "auto_verified": False, "matched_amount": None, "payment_currency": payment_currency}
@@ -133,51 +166,72 @@ class ReceiptVerifier:
 
     @staticmethod
     def _extract_shamcash_fields(text: str) -> dict:
+        text = ReceiptVerifier._normalize_ocr_text(text)
         result = {"date": "", "sender_name": "", "sender_account": "", "recipient_name": "", "recipient_account": "", "amount": 0.0}
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         date_match = re.search(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})", text)
         if date_match:
             result["date"] = date_match.group(1)
+
+        sender_name_labels = r"اسم\s*المرسل|المرسل|sender|from"
+        recipient_name_labels = r"اسم\s*المستلم|المستلم|المستفيد|recipient|beneficiary|to"
+        sender_account_labels = r"حساب\s*المرسل|رقم\s*المرسل|حساب\s*الدافع|sender\s*(?:account|id)|from\s*(?:account|id)"
+        recipient_account_labels = r"حساب\s*المستلم|رقم\s*المستلم|حساب\s*المستفيد|recipient\s*(?:account|id)|beneficiary\s*(?:account|id)|to\s*(?:account|id)"
+        amount_labels = r"المبلغ|القيمة|الإجمالي|المجموع|amount|total|payment|value"
+
         for i, line in enumerate(lines):
-            if "اسم المرسل" in line or re.search(r"\bSender\b", line, re.IGNORECASE):
-                result["sender_name"] = ReceiptVerifier._label_value(line, r"اسم المرسل|Sender") or (lines[i + 1] if i + 1 < len(lines) else "")
-            if "اسم المستلم" in line or "المستلم" in line:
-                result["recipient_name"] = ReceiptVerifier._label_value(line, r"اسم المستلم|المستلم") or (lines[i + 1] if i + 1 < len(lines) else "")
-            if "حساب المرسل" in line:
-                result["sender_account"] = re.sub(r"[^\d*]", "", ReceiptVerifier._label_value(line, r"حساب المرسل"))
-            if "حساب المستلم" in line:
-                result["recipient_account"] = re.sub(r"[^\d*]", "", ReceiptVerifier._label_value(line, r"حساب المستلم"))
-            if "المبلغ" in line or re.search(r"\bamount\b", line, re.IGNORECASE):
+            if re.search(sender_name_labels, line, re.IGNORECASE) and not result["sender_name"]:
+                result["sender_name"] = ReceiptVerifier._label_value(line, sender_name_labels) or (lines[i + 1] if i + 1 < len(lines) else "")
+            if re.search(recipient_name_labels, line, re.IGNORECASE) and not result["recipient_name"]:
+                result["recipient_name"] = ReceiptVerifier._label_value(line, recipient_name_labels) or (lines[i + 1] if i + 1 < len(lines) else "")
+            if re.search(sender_account_labels, line, re.IGNORECASE) and not result["sender_account"]:
+                raw = ReceiptVerifier._label_value(line, sender_account_labels) or (lines[i + 1] if i + 1 < len(lines) else "")
+                result["sender_account"] = ReceiptVerifier._clean_account(raw)
+            if re.search(recipient_account_labels, line, re.IGNORECASE) and not result["recipient_account"]:
+                raw = ReceiptVerifier._label_value(line, recipient_account_labels) or (lines[i + 1] if i + 1 < len(lines) else "")
+                result["recipient_account"] = ReceiptVerifier._clean_account(raw)
+            if re.search(amount_labels, line, re.IGNORECASE) and not result["amount"]:
                 amount_match = re.search(r"([\d,]+(?:\.\d+)?)", line)
                 if amount_match:
-                    try:
-                        result["amount"] = float(amount_match.group(1).replace(",", ""))
-                    except ValueError:
-                        pass
-        masked = re.findall(r"(\d{3,}\*+)", text)
+                    result["amount"] = ReceiptVerifier._numeric_value(amount_match.group(1)) or 0.0
+
+        masked = re.findall(r"(\d{3,}\*+|\d{3,}\s*[*xX]+)", text)
         if not result["sender_account"] and masked:
-            result["sender_account"] = masked[0]
+            result["sender_account"] = ReceiptVerifier._clean_account(masked[0])
         if not result["recipient_account"] and len(masked) > 1:
-            result["recipient_account"] = masked[1]
+            result["recipient_account"] = ReceiptVerifier._clean_account(masked[1])
         if not result["amount"]:
-            amount_match = re.search(r"(?:\$|SYP|USD|NEW\.SYP)\s*([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
-            if amount_match:
-                result["amount"] = float(amount_match.group(1).replace(",", ""))
+            currency_match = re.search(r"(?:\$|USDT|USD|SYP|NEW\.SYP|ل\.س|دولار|ليرة|ريال)\s*[:\s]*([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
+            if currency_match:
+                result["amount"] = ReceiptVerifier._numeric_value(currency_match.group(1)) or 0.0
+        if not result["amount"]:
+            amounts = ReceiptVerifier._extract_amounts(text)
+            if amounts:
+                result["amount"] = min(amounts, key=lambda value: abs(value - 0.0))
         return result
 
     @staticmethod
+    def _clean_account(value: str) -> str:
+        normalized = ReceiptVerifier._normalize_ocr_text(value)
+        return re.sub(r"[^0-9*Xx]", "", normalized)
+
+    @staticmethod
     def _label_value(line: str, labels: str) -> str:
-        return re.sub(rf"(?:{labels})\s*[:：]?\s*", "", line, flags=re.IGNORECASE).strip()
+        return re.sub(rf"(?:{labels})\s*[:：]?\s*", "", line, flags=re.IGNORECASE).strip(" :-—")
 
     @staticmethod
     def _date_matches(extracted: str, expected: str) -> bool:
         if not extracted or not expected:
             return False
-        normalized = extracted.replace("/", "-")
+        normalized = ReceiptVerifier._normalize_ocr_text(extracted).replace("/", "-")
         if normalized == expected:
             return True
         parts = normalized.split("-")
-        return len(parts) == 3 and f"{parts[2]}-{parts[1]}-{parts[0]}" == expected
+        if len(parts) != 3:
+            return False
+        if len(parts[0]) == 4:
+            return f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}" == expected
+        return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}" == expected
 
     @staticmethod
     def _name_matches(extracted: str, expected: str) -> bool:
@@ -193,6 +247,7 @@ class ReceiptVerifier:
     def _normalize_arabic(text: str) -> str:
         if not text:
             return ""
+        text = ReceiptVerifier._normalize_ocr_text(text)
         text = re.sub(r"[أإآا]", "ا", text)
         text = re.sub(r"[ةۀ]", "ه", text)
         text = re.sub(r"[ؤ]", "و", text)
@@ -203,12 +258,29 @@ class ReceiptVerifier:
     def _compare_masked_account(extracted: str, expected: str) -> bool:
         if not extracted or not expected:
             return False
-        extracted_digits, expected_digits = re.sub(r"[^\d]", "", extracted), re.sub(r"[^\d]", "", expected)
-        if not extracted_digits or not expected_digits:
+        extracted = ReceiptVerifier._normalize_ocr_text(extracted)
+        expected = ReceiptVerifier._normalize_ocr_text(expected)
+        extracted_digits = re.sub(r"[^0-9]", "", extracted)
+        expected_digits = re.sub(r"[^0-9]", "", expected)
+        if extracted_digits and expected_digits:
+            if extracted_digits == expected_digits:
+                return True
+            if len(extracted_digits) >= len(expected_digits):
+                return False
+            prefix_len = min(4, len(extracted_digits), len(expected_digits))
+            suffix_len = min(4, len(extracted_digits), len(expected_digits))
+            return extracted_digits[:prefix_len] == expected_digits[:prefix_len] or extracted_digits[-suffix_len:] == expected_digits[-suffix_len:]
+
+        extracted_mask = re.sub(r"[^0-9*Xx]", "", extracted).lower()
+        expected_digits = re.sub(r"[^0-9]", "", expected)
+        if not extracted_mask or not expected_digits:
             return False
-        if extracted_digits == expected_digits:
-            return True
-        if len(extracted_digits) >= len(expected_digits):
+        match = re.fullmatch(r"([0-9]{1,})[*x]+([0-9]{0,})", extracted_mask)
+        if not match:
             return False
-        prefix_len, suffix_len = min(4, len(extracted_digits), len(expected_digits)), min(4, len(extracted_digits), len(expected_digits))
-        return extracted_digits[:prefix_len] == expected_digits[:prefix_len] or extracted_digits[-suffix_len:] == expected_digits[-suffix_len:]
+        prefix, suffix = match.groups()
+        if prefix and not expected_digits.startswith(prefix):
+            return False
+        if suffix and not expected_digits.endswith(suffix):
+            return False
+        return bool(prefix or suffix)
