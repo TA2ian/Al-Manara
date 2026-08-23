@@ -11,8 +11,19 @@ def test_retired_compatibility_modules_are_absent():
         "handlers/admin_settings_alias_policy.py",
         "handlers/legacy_wallet_guard.py",
         "services/order_wallet_guard.py",
+        "database_wallet_guards.py",
     ):
         assert not (ROOT / relative_path).exists()
+
+
+def test_canonical_database_constraints_are_runtime_owned():
+    database = (ROOT / "database.py").read_text(encoding="utf-8")
+    constraints = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
+    assert "database_wallet_guards" not in database
+    assert "from database_order_constraints import install_order_constraints" in database
+    assert "await install_order_constraints(conn)" in database
+    assert "verified order wallet must have a stored QR" in constraints
+    assert "order wallet QR does not match the verified saved wallet" in constraints
 
 
 def test_order_wallet_state_is_canonical():
