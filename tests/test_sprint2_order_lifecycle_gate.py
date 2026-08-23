@@ -16,6 +16,14 @@ def test_order_state_graph_is_authoritative_and_terminal_states_are_closed():
     assert "audit_logs" in source
 
 
+def test_database_state_guard_matches_service_and_supports_compensating_rollback():
+    source = (ROOT / "database.py").read_text(encoding="utf-8")
+    assert "OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')" in source
+    assert "OLD.status='payment_confirmed' AND NEW.status IN ('completed')" in source
+    assert "OLD.status='payment_confirmed' AND NEW.status IN ('completed','expired')" not in source
+    assert "INSERT INTO audit_logs" not in source[source.index("CREATE OR REPLACE FUNCTION enforce_order_state_transition()"):source.index("CREATE TRIGGER trg_enforce_order_state_transition")]
+
+
 def test_payment_confirmation_uses_authoritative_transition_service():
     source = (ROOT / "handlers/admin_payment_confirmation_policy.py").read_text(encoding="utf-8")
     assert "transition_order" in source
