@@ -16,6 +16,8 @@ def test_database_defines_only_canonical_runtime_payment_method_codes():
     source = (ROOT / "database.py").read_text(encoding="utf-8")
     assert "shamcash_usd" in source
     assert "shamcash_new_syp" in source
+    assert "NEW.SYP" in source
+    assert "non-canonical ShamCash payment method code" in source
     assert "payment_methods WHERE provider = 'ShamCash'" in source or "WHERE provider = 'ShamCash'" in source
 
 
@@ -26,7 +28,9 @@ def test_order_payment_snapshot_authority_is_the_canonical_database_constraints_
     assert "from database_order_constraints import install_order_constraints" in database_source
     assert "await install_order_constraints(conn)" in database_source
     assert "snapshot_order_payment_method" in constraints_source
-    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in constraints_source
+    assert "NEW.payment_currency NOT IN ('USD', 'NEW.SYP')" in constraints_source
+    assert "provider='ShamCash'" in constraints_source
+    assert "enabled=TRUE" in constraints_source
     assert "payment_account_snapshot" in constraints_source
     assert "payment_qr_photo_id" in constraints_source
     assert "BEFORE INSERT ON orders" in constraints_source
