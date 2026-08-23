@@ -101,18 +101,3 @@ async def admin_maintenance(callback: CallbackQuery):
     await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
     await callback.answer()
     await _notify_users_maintenance(callback.message)
-
-
-@router.callback_query(F.data == "admin_maintenance_force")
-async def admin_maintenance_force(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await SettingsService.set_bool("maintenance_mode", True)
-    Config.set_maintenance_mode_sync(True)
-    await callback.message.edit_text(
-        "🛑 <b>تم تفعيل وضع الصيانة (قسري)</b>\n\n⚠️ تم تجاوز الطلبات النشطة.",
-        parse_mode="HTML",
-    )
-    await callback.answer()
-    await _notify_users_maintenance(callback.message)
