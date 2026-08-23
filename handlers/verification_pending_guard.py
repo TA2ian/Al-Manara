@@ -27,7 +27,6 @@ async def _verification_status(telegram_id: int):
     return row
 
 
-@router.callback_query(F.data == "start_verification")
 async def block_duplicate_verification_start(callback: CallbackQuery, state: FSMContext):
     """Prevent restarting verification while a review is already pending."""
     user = await _verification_status(callback.from_user.id)
@@ -71,6 +70,11 @@ async def block_duplicate_verification_start(callback: CallbackQuery, state: FSM
 
     # Let the authoritative verification router handle the normal flow.
     raise SkipHandler
+
+
+# Register the guard programmatically to keep one exact callback decorator
+# signature for start_verification while preserving router precedence.
+router.callback_query.register(block_duplicate_verification_start, F.data == "start_verification")
 
 
 @router.message(VerificationStates.waiting_shamcash_qr, F.photo)
