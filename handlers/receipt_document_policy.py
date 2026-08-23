@@ -1,11 +1,15 @@
-"""Customer receipt upload entrypoint for document submissions."""
+"""Customer receipt upload and manual-review entrypoints."""
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from database import get_pool
-from services.receipt_service import MAX_RECEIPT_ATTEMPTS, handle_receipt_upload
+from services.receipt_service import (
+    MAX_RECEIPT_ATTEMPTS,
+    handle_receipt_upload,
+    request_manual_receipt_review,
+)
 from states import ReceiptStates
 
 router = Router()
@@ -44,24 +48,17 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
     lang = await _lang(callback.from_user.id)
 
     if not order:
-        await callback.answer(
-            "الطلب غير موجود" if lang == "ar" else "Order not found",
-            show_alert=True,
-        )
+        await callback.answer("الطلب غير موجود" if lang == "ar" else "Order not found", show_alert=True)
         return
     if order["status"] != "waiting_payment":
         await callback.answer(
-            "لا يمكن رفع إثبات لهذا الطلب حالياً"
-            if lang == "ar"
-            else "This order is not awaiting payment proof",
+            "لا يمكن رفع إثبات لهذا الطلب حالياً" if lang == "ar" else "This order is not awaiting payment proof",
             show_alert=True,
         )
         return
     if int(order["receipt_upload_count"] or 0) >= MAX_RECEIPT_ATTEMPTS:
         await callback.answer(
-            "❌ استنفدت محاولات رفع الإثبات"
-            if lang == "ar"
-            else "❌ Receipt attempts exhausted",
+            "❌ استنفدت محاولات رفع الإثبات" if lang == "ar" else "❌ Receipt attempts exhausted",
             show_alert=True,
         )
         return
@@ -80,6 +77,27 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(prompt, parse_mode="HTML")
     await state.set_state(ReceiptStates.waiting_receipt)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("manual_receipt_review_"))
+async def request_manual_review(callback: CallbackQuery, state: FSMContext):
+    order_id = int(callback.data.removeprefix("manual_receipt_review_"))
+    lang = await _lang(callback.from_user.id)
+    success, text = await request_manual_receipt_review(
+        bot=callback.bot,
+        order_id=order_id,
+        telegram_id=callback.from_user.id,
+        username=callback.from_user.username or "",
+    )
+    if success:
+        await state.clear()
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(
+            text if lang == "ar" else "📨 The receipt was sent to administration for manual review. You will be notified when a decision is made."
+        )
+        await callback.answer("تم الإرسال" if lang == "ar" else "Sent")
+        return
+    await callback.answer(text if lang == "ar" else "Manual review request could not be completed.", show_alert=True)
 
 
 @router.message(ReceiptStates.waiting_receipt, F.document)
