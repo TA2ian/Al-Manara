@@ -136,11 +136,11 @@ def auto_approve_keyboard(enabled: bool) -> InlineKeyboardMarkup:
 
 
 def settings_keyboard() -> InlineKeyboardMarkup:
+    """Operational settings only; payment accounts and rate have dedicated owners."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💱 سعر الصرف", callback_data="setting_rate"), InlineKeyboardButton(text="💰 الرسوم", callback_data="setting_fees")],
-        [InlineKeyboardButton(text="📱 شام كاش USD", callback_data="setting_shamcash_usd"), InlineKeyboardButton(text="📱 شام كاش NEW.SYP", callback_data="setting_shamcash_syp")],
-        [InlineKeyboardButton(text="👤 اسم شام كاش", callback_data="setting_shamcash_name"), InlineKeyboardButton(text="⏱ مهلة الدفع", callback_data="setting_timeout")],
-        [InlineKeyboardButton(text="📊 الحدود", callback_data="setting_limits"), InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")],
+        [InlineKeyboardButton(text="💰 الرسوم", callback_data="setting_fees"), InlineKeyboardButton(text="⏱ مهلة الدفع", callback_data="setting_timeout")],
+        [InlineKeyboardButton(text="📊 الحدود", callback_data="setting_limits")],
+        [InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")],
     ])
 
 
