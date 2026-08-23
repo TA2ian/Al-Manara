@@ -43,7 +43,7 @@ def test_wallet_add_message_explains_acceptance_and_verification_sequence():
     assert "لن يتم حفظ العنوان بمجرد إرساله" in source
     assert "يتحقق البوت أولاً من صحة العنوان" in source
     assert "QR لنفس العنوان" in source
-    assert "كـ<b>موثق</b>" in source
+    assert "كعنوان <b>موثق</b>" in source
     assert "لا يمكن تخطيه" in source
 
 
