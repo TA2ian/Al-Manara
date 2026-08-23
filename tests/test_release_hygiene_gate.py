@@ -27,8 +27,18 @@ def test_legacy_compatibility_surface_is_removed():
         "services/order_wallet_guard.py",
         "handlers/order.py",
         "handlers/menu.py",
+        "database_wallet_guards.py",
     ):
         assert not (ROOT / relative_path).exists(), relative_path
+
+
+def test_canonical_order_constraint_surface_is_active():
+    database = (ROOT / "database.py").read_text(encoding="utf-8")
+    constraints = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
+    assert "database_wallet_guards" not in database
+    assert "install_order_constraints" in database
+    assert "await install_order_constraints(conn)" in database
+    assert "order wallet QR does not match the verified saved wallet" in constraints
 
 
 def test_release_gate_covers_authoritative_services_and_removed_surface():
