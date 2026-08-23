@@ -17,3 +17,9 @@ def test_database_defines_only_canonical_runtime_payment_method_codes():
     assert "shamcash_usd" in source
     assert "shamcash_new_syp" in source
     assert "payment_methods WHERE provider = 'ShamCash'" in source
+
+
+def test_database_order_snapshot_trigger_rejects_noncanonical_method_rows():
+    source = (ROOT / "database.py").read_text(encoding="utf-8")
+    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in source
+    assert "snapshot_order_payment_method" in source
