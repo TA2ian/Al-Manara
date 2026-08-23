@@ -151,7 +151,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             payment = await conn.fetchrow(
                 """SELECT code, account_identifier, qr_photo_id
                    FROM payment_methods
-                   WHERE provider = 'ShamCash' AND currency = $1 AND enabled = TRUE
+                   WHERE provider = 'ShamCash'
+                     AND currency = $1
+                     AND code IN ('shamcash_usd', 'shamcash_new_syp')
+                     AND enabled = TRUE
                      AND NULLIF(BTRIM(account_identifier), '') IS NOT NULL
                      AND qr_photo_id IS NOT NULL
                    ORDER BY id ASC LIMIT 1""",
