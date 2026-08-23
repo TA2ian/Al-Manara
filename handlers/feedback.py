@@ -45,6 +45,8 @@ async def start_feedback(callback: CallbackQuery, state: FSMContext):
 async def _store_feedback(message: Message, text: str, attachment_type: str | None, attachment_file_id: str | None):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await conn.execute("ALTER TABLE feedback_messages ADD COLUMN IF NOT EXISTS attachment_type TEXT")
+        await conn.execute("ALTER TABLE feedback_messages ADD COLUMN IF NOT EXISTS attachment_file_id TEXT")
         user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", message.from_user.id)
         if not user:
             return None
