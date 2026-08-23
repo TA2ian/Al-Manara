@@ -1,3 +1,4 @@
+import ast
 import unittest
 from pathlib import Path
 
@@ -42,11 +43,31 @@ class ReceiptReviewPolicyTests(unittest.TestCase):
         )
         self.assertIsNone(keyboard)
 
-    def test_admin_handoff_is_gated_by_success_or_exhaustion(self):
+    def test_automatic_admin_handoff_is_gated_by_success_or_exhaustion(self):
         source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
-        self.assertIn("if auto_verified or remaining_attempts <= 0:", source)
-        self.assertIn("await notify_admins_receipt(", source)
+        tree = ast.parse(source)
+        handler = next(
+            node for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "handle_receipt_upload"
+        )
+        guarded_calls = []
+        for node in ast.walk(handler):
+            if not isinstance(node, ast.If):
+                continue
+            condition = ast.unparse(node.test)
+            if "auto_verified" in condition and "remaining_attempts" in condition:
+                guarded_calls.extend(
+                    child for child in ast.walk(node)
+                    if isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Name)
+                    and child.func.id == "notify_admins_receipt"
+                )
+        self.assertTrue(guarded_calls, "Automatic admin handoff must remain inside the success/exhaustion gate")
+
+    def test_manual_review_path_marks_the_request_explicitly(self):
+        source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
         self.assertIn("manual_review_requested=True", source)
+        self.assertIn("request_manual_receipt_review", source)
 
     def test_progress_pipeline_and_elapsed_timer_are_present(self):
         source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
