@@ -81,6 +81,7 @@ async def check_expired_orders(bot: Bot):
                     )
                     for order in expired:
                         try:
+                            # Authoritative expiry transition target: "expired".
                             await transition_order(conn, order['id'], 'expired')
                         except InvalidOrderTransition:
                             continue
