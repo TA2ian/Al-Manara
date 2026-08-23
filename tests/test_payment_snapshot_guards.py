@@ -1,22 +1,22 @@
-"""PostgreSQL integration tests for order payment snapshots."""
+"""PostgreSQL integration tests for canonical order payment snapshots."""
 import os
 import unittest
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not configured")
-class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
+class PaymentSnapshotConstraintTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import asyncpg
-        from database_wallet_guards import install_order_wallet_guard
+        from database_order_constraints import install_order_constraints
 
         self.pool = await asyncpg.create_pool(
             os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2,
-            server_settings={"search_path": "payment_guard_test"},
+            server_settings={"search_path": "order_constraints_test"},
         )
         async with self.pool.acquire() as conn:
-            await conn.execute("DROP SCHEMA IF EXISTS payment_guard_test CASCADE")
-            await conn.execute("CREATE SCHEMA payment_guard_test")
-            await conn.execute("SET search_path TO payment_guard_test")
+            await conn.execute("DROP SCHEMA IF EXISTS order_constraints_test CASCADE")
+            await conn.execute("CREATE SCHEMA order_constraints_test")
+            await conn.execute("SET search_path TO order_constraints_test")
             await conn.execute("""CREATE TABLE users (
                 id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL,
                 is_verified BOOLEAN DEFAULT FALSE, phone_verified BOOLEAN DEFAULT FALSE,
@@ -41,11 +41,11 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute("""INSERT INTO payment_methods
                 (code,provider,currency,account_identifier,qr_photo_id,enabled)
                 VALUES ('shamcash_new_syp','ShamCash','NEW.SYP','ACCOUNT-A','payment-qr-a',TRUE)""")
-            await install_order_wallet_guard(conn)
+            await install_order_constraints(conn)
 
     async def asyncTearDown(self):
         async with self.pool.acquire() as conn:
-            await conn.execute("DROP SCHEMA IF EXISTS payment_guard_test CASCADE")
+            await conn.execute("DROP SCHEMA IF EXISTS order_constraints_test CASCADE")
         await self.pool.close()
 
     async def _insert_order(self):
@@ -92,7 +92,7 @@ class PaymentSnapshotGuardTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await self._insert_order()
 
-    async def test_legacy_syp_is_normalized_to_new_syp(self):
+    async def test_canonical_currency_is_persisted(self):
         row = await self._insert_order()
         async with self.pool.acquire() as conn:
             current = await conn.fetchval("SELECT payment_currency FROM orders WHERE id=$1", row["id"])
