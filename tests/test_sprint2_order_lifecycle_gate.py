@@ -33,7 +33,8 @@ def test_payment_confirmation_uses_authoritative_transition_service():
 
 
 def test_receipt_manual_review_cannot_bypass_waiting_payment():
-    source = (ROOT / "handlers/receipt_transition_policy.py").read_text(encoding="utf-8")
+    source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
+    assert "async def request_manual_receipt_review" in source
     assert 'order["status"] != "waiting_payment"' in source
     assert '"receipt_received"' in source
     assert "transition_order" in source
@@ -42,10 +43,11 @@ def test_receipt_manual_review_cannot_bypass_waiting_payment():
 
 def test_receipt_verification_never_completes_payment_by_itself():
     verifier = (ROOT / "services/receipt_verifier.py").read_text(encoding="utf-8")
-    transition = (ROOT / "handlers/receipt_transition_policy.py").read_text(encoding="utf-8")
+    receipt_service = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
     assert "auto_verified" in verifier
     assert "payment_confirmed" not in verifier
-    assert "transition_order" in transition
+    assert "transition_order" in receipt_service
+    assert '"receipt_received"' in receipt_service
 
 
 def test_payment_snapshot_and_new_syp_contract_are_present():
