@@ -17,7 +17,7 @@ POLICY_MODULES = [
     "handlers.receipt_document_policy", "handlers.receipt_processing_policy",
     "handlers.receipt_transition_policy", "handlers.saved_wallets",
     "handlers.verification", "handlers.verification_admin_policy",
-    "handlers.verification_pending_guard", "handlers.wallet_qr_first_policy", "handlers.wallets",
+    "handlers.verification_pending_policy", "handlers.wallet_qr_first_policy", "handlers.wallets",
 ]
 
 
@@ -25,6 +25,7 @@ REMOVED_MODULES = (
     "handlers.admin",
     "handlers.admin_settings_alias_policy",
     "handlers.legacy_wallet_guard",
+    "handlers.verification_pending_guard",
     "services.order_wallet_guard",
     "database_wallet_guards",
 )
