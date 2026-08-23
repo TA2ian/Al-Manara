@@ -26,21 +26,21 @@ class SettingsService:
         if pool:
             async with pool.acquire() as conn:
                 rows = await conn.fetch("SELECT key, value FROM bot_settings")
-                cls._cache = {row['key']: row['value'] for row in rows}
+                cls._cache = {row["key"]: row["value"] for row in rows}
         else:
             cls._cache = {}
         cls._initialized = True
-        logger.info("Settings reloaded: %s", dict(cls._cache))
+        logger.info("Settings cache reloaded: %d keys", len(cls._cache))
 
     @classmethod
-    async def get(cls, key: str, default: str = '') -> str:
+    async def get(cls, key: str, default: str = "") -> str:
         if not cls._initialized:
             await cls.init()
         return cls._cache.get(key, default)
 
     @classmethod
     async def set(cls, key: str, value: str):
-        cls._cache[key] = value
+        """Persist a setting before publishing it to the process cache."""
         pool = await get_pool()
         if pool:
             async with pool.acquire() as conn:
@@ -48,17 +48,20 @@ class SettingsService:
                     """INSERT INTO bot_settings (key, value)
                        VALUES ($1, $2)
                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
-                    key, value,
+                    key,
+                    value,
                 )
-        logger.info("Setting saved: %s = %s", key, value)
+        cls._cache[key] = value
+        cls._initialized = True
+        logger.info("Setting saved: %s", key)
 
     @classmethod
     async def get_bool(cls, key: str, default: bool = False) -> bool:
-        val = await cls.get(key, '')
+        val = await cls.get(key, "")
         if not val:
             return default
-        return val.lower() in ('1', 'true', 'yes', 'on')
+        return val.lower() in ("1", "true", "yes", "on")
 
     @classmethod
     async def set_bool(cls, key: str, value: bool):
-        await cls.set(key, '1' if value else '0')
+        await cls.set(key, "1" if value else "0")
