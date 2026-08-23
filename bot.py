@@ -3,7 +3,7 @@ from aiogram import Dispatcher
 
 
 def create_dispatcher() -> Dispatcher:
-    """Create dispatcher with authoritative handlers in precedence order."""
+    """Create dispatcher from the single authoritative router graph."""
     from handlers import (
         start,
         saved_wallets,
@@ -34,7 +34,11 @@ def create_dispatcher() -> Dispatcher:
         admin_payment_confirmation_policy,
         admin_transfer_policy,
         admin_note_policy,
-        admin,
+        admin_order_list_policy,
+        admin_user_management_policy,
+        admin_utility_policy,
+        admin_maintenance_policy,
+        admin_settings_policy,
         payment_methods,
         verification,
         language_policy,
@@ -56,23 +60,11 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
-
-    # The payment-methods router owns the authoritative admin_menu callback.
-    # It must precede all compatibility/policy routers that still contain
-    # historical admin_menu handlers so the enhanced dashboard is always the
-    # first and only effective navigation target.
     dp.include_router(payment_methods.router)
 
-    # Dedicated input routers must precede broad legacy catch-alls.
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
-
-    # The main order-menu command must have precedence over any stale
-    # wallet-registration FSM state. Otherwise a user who previously entered
-    # a wallet label/address and then presses "Create buy order" can have that
-    # menu command consumed as wallet input instead of returning to the order
-    # flow / active-order guidance.
     dp.include_router(order_amount_policy.router)
 
     dp.include_router(saved_wallets.router)
@@ -80,10 +72,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(order_wallet_qr_policy.router)
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
-    # QR-first registration must precede wallets.router's broad
-    # WalletStates.waiting_address message handler. This supports QR-only
-    # registration and QR + address/caption matching without changing the
-    # existing address-first flow.
     dp.include_router(wallet_qr_first_policy.router)
     dp.include_router(wallets.router)
     dp.include_router(order_confirmation_policy.router)
@@ -95,6 +83,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(customer_orders_policy.router)
     dp.include_router(my_orders.router)
     dp.include_router(feedback.router)
+
     dp.include_router(admin_entry.router)
     dp.include_router(admin_broadcast_policy.router)
     dp.include_router(verification_admin_policy.router)
@@ -104,8 +93,12 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_rejection_policy.router)
     dp.include_router(admin_payment_confirmation_policy.router)
     dp.include_router(admin_transfer_policy.router)
-    dp.include_router(admin.router)
-    # Payment methods is already registered above because it owns admin_menu.
+    dp.include_router(admin_order_list_policy.router)
+    dp.include_router(admin_user_management_policy.router)
+    dp.include_router(admin_utility_policy.router)
+    dp.include_router(admin_maintenance_policy.router)
+    dp.include_router(admin_settings_policy.router)
+
     dp.include_router(verification_pending_guard.router)
     dp.include_router(verification.router)
     dp.include_router(customer_navigation_policy.router)
