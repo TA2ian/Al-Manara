@@ -178,8 +178,8 @@ async def admin_ban_user_execute(callback: CallbackQuery):
     await callback.message.edit_text(
         f"✅ <b>تم حظر المستخدم</b>\n🆔 <code>{telegram_id}</code>",
         parse_mode="HTML",
+        reply_markup=admin_menu_keyboard(),
     )
-    await callback.message.answer("⚙️ لوحة التحكم", reply_markup=admin_menu_keyboard())
     await callback.answer()
 
 
@@ -230,8 +230,8 @@ async def admin_unban_user_execute(callback: CallbackQuery):
     await callback.message.edit_text(
         f"✅ <b>تم فك الحظر عن المستخدم</b>\n🆔 <code>{telegram_id}</code>",
         parse_mode="HTML",
+        reply_markup=admin_menu_keyboard(),
     )
-    await callback.message.answer("⚙️ لوحة التحكم", reply_markup=admin_menu_keyboard())
     await callback.answer()
 
 
@@ -241,7 +241,11 @@ async def admin_del_user(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    telegram_id = int(callback.data.replace("admin_del_user_", ""))
+    try:
+        telegram_id = int(callback.data.replace("admin_del_user_", ""))
+    except ValueError:
+        await callback.answer("❌ معرف غير صالح", show_alert=True)
+        return
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -273,7 +277,11 @@ async def admin_del_user_execute(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    telegram_id = int(callback.data.replace("admin_del_confirm_", ""))
+    try:
+        telegram_id = int(callback.data.replace("admin_del_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ معرف غير صالح", show_alert=True)
+        return
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -321,6 +329,6 @@ async def admin_del_user_execute(callback: CallbackQuery):
         f"📊 تم حذف {order_count} طلب/طلبات\n"
         f"📍 تم حذف {addr_count} عنوان/عناوين محفوظة",
         parse_mode="HTML",
+        reply_markup=admin_menu_keyboard(),
     )
-    await callback.message.answer("⚙️ لوحة التحكم", reply_markup=admin_menu_keyboard())
     await callback.answer()
