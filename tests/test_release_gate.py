@@ -26,6 +26,7 @@ REMOVED_MODULES = (
     "handlers.admin_settings_alias_policy",
     "handlers.legacy_wallet_guard",
     "services.order_wallet_guard",
+    "database_wallet_guards",
 )
 
 
@@ -46,6 +47,7 @@ def test_authoritative_order_services_import():
     for module_name in (
         "services.order_state_service", "services.order_completion_service",
         "services.receipt_verifier", "services.exchange_service", "services.settings_service",
+        "database_order_constraints",
     ):
         importlib.import_module(module_name)
 
