@@ -42,8 +42,14 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
     try:
         pool = await get_pool()
         data = await state.get_data()
-        required = ("amount_usdt", "network", "wallet_address", "payment_currency", "calculation")
-        if any(data.get(key) is None for key in required):
+        required = ("amount_usdt", "network", "wallet_address", "wallet_id", "wallet_qr_photo_id", "payment_currency", "calculation")
+        missing = [key for key in required if data.get(key) is None]
+        if missing:
+            logger.warning(
+                "Order confirmation rejected for telegram_id=%s; missing FSM keys=%s",
+                callback.from_user.id,
+                missing,
+            )
             await callback.answer(
                 "❌ بيانات الطلب غير مكتملة. أعد إنشاء الطلب." if lang == "ar" else
                 "❌ The order data is incomplete. Please start the order again.",
@@ -88,6 +94,47 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await state.clear()
                 return
 
+            # The database is the source of truth for the receiving wallet.
+            # Never trust a wallet address/QR carried only by the FSM at the
+            # final order boundary.
+            wallet = await conn.fetchrow(
+                """SELECT id, address, network, qr_photo_id, verification_status
+                   FROM saved_addresses
+                   WHERE id = $1
+                     AND user_id = $2
+                     AND deleted_at IS NULL
+                     AND verification_status = 'verified'
+                     AND qr_photo_id IS NOT NULL""",
+                data["wallet_id"],
+                user["id"],
+            )
+            if not wallet:
+                await callback.answer(
+                    "❌ المحفظة المحددة لم تعد موثقة أو لا تحتوي على QR محفوظ. اختر محفظة موثقة أخرى." if lang == "ar" else
+                    "❌ The selected wallet is no longer verified or has no stored QR. Choose another verified wallet.",
+                    show_alert=True,
+                )
+                await state.clear()
+                return
+
+            if (
+                wallet["address"].strip().lower() != str(data["wallet_address"]).strip().lower()
+                or wallet["network"] != data["network"]
+                or wallet["qr_photo_id"] != data["wallet_qr_photo_id"]
+            ):
+                logger.warning(
+                    "Wallet FSM/DB mismatch for telegram_id=%s wallet_id=%s",
+                    callback.from_user.id,
+                    data["wallet_id"],
+                )
+                await callback.answer(
+                    "❌ تغيرت بيانات المحفظة أثناء الطلب. اختر المحفظة مرة أخرى." if lang == "ar" else
+                    "❌ The wallet data changed during this order. Please select the wallet again.",
+                    show_alert=True,
+                )
+                await state.clear()
+                return
+
             currency = data["payment_currency"]
             if currency == "SYP":
                 currency = "NEW.SYP"
@@ -122,10 +169,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                     payment_method_code, payment_account_snapshot, payment_qr_photo_id, status
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending')
                 RETURNING id""",
-                order_number, user["id"], data["network"], data["amount_usdt"],
+                order_number, user["id"], wallet["network"], data["amount_usdt"],
                 calculation["exchange_rate"], currency, calculation["base_amount"],
                 calculation["fee_percent"], calculation["fee_amount"], calculation["total_amount"],
-                data["wallet_address"], data.get("wallet_qr_photo_id"), payment["code"],
+                wallet["address"], wallet["qr_photo_id"], payment["code"],
                 payment["account_identifier"], payment["qr_photo_id"],
             )
             order_id = row["id"]
@@ -190,10 +237,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"🆔 المعرف: <code>{callback.from_user.id}</code>\n"
             f"👤 المستخدم: @{username}\n"
             f"💰 الكمية: {usdt(data['amount_usdt'])} USDT\n"
-            f"🌐 الشبكة: {data['network']}\n"
+            f"🌐 الشبكة: {wallet['network']}\n"
             f"💱 عملة الدفع: {currency}\n"
             f"💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
-            f"📍 <b>عنوان الاستلام:</b> <code>{data['wallet_address']}</code>\n\n"
+            f"📍 <b>عنوان الاستلام:</b> <code>{wallet['address']}</code>\n\n"
             + (
                 "⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع."
                 if auto_approved else
