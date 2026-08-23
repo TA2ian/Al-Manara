@@ -9,7 +9,7 @@ from database import get_pool
 
 
 ORDER_ID_PATTERNS = (
-    re.compile(r"^(?:upload_receipt|retry_receipt|manual_review|rate)_([0-9]+)$"),
+    re.compile(r"^(?:upload_receipt|retry_receipt|manual_review|manual_receipt_review|rate)_([0-9]+)$"),
 )
 WALLET_ID_PATTERNS = (
     re.compile(r"^(?:view_addr|del_addr|set_default_addr)_([0-9]+)$"),
