@@ -62,12 +62,7 @@ async def reject_receipt(callback: CallbackQuery):
             return
 
         try:
-            await transition_order(
-                conn,
-                order_id,
-                "waiting_payment",
-                admin_id=callback.from_user.id,
-            )
+            await transition_order(conn, order_id, "waiting_payment", admin_id=callback.from_user.id)
         except InvalidOrderTransition as exc:
             logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
             await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
@@ -133,9 +128,6 @@ async def reject_order(callback: CallbackQuery):
             return
 
         try:
-            # wallet_qr_photo_id is an immutable order snapshot and must remain
-            # intact even when the order is rejected. Only receipt data is
-            # cleared because it is a review artifact, not the wallet identity.
             await transition_order(
                 conn,
                 order_id,
