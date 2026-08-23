@@ -1,14 +1,9 @@
-"""Authoritative admin navigation and analytics.
-
-Search input is owned by ``admin_search_policy`` and exchange-rate input is
-owned by ``admin_rate_policy``. Operational settings are owned exclusively by
-``admin_settings_policy`` so each callback/FSM flow has one authority.
-"""
+"""Authoritative admin navigation and analytics."""
 import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import Config
 from database import get_pool
