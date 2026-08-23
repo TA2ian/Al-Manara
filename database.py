@@ -6,7 +6,6 @@ from database_wallet_guards import install_order_wallet_guard
 logger = logging.getLogger(__name__)
 _pool = None
 
-
 async def init_db():
     """Initialize database connection pool and apply additive schema changes."""
     global _pool
@@ -213,13 +212,11 @@ async def init_db():
             BEGIN
                 IF NEW.status IS DISTINCT FROM OLD.status THEN
                     IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR
-                            (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired')) OR
+                            (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')) OR
                             (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR
-                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed','expired'))) THEN
+                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed'))) THEN
                         RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001';
                     END IF;
-                    INSERT INTO audit_logs (user_id, admin_id, action, details, previous_value, new_value, severity)
-                    VALUES (NEW.user_id, NULL, 'order_status_transition', 'order_id=' || NEW.id, OLD.status, NEW.status, 'info');
                 END IF;
                 RETURN NEW;
             END;
@@ -233,10 +230,8 @@ async def init_db():
         if count == 0:
             await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", "150.00", 0)
 
-
 async def get_pool():
     return _pool
-
 
 async def close_db():
     global _pool
