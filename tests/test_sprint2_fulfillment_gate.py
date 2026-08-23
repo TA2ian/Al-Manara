@@ -37,5 +37,6 @@ def test_expiry_and_reminders_are_background_order_lifecycle_controls():
     assert "send_expiry_reminders" in source
     assert "check_expired_orders" in source
     assert "payment_deadline" in source
-    assert "asyncio.create_task(check_expired_orders(bot))" in source
-    assert "asyncio.create_task(send_expiry_reminders(bot))" in source
+    assert "_track_background_task(check_expired_orders(bot), 'order-expiry-checker')" in source
+    assert "_track_background_task(send_expiry_reminders(bot), 'expiry-reminder-worker')" in source
+    assert "def _track_background_task(" in source
