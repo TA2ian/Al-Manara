@@ -19,15 +19,23 @@ def test_no_replit_runtime_artifacts_remain():
         assert not (ROOT / name).exists(), name
 
 
-def test_legacy_compatibility_surface_is_explicit():
-    source = (ROOT / "tests/test_router_integrity.py").read_text(encoding="utf-8")
-    assert 'LEGACY_COMPATIBILITY_FILES = {"menu.py"}' in source
-    assert "test_retired_monolithic_order_handler_is_absent" in source
+def test_legacy_compatibility_surface_is_removed():
+    for relative_path in (
+        "handlers/admin.py",
+        "handlers/admin_settings_alias_policy.py",
+        "handlers/legacy_wallet_guard.py",
+        "services/order_wallet_guard.py",
+        "handlers/order.py",
+        "handlers/menu.py",
+    ):
+        assert not (ROOT / relative_path).exists(), relative_path
 
 
-def test_release_gate_covers_compatibility_guard_and_authoritative_services():
+def test_release_gate_covers_authoritative_services_and_removed_surface():
     source = (ROOT / "tests/test_release_gate.py").read_text(encoding="utf-8")
-    assert "handlers.legacy_wallet_guard" in source
+    assert "handlers.admin_settings_policy" in source
+    assert "handlers.verification_pending_guard" in source
     assert "services.order_state_service" in source
     assert "services.order_completion_service" in source
-    assert "handlers.verification_pending_guard" in source
+    assert "handlers.legacy_wallet_guard" in source
+    assert "handlers.admin" in source
