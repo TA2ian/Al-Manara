@@ -47,12 +47,14 @@ def create_dispatcher() -> Dispatcher:
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
     from middleware.ownership import OwnershipMiddleware
+    from middleware.state_processing_lock import StateProcessingLockMiddleware
 
     dp = Dispatcher()
     dp.message.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
+    dp.message.middleware(StateProcessingLockMiddleware())
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
