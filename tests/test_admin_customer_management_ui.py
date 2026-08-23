@@ -1,8 +1,11 @@
 """Regression checks for scalable admin customer-management UI."""
 
 import inspect
+from pathlib import Path
 
 from handlers import admin_search_policy, admin_user_management_policy
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_customer_list_has_no_per_row_destructive_actions():
@@ -25,3 +28,9 @@ def test_customer_action_keyboard_contains_delete_only_after_search():
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert "admin_del_user_123456" in callbacks
     assert "admin_ban_123456" in callbacks
+
+
+def test_customer_mutation_results_do_not_push_a_second_dashboard_message():
+    source = (ROOT / "handlers/admin_user_management_policy.py").read_text(encoding="utf-8")
+    assert "reply_markup=admin_menu_keyboard()" in source
+    assert 'await callback.message.answer("⚙️ لوحة التحكم"' not in source
