@@ -1,9 +1,4 @@
-"""Enforce the customer wallet registry as the only wallet source for orders.
-
-A wallet QR is collected once during wallet registration, stored with the
-verified wallet record, and reused for subsequent orders. The order flow must
-never ask for the same QR again.
-"""
+"""Enforce the customer wallet registry as the only wallet source for orders."""
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -61,8 +56,6 @@ async def _continue_to_currency(message_or_callback, state: FSMContext, lang: st
 @router.callback_query(F.data == "back_to_wallet")
 async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
     """Return to verified-wallet selection without restarting address entry."""
-    # Acknowledge immediately so Telegram does not leave the button in a loading state
-    # while the wallet list is being read from the database.
     await callback.answer()
     lang = await _lang(callback.from_user.id)
     draft = await state.get_data()
@@ -83,8 +76,6 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
             )
 
     if rows:
-        # Keep the order draft intact when navigating backward. In particular,
-        # preserve the selected amount under both keys used by the order flow.
         preserved = {}
         if draft.get("amount_usdt") is not None:
             preserved["amount_usdt"] = draft["amount_usdt"]
@@ -93,10 +84,6 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
         if preserved:
             await state.update_data(**preserved)
 
-        # The wallet list is an intermediate step. Keeping the FSM in
-        # waiting_wallet prevents currency callbacks from being accepted before
-        # a wallet is selected and avoids the misleading "incomplete order"
-        # error seen after pressing Back.
         await state.set_state(OrderStates.waiting_wallet)
         await callback.message.edit_text(
             "👛 <b>اختر محفظة موثقة</b>\n\nاختر العنوان الذي تريد استخدامه لهذا الطلب. سيتم استخدام QR المحفوظ تلقائياً."
@@ -132,8 +119,8 @@ async def reject_currency_before_wallet(callback: CallbackQuery, state: FSMConte
 
 
 @router.callback_query(F.data == "order_wallet_manual")
-async def redirect_manual_wallet_to_registry(callback: CallbackQuery, state: FSMContext):
-    """Register a new wallet once; never collect wallet/QR as per-order data."""
+async def open_wallet_registry_from_order(callback: CallbackQuery, state: FSMContext):
+    """Start the canonical wallet registry for a new order wallet."""
     lang = await _lang(callback.from_user.id)
     await state.update_data(return_to_order=True)
     await state.set_state(WalletStates.waiting_address)
@@ -152,8 +139,8 @@ async def redirect_manual_wallet_to_registry(callback: CallbackQuery, state: FSM
 
 
 @router.message(OrderStates.waiting_wallet)
-async def redirect_manual_wallet_message_to_registry(message: Message, state: FSMContext):
-    """Redirect legacy order wallet input into the one-time wallet registry."""
+async def open_wallet_registry_from_message(message: Message, state: FSMContext):
+    """Start wallet registration when the customer types while choosing a wallet."""
     lang = await _lang(message.from_user.id)
     await state.update_data(return_to_order=True)
     await state.set_state(WalletStates.waiting_address)
@@ -166,46 +153,4 @@ async def redirect_manual_wallet_message_to_registry(message: Message, state: FS
             "The network and address will be validated automatically, then the matching QR will be requested once.\n\n🔒 You will not need to send the QR again for this address."
         ),
         reply_markup=_cancel_order_keyboard(lang),
-    )
-
-
-@router.callback_query(F.data == "save_address_skip")
-@router.callback_query(F.data == "skip_wallet_qr")
-async def block_legacy_wallet_skip(callback: CallbackQuery, state: FSMContext):
-    """Legacy safety net: per-order QR upload/skip is no longer supported."""
-    lang = await _lang(callback.from_user.id)
-    await state.update_data(return_to_order=True)
-    await state.set_state(WalletStates.waiting_address)
-    await callback.message.edit_text(
-        "❌ <b>لا يمكن تخطي التحقق.</b>\n\nأضف محفظة موثقة مرة واحدة: العنوان أولاً ثم QR المطابق. بعد الحفظ سيُستخدم QR تلقائياً."
-        if lang == "ar" else
-        "❌ <b>Verification cannot be skipped.</b>\n\nRegister a wallet once: address first, then the matching QR. After saving, the QR will be reused automatically.",
-        reply_markup=_cancel_order_keyboard(lang),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.message(OrderStates.waiting_wallet_qr, F.photo)
-async def block_legacy_wallet_qr_upload(message: Message, state: FSMContext):
-    """Prevent stale FSM sessions from accepting a QR per order."""
-    lang = await _lang(message.from_user.id)
-    await state.update_data(return_to_order=True)
-    await state.set_state(WalletStates.waiting_address)
-    await message.answer(
-        "❌ هذا الطلب لا يستقبل QR منفصلاً. سجّل المحفظة مرة واحدة من خلال العنوان ثم QR المطابق؛ سيُحفظ ويُستخدم تلقائياً."
-        if lang == "ar" else
-        "❌ This order does not accept a separate QR. Register the wallet once with the address and matching QR; it will be stored and reused automatically.",
-        reply_markup=_cancel_order_keyboard(lang),
-    )
-
-
-@router.message(OrderStates.waiting_wallet_qr)
-async def block_legacy_wallet_qr_message(message: Message):
-    """Prevent stale FSM sessions from falling through to legacy QR handlers."""
-    lang = await _lang(message.from_user.id)
-    await message.answer(
-        "❌ لا يتم رفع QR مع كل طلب. اختر محفظة موثقة محفوظة أو أضف محفظة جديدة مرة واحدة."
-        if lang == "ar" else
-        "❌ QR is not uploaded with every order. Use a saved verified wallet or register a new wallet once."
     )
