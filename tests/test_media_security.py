@@ -3,6 +3,7 @@ import io
 import pytest
 from PIL import Image
 
+import services.media_security as media_security
 from services.media_security import (
     MAX_UPLOAD_BYTES,
     validate_image_payload,
@@ -45,7 +46,8 @@ def test_unsupported_extension_is_rejected():
         validate_image_payload(payload, mime_type="application/octet-stream", file_name="payload.exe")
 
 
-def test_image_pixel_limit_is_enforced():
-    payload = _image_bytes("PNG", (7000, 7000))
+def test_image_pixel_limit_is_enforced(monkeypatch):
+    monkeypatch.setattr(media_security, "MAX_IMAGE_PIXELS", 100)
+    payload = _image_bytes("PNG", (32, 32))
     with pytest.raises(ValueError, match="pixel count"):
         validate_image_payload(payload, mime_type="image/png", file_name="large.png")
