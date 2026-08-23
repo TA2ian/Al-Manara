@@ -12,8 +12,9 @@ def test_verification_pending_guard_is_registered_before_verification():
 def test_pending_guard_blocks_new_verification_and_stale_qr_submission():
     source = (ROOT / "handlers/verification_pending_guard.py").read_text(encoding="utf-8")
     assert 'status == "pending"' in source
-    assert "لا يمكنك إرسال طلب توثيق جديد" in source
-    assert "لا يمكن إرسال طلب توثيق ثانٍ" in source
+    assert "تم استلام بياناتك بالفعل" in source
+    assert "لن يسمح النظام بإرسال طلب توثيق آخر" in source
+    assert "تم منع إنشاء طلب توثيق ثانٍ" in source
     assert "await state.clear()" in source
 
 
