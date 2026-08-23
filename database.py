@@ -160,7 +160,7 @@ async def init_db():
             ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_syp())
 
         # Runtime payment methods have exactly two canonical ShamCash codes.
-        # Any non-canonical row is rejected rather than becoming a second path.
+        # The legacy shamcash_syp row is migration-only and must never become an active runtime path.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_canonical_payment_method_row()
             RETURNS TRIGGER AS $$
@@ -179,6 +179,49 @@ async def init_db():
         await conn.execute("""CREATE TRIGGER trg_enforce_canonical_payment_method_row
             BEFORE INSERT OR UPDATE OF code, currency, provider ON payment_methods
             FOR EACH ROW EXECUTE FUNCTION enforce_canonical_payment_method_row()""")
+
+        # Every new order must snapshot one currently enabled canonical ShamCash method.
+        # The snapshot is immutable order data: later admin changes affect future orders only.
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION snapshot_order_payment_method()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                method RECORD;
+            BEGIN
+                IF NEW.payment_method_code IS NULL OR BTRIM(NEW.payment_method_code) = '' THEN
+                    RAISE EXCEPTION 'order payment method code is required' USING ERRCODE='23514';
+                END IF;
+
+                IF NEW.payment_method_code NOT IN ('shamcash_usd', 'shamcash_new_syp') THEN
+                    RAISE EXCEPTION 'order payment method must use a canonical ShamCash code: %', NEW.payment_method_code USING ERRCODE='23514';
+                END IF;
+
+                SELECT code, provider, currency, account_identifier, qr_photo_id
+                  INTO method
+                  FROM payment_methods
+                 WHERE provider = 'ShamCash'
+                   AND code IN ('shamcash_usd', 'shamcash_new_syp')
+                   AND code = NEW.payment_method_code
+                   AND currency = NEW.payment_currency
+                   AND enabled = TRUE
+                   AND NULLIF(BTRIM(account_identifier), '') IS NOT NULL
+                   AND qr_photo_id IS NOT NULL
+                 LIMIT 1;
+
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION 'enabled canonical payment method is unavailable: %', NEW.payment_method_code USING ERRCODE='23514';
+                END IF;
+
+                NEW.payment_account_snapshot := method.account_identifier;
+                NEW.payment_qr_photo_id := method.qr_photo_id;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_payment_method ON orders")
+        await conn.execute("""CREATE TRIGGER trg_snapshot_order_payment_method
+            BEFORE INSERT ON orders
+            FOR EACH ROW EXECUTE FUNCTION snapshot_order_payment_method()""")
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
