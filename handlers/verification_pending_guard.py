@@ -6,6 +6,7 @@ makes the database verification status authoritative: a user with a pending
 review cannot start or submit another verification request.
 """
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -31,7 +32,7 @@ async def block_duplicate_verification_start(callback: CallbackQuery, state: FSM
     """Prevent restarting verification while a review is already pending."""
     user = await _verification_status(callback.from_user.id)
     if not user:
-        await callback.answer("❌ الرجاء البدء أولاً: /start" if True else "", show_alert=True)
+        await callback.answer("❌ الرجاء البدء أولاً: /start", show_alert=True)
         return
 
     lang = user["language"] or "ar"
@@ -56,9 +57,8 @@ async def block_duplicate_verification_start(callback: CallbackQuery, state: FSM
         )
         return
 
-    # This callback belongs to the authoritative verification router when
-    # there is no pending/approved state. Do not duplicate its flow here.
-    await callback.answer()
+    # Let the authoritative verification router handle the normal flow.
+    raise SkipHandler
 
 
 @router.message(VerificationStates.waiting_shamcash_qr, F.photo)
