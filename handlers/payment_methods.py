@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from database import get_pool
 from keyboards.inline import payment_methods_keyboard, payment_method_actions, admin_menu_keyboard
+from services.settings_service import SettingsService
 
 router = Router()
 
@@ -232,6 +233,13 @@ async def payment_method_account_save(message: Message, state: FSMContext):
                VALUES ($1, 'payment_method_account_update', $2, $3, 'info')""",
             message.from_user.id, f"payment_method={code}", value,
         )
+
+    if row["currency"] == "USD":
+        Config.set_shamcash_usd(value)
+        await SettingsService.set("shamcash_usd", value)
+    elif row["currency"] == "NEW.SYP":
+        Config.set_shamcash_syp(value)
+        await SettingsService.set("shamcash_syp", value)
 
     await message.answer(f"✅ تم حفظ حساب ShamCash لـ {row['currency']}.")
     await state.clear()
