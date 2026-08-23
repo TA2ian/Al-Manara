@@ -9,16 +9,6 @@ async def install_order_constraints(conn):
         DECLARE wallet_row RECORD; customer_row RECORD;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                IF NEW.status IN ('payment_confirmed', 'completed')
-                   AND OLD.wallet_qr_photo_id IS NOT NULL
-                   AND NEW.wallet_qr_photo_id IS NULL
-                   AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id
-                   AND NEW.wallet_address IS NOT DISTINCT FROM OLD.wallet_address
-                   AND NEW.network IS NOT DISTINCT FROM OLD.network THEN
-                    NEW.wallet_qr_photo_id := OLD.wallet_qr_photo_id;
-                    RETURN NEW;
-                END IF;
-
                 IF NEW.user_id IS DISTINCT FROM OLD.user_id
                    OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
                    OR NEW.network IS DISTINCT FROM OLD.network
@@ -85,7 +75,6 @@ async def install_order_constraints(conn):
         RETURNS TRIGGER AS $$
         DECLARE method_row RECORD;
         BEGIN
-            IF NEW.payment_currency = 'SYP' THEN NEW.payment_currency := 'NEW.SYP'; END IF;
             IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN
                 RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514';
             END IF;
