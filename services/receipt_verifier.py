@@ -3,6 +3,7 @@ import asyncio
 import io
 import logging
 import re
+import time
 from datetime import datetime
 
 from PIL import Image, ImageOps
@@ -11,8 +12,8 @@ import pytesseract
 from services.formatters import money
 
 logger = logging.getLogger(__name__)
-OCR_TIMEOUT_SECONDS = 20
-OCR_MAX_DIMENSION = 1800
+OCR_TIMEOUT_SECONDS = 15
+OCR_MAX_DIMENSION = 1400
 
 
 class ReceiptVerifier:
@@ -35,7 +36,12 @@ class ReceiptVerifier:
     @staticmethod
     async def _ocr(image_bytes: bytes) -> str:
         """Run CPU-bound Tesseract work outside the asyncio event loop."""
-        return await asyncio.to_thread(ReceiptVerifier._ocr_sync, image_bytes)
+        started = time.perf_counter()
+        try:
+            return await asyncio.to_thread(ReceiptVerifier._ocr_sync, image_bytes)
+        finally:
+            elapsed = time.perf_counter() - started
+            logger.info("receipt_ocr_completed elapsed_seconds=%.3f bytes=%d", elapsed, len(image_bytes))
 
     @staticmethod
     async def analyze_receipt(image_bytes: bytes, expected_amount: float) -> dict:
@@ -88,6 +94,7 @@ class ReceiptVerifier:
     @staticmethod
     async def verify_shamcash_receipt(image_bytes: bytes, order_date: datetime, customer_name: str, customer_shamcash_account: str, admin_name: str, admin_shamcash_account: str, expected_amount: float, payment_currency: str = "USD") -> dict:
         """Compare receipt date, identities, accounts and amount without auto-completing payment."""
+        started = time.perf_counter()
         try:
             text = await ReceiptVerifier._ocr(image_bytes)
             extracted = ReceiptVerifier._extract_shamcash_fields(text)
@@ -121,6 +128,8 @@ class ReceiptVerifier:
         except Exception as exc:
             logger.exception("ShamCash receipt verification failed")
             return {"success": False, "text": "", "fields": {}, "matches": {}, "score": 0, "score_label": "فاشل", "summary": f"❌ فشل تحليل الإيصال: {exc}", "details": [f"❌ خطأ تقني: {exc}"], "auto_verified": False, "matched_amount": None, "payment_currency": payment_currency}
+        finally:
+            logger.info("receipt_verification_completed elapsed_seconds=%.3f", time.perf_counter() - started)
 
     @staticmethod
     def _extract_shamcash_fields(text: str) -> dict:
