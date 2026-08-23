@@ -96,8 +96,13 @@ async def start_order_authoritative(message: Message, state: FSMContext):
             parse_mode="HTML",
         )
         return
-    await message.answer(locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=preset_amounts_keyboard(lang))
+
+    # A new order must always start from a clean FSM snapshot. This prevents
+    # stale data from a previous/abandoned order confirmation from leaking into
+    # the new flow and producing misleading "incomplete order" errors.
+    await state.clear()
     await state.set_state(OrderStates.waiting_amount)
+    await message.answer(locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=preset_amounts_keyboard(lang))
 
 
 async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, lang: str, user_id: int):
