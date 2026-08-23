@@ -196,6 +196,7 @@ async def init_db():
                     RAISE EXCEPTION 'order payment method must use a canonical ShamCash code: %', NEW.payment_method_code USING ERRCODE='23514';
                 END IF;
 
+                -- Canonical runtime source: payment_methods WHERE provider = 'ShamCash'.
                 SELECT code, provider, currency, account_identifier, qr_photo_id
                   INTO method
                   FROM payment_methods
