@@ -21,8 +21,14 @@ def test_admin_dashboard_is_not_auto_sent_during_flow_handlers():
         assert "reply_markup=admin_menu_keyboard (" not in source, relative_path
         assert '"⚙️ <b>لوحة التحكم</b>"' not in source, relative_path
         assert '"⚙️ <b>Admin Dashboard</b>"' not in source, relative_path
+        assert 'await callback.message.answer("⚙️ لوحة التحكم"' not in source, relative_path
 
 
 def test_dashboard_keyboard_is_only_a_controlled_navigation_target():
     source = (ROOT / "keyboards/inline.py").read_text(encoding="utf-8")
     assert 'callback_data="admin_menu"' in source
+
+
+def test_admin_entry_owns_dashboard_message_creation():
+    entry = (ROOT / "handlers/admin_entry.py").read_text(encoding="utf-8")
+    assert "reply_markup=admin_menu_keyboard()" in entry
