@@ -117,19 +117,6 @@ async def on_startup(bot: Bot):
     if maintenance_active:
         logger.info("Maintenance mode is ACTIVE (from DB)")
 
-    shamcash_name = await SettingsService.get('shamcash_name', '')
-    if shamcash_name:
-        Config.set_shamcash_name(shamcash_name)
-        logger.info("ShamCash name loaded from DB")
-    shamcash_usd = await SettingsService.get('shamcash_usd', '')
-    if shamcash_usd:
-        Config.set_shamcash_usd(shamcash_usd)
-        logger.info("ShamCash USD account loaded from DB")
-    shamcash_syp = await SettingsService.get('shamcash_syp', '')
-    if shamcash_syp:
-        Config.set_shamcash_syp(shamcash_syp)
-        logger.info("ShamCash SYP account loaded from DB")
-
     if Config.WEBHOOK_URL:
         await bot.set_webhook(url=Config.WEBHOOK_URL, secret_token=Config.SECRET_TOKEN, drop_pending_updates=True)
         logger.info("Webhook set: %s", Config.WEBHOOK_URL)
