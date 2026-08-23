@@ -38,13 +38,16 @@ def test_order_rejection_uses_authoritative_transition():
     assert "admin_id=callback.from_user.id" in source
 
 
-def test_wallet_add_message_explains_acceptance_and_verification_sequence():
+def test_wallet_add_message_describes_all_supported_inputs_and_matching():
     source = inspect.getsource(wallets.wallet_add)
-    assert "لن يتم حفظ العنوان بمجرد إرساله" in source
-    assert "يتحقق البوت أولاً من صحة العنوان" in source
-    assert "QR لنفس العنوان" in source
-    assert "كعنوان <b>موثق</b>" in source
-    assert "لا يمكن تخطيه" in source
+    assert "عنوان المحفظة" in source
+    assert "صورة <b>QR</b>" in source
+    assert "شارك المحفظة مباشرة" in source
+    assert "العنوان مع QR" in source
+    assert "يطابق العنوان مع QR" in source
+    assert "BEP20" in source
+    assert "TRC20" in source
+    assert "لن يتم حفظ العنوان بمجرد إرساله" not in source
 
 
 if __name__ == "__main__":
