@@ -1,10 +1,15 @@
-"""Authoritative admin settings policy for ShamCash and operational settings."""
+"""Authoritative operational admin settings.
+
+Exchange rate is owned by ``admin_rate_policy`` and ShamCash payment accounts
+and QR codes are owned by ``payment_methods``. This module contains only
+operational settings that have one runtime authority.
+"""
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import Config
 from keyboards.inline import admin_menu_keyboard, settings_keyboard
@@ -26,7 +31,8 @@ async def _show_settings(callback: CallbackQuery, state: FSMContext | None = Non
     if state is not None:
         await state.clear()
     await callback.message.edit_text(
-        "⚙️ <b>الإعدادات</b>\nاختر الإعداد الذي تريد تعديله:",
+        "⚙️ <b>الإعدادات التشغيلية</b>\n\n"
+        "سعر الصرف ووسائل الدفع لهما لوحات مستقلة لتجنب تكرار مسارات الإعداد.",
         reply_markup=settings_keyboard(),
         parse_mode="HTML",
     )
@@ -73,99 +79,6 @@ async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext):
         return
     await _show_settings(callback, state)
     await callback.answer()
-
-
-@router.callback_query(F.data == "setting_shamcash_usd")
-async def setting_shamcash_usd(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await callback.message.edit_text(
-        f"📱 <b>حساب شام كاش USD الحالي:</b>\n<code>{Config.get_shamcash_usd()}</code>\n\nأرسل رقم الحساب الجديد:",
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_shamcash_usd)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_shamcash_usd)
-async def admin_set_shamcash_usd(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    account = (message.text or "").strip()
-    if not account:
-        await message.answer("❌ رقم الحساب فارغ.")
-        return
-    Config.SHAMCASH_USD_ACCOUNT = account
-    Config.set_shamcash_usd(account)
-    await SettingsService.set("shamcash_usd", account)
-    await message.answer(f"✅ تم تحديث حساب شام كاش USD:\n<code>{account}</code>", parse_mode="HTML")
-    await state.clear()
-    await _back_to_admin(message)
-
-
-@router.callback_query(F.data == "setting_shamcash_syp")
-async def setting_shamcash_syp(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await callback.message.edit_text(
-        f"📱 <b>حساب شام كاش NEW.SYP الحالي:</b>\n<code>{Config.get_shamcash_syp()}</code>\n\nأرسل رقم الحساب الجديد لعملة NEW.SYP:",
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_shamcash_syp)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_shamcash_syp)
-async def admin_set_shamcash_syp(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    account = (message.text or "").strip()
-    if not account:
-        await message.answer("❌ رقم الحساب فارغ.")
-        return
-    Config.SHAMCASH_SYP_ACCOUNT = account
-    Config.set_shamcash_syp(account)
-    await SettingsService.set("shamcash_syp", account)
-    await message.answer(f"✅ تم تحديث حساب شام كاش NEW.SYP:\n<code>{account}</code>", parse_mode="HTML")
-    await state.clear()
-    await _back_to_admin(message)
-
-
-@router.callback_query(F.data == "setting_shamcash_name")
-async def setting_shamcash_name(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    await callback.message.edit_text(
-        f"👤 <b>اسم حساب شام كاش الحالي:</b>\n{Config.get_shamcash_name() or 'N/A'}\n\nأرسل الاسم الجديد:",
-        parse_mode="HTML",
-    )
-    await state.set_state(AdminStates.waiting_shamcash_name)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_shamcash_name)
-async def admin_set_shamcash_name(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    name = (message.text or "").strip()
-    if not name:
-        await message.answer("❌ الاسم فارغ.")
-        return
-    Config.SHAMCASH_NAME = name
-    Config.set_shamcash_name(name)
-    await SettingsService.set("shamcash_name", name)
-    await message.answer(f"✅ تم تحديث اسم حساب شام كاش: {name}")
-    await state.clear()
-    await _back_to_admin(message)
 
 
 @router.callback_query(F.data == "setting_fees")
@@ -250,22 +163,21 @@ async def setting_limits(callback: CallbackQuery):
     minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
     maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
     daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⬇️ الحد الأدنى", callback_data="setting_limit_min"),
+            InlineKeyboardButton(text="⬆️ الحد الأقصى", callback_data="setting_limit_max"),
+        ],
+        [InlineKeyboardButton(text="📅 الحد اليومي", callback_data="setting_limit_daily")],
+        [InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")],
+    ])
     await callback.message.edit_text(
         "📊 <b>حدود الطلبات</b>\n\n"
         f"🔹 الحد الأدنى: <b>{minimum:g} USDT</b>\n"
         f"🔹 الحد الأقصى: <b>{maximum:g} USDT</b>\n"
         f"🔹 الحد اليومي للعميل: <b>{daily:g} USDT</b>\n\n"
         "اختر الحد الذي تريد تعديله:",
-        reply_markup=__import__("aiogram.types", fromlist=["InlineKeyboardMarkup", "InlineKeyboardButton"]).InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    __import__("aiogram.types", fromlist=["InlineKeyboardButton"]).InlineKeyboardButton(text="⬇️ الحد الأدنى", callback_data="setting_limit_min"),
-                    __import__("aiogram.types", fromlist=["InlineKeyboardButton"]).InlineKeyboardButton(text="⬆️ الحد الأقصى", callback_data="setting_limit_max"),
-                ],
-                [__import__("aiogram.types", fromlist=["InlineKeyboardButton"]).InlineKeyboardButton(text="📅 الحد اليومي", callback_data="setting_limit_daily")],
-                [__import__("aiogram.types", fromlist=["InlineKeyboardButton"]).InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")],
-            ]
-        ),
+        reply_markup=keyboard,
         parse_mode="HTML",
     )
     await callback.answer()
