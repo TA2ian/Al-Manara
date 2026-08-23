@@ -33,35 +33,52 @@ async def _sync_customer_status(bot: Bot, order, text: str):
             parse_mode="HTML",
         )
     except Exception:
-        logger.warning("Could not update customer status message for order %s", order["order_number"], exc_info=True)
+        logger.warning(
+            "Could not update customer status message for order %s",
+            order["order_number"],
+            exc_info=True,
+        )
 
 
 @router.callback_query(F.data.startswith("admin_reject_receipt_"))
 async def reject_receipt(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True); return
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
     order_id = int(callback.data.replace("admin_reject_receipt_", ""))
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.language FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id, u.full_name, u.language "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id,
         )
         if not order:
-            await callback.answer("الطلب غير موجود", show_alert=True); return
+            await callback.answer("الطلب غير موجود", show_alert=True)
+            return
         if order["status"] != "receipt_received":
-            await callback.answer("لا يمكن رفض الإيصال من الحالة الحالية", show_alert=True); return
+            await callback.answer("لا يمكن رفض الإيصال من الحالة الحالية", show_alert=True)
+            return
+
         try:
-            await transition_order(conn, order_id, "waiting_payment", admin_id=callback.from_user.id)
+            await transition_order(
+                conn,
+                order_id,
+                "waiting_payment",
+                admin_id=callback.from_user.id,
+            )
         except InvalidOrderTransition as exc:
             logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
-            await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True); return
+            await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
+            return
 
     remaining = ""
     if order["payment_deadline"]:
         seconds = int((order["payment_deadline"] - datetime.now()).total_seconds())
         if seconds > 0:
             remaining = f"⏱ الوقت المتبقي: <b>{seconds // 60} دقيقة و{seconds % 60} ثانية</b>"
+
     bot = Bot(token=Config.BOT_TOKEN)
     status_text = (
         f"⚠️ <b>تم رفض إيصال الطلب #{html.escape(order['order_number'])}</b>\n\n"
@@ -79,39 +96,57 @@ async def reject_receipt(callback: CallbackQuery):
             "⚠️ <b>تم رفض الإيصال</b>\n\n"
             f"عذراً {html.escape(order['full_name'] or 'عميلنا العزيز')}، الإيصال غير مطابق أو غير واضح.\n\n"
             "📌 أرسل إيصالاً جديداً يظهر المبلغ واسم المستفيد والتاريخ.\n\n"
-            f"📎 اضغط لإعادة رفع الإيصال.\n{remaining}\n\n"
+            "📎 اضغط لإعادة رفع الإيصال.\n"
+            f"{remaining}\n\n"
             "⚠️ إذا انتهت المهلة سيتم إلغاء الطلب تلقائياً.",
-            reply_markup=receipt_upload_keyboard(order_id), parse_mode="HTML",
+            reply_markup=receipt_upload_keyboard(order_id),
+            parse_mode="HTML",
         )
     except Exception:
         logger.exception("Failed to notify receipt rejection for order %s", order_id)
     await callback.answer("❌ تم رفض الإيصال!")
-    await callback.message.edit_text(f"❌ تم رفض إيصال الطلب #{order['order_number']}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"❌ تم رفض إيصال الطلب #{order['order_number']}",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("admin_reject_"), ~F.data.startswith("admin_reject_receipt_"))
 async def reject_order(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True); return
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
     order_id = int(callback.data.replace("admin_reject_", ""))
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id AS user_tg, u.full_name, u.language FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            "SELECT o.*, u.telegram_id AS user_tg, u.full_name, u.language "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id,
         )
         if not order:
-            await callback.answer("الطلب غير موجود", show_alert=True); return
+            await callback.answer("الطلب غير موجود", show_alert=True)
+            return
         if order["status"] not in ("pending", "waiting_payment", "receipt_received"):
-            await callback.answer("لا يمكن رفض الطلب من حالته الحالية", show_alert=True); return
+            await callback.answer("لا يمكن رفض الطلب من حالته الحالية", show_alert=True)
+            return
+
         try:
+            # wallet_qr_photo_id is an immutable order snapshot and must remain
+            # intact even when the order is rejected. Only receipt data is
+            # cleared because it is a review artifact, not the wallet identity.
             await transition_order(
-                conn, order_id, "rejected", admin_id=callback.from_user.id,
-                updates={"wallet_qr_photo_id": None, "receipt_photo_id": None},
+                conn,
+                order_id,
+                "rejected",
+                admin_id=callback.from_user.id,
+                updates={"receipt_photo_id": None},
             )
         except InvalidOrderTransition as exc:
             logger.warning("Order rejection transition failed for %s: %s", order_id, exc)
-            await callback.answer("لا يمكن رفض الطلب من حالته الحالية", show_alert=True); return
+            await callback.answer("لا يمكن رفض الطلب من الحالة الحالية", show_alert=True)
+            return
 
     lang = order["language"] or "ar"
     bot = Bot(token=Config.BOT_TOKEN)
@@ -125,15 +160,27 @@ async def reject_order(callback: CallbackQuery):
     await _sync_customer_status(bot, order, status_text)
     try:
         text = (
-            f"❌ <b>تم رفض طلبك</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {usdt(order['amount_usdt'])} USDT\n\nيمكنك إنشاء طلب جديد من القائمة السفلية."
+            f"❌ <b>تم رفض طلبك</b>\n\n📦 الطلب: #{order['order_number']}\n"
+            f"💰 المبلغ: {usdt(order['amount_usdt'])} USDT\n\n"
+            "يمكنك إنشاء طلب جديد من القائمة السفلية."
         ) if lang == "ar" else (
-            f"❌ <b>Your order was rejected</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {usdt(order['amount_usdt'])} USDT\n\nYou can create a new order from the bottom menu."
+            f"❌ <b>Your order was rejected</b>\n\n📦 Order: #{order['order_number']}\n"
+            f"💰 Amount: {usdt(order['amount_usdt'])} USDT\n\n"
+            "You can create a new order from the bottom menu."
         )
-        await bot.send_message(order["user_tg"], text, parse_mode="HTML", reply_markup=compact_reply_keyboard(lang))
+        await bot.send_message(
+            order["user_tg"],
+            text,
+            parse_mode="HTML",
+            reply_markup=compact_reply_keyboard(lang),
+        )
     except Exception:
         logger.exception("Failed to notify order rejection for %s", order_id)
     await callback.answer("❌ تم رفض الطلب!")
-    await callback.message.edit_text(f"❌ تم رفض الطلب #{order['order_number']}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"❌ تم رفض الطلب #{order['order_number']}",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("admin_noop"))
