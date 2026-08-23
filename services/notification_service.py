@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Send authoritative order/payment notifications."""
+    """Send authoritative order/payment and support notifications."""
 
     def __init__(self, bot: Bot, admin_ids: list):
         self._bot = bot
@@ -29,6 +29,32 @@ class NotificationService:
             logger.error("Failed to notify user %s: %s", user_id, exc)
             raise
 
+    async def notify_feedback(
+        self,
+        user: dict,
+        text: str,
+        attachment_type: str | None = None,
+        attachment_file_id: str | None = None,
+    ):
+        """Forward a validated support submission to every administrator."""
+        user_id = user.get("telegram_id", "N/A")
+        username = user.get("username") or "بدون"
+        body = (
+            "🆘 <b>رسالة دعم جديدة</b>\n\n"
+            f"👤 المستخدم: @{username}\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"📝 الرسالة: {text or 'بدون نص'}"
+        )
+        for admin_id in self._admin_ids:
+            try:
+                await self._bot.send_message(admin_id, body, parse_mode="HTML")
+                if attachment_file_id and attachment_type == "photo":
+                    await self._bot.send_photo(admin_id, attachment_file_id, caption="📎 مرفق من العميل")
+                elif attachment_file_id and attachment_type == "pdf":
+                    await self._bot.send_document(admin_id, attachment_file_id, caption="📎 ملف PDF مرفق من العميل")
+            except Exception as exc:
+                logger.error("Failed to notify admin %s about feedback: %s", admin_id, exc)
+
     async def notify_new_order(self, order: dict):
         text = (
             "📦 <b>طلب جديد!</b>\n\n"
@@ -41,12 +67,7 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot as one mandatory QR message.
-
-        The account, amount, currency and deadline are included in the same
-        Telegram photo caption as the QR. This avoids approving an order after
-        only a partial payment-instructions message was delivered.
-        """
+        """Deliver the immutable payment snapshot as one mandatory QR message."""
         from config import Config
         from services.exchange_service import ExchangeService
 
@@ -61,11 +82,7 @@ class NotificationService:
         if not account or not qr_photo_id:
             logger.error("Incomplete payment snapshot for approved order %s: account=%r qr=%r", order_number, bool(account), bool(qr_photo_id))
             try:
-                await self.notify_user(
-                    user_id,
-                    (f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة." if lang == "ar" else
-                     f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration."),
-                )
+                await self.notify_user(user_id, (f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة." if lang == "ar" else f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration."))
             except Exception:
                 logger.exception("Failed to send incomplete-payment warning for %s", order_number)
             return False
@@ -75,11 +92,7 @@ class NotificationService:
             old_syp_amount = order.get("old_syp_total")
             if old_syp_amount is None:
                 old_syp_amount = ExchangeService.old_syp_equivalent(order.get("total_amount"))
-            old_syp_line = (
-                f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة"
-                if lang == "ar" else
-                f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
-            )
+            old_syp_line = f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة" if lang == "ar" else f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
 
         caption = (
             f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
@@ -101,21 +114,9 @@ class NotificationService:
             "⚠️ <b>Do not send funds until these details match.</b>"
         )
 
+        await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
         try:
-            await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
-        except Exception as exc:
-            logger.exception("Failed to send mandatory payment snapshot for order %s", order_number)
-            raise RuntimeError("payment_snapshot_delivery_failed") from exc
-
-        try:
-            await self.notify_user(
-                user_id,
-                "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
-                if lang == "ar" else
-                "📎 After payment, use the receipt-upload button to submit your proof.",
-            )
+            await self.notify_user(user_id, "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك." if lang == "ar" else "📎 After payment, use the receipt-upload button to submit your proof.")
         except Exception:
-            # The mandatory payment snapshot was already delivered; a failure of
-            # this secondary instruction must not roll the approved order back.
             logger.exception("Failed to send secondary receipt instruction for %s", order_number)
         return True
