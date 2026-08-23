@@ -11,6 +11,7 @@ def create_dispatcher() -> Dispatcher:
         order_wallet_qr_policy,
         payment_currency_policy,
         legacy_wallet_guard,
+        wallet_qr_first_policy,
         wallets,
         order_amount_policy,
         order_confirmation_policy,
@@ -73,6 +74,11 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(order_wallet_qr_policy.router)
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
+    # QR-first registration must precede wallets.router's broad
+    # WalletStates.waiting_address message handler. This supports QR-only
+    # registration and QR + address/caption matching without changing the
+    # existing address-first flow.
+    dp.include_router(wallet_qr_first_policy.router)
     dp.include_router(wallets.router)
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
