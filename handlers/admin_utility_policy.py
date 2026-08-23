@@ -149,28 +149,6 @@ async def admin_order_timeline(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_backups")
-async def admin_backups(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        order_count = await conn.fetchval("SELECT COUNT(*) FROM orders")
-        user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
-        rate_count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
-        feedback_count = await conn.fetchval("SELECT COUNT(*) FROM feedback_messages")
-    await callback.message.edit_text(
-        "📋 <b>النسخ الاحتياطية</b>\n\n"
-        f"📊 إحصائيات قاعدة البيانات:\n👤 المستخدمون: {user_count}\n📦 الطلبات: {order_count}\n"
-        f"💱 أسعار الصرف: {rate_count}\n✉️ الرسائل: {feedback_count}\n\n"
-        f"🔹 الاحتفاظ بالنسخ الاحتياطية: {Config.BACKUP_RETENTION_DAYS} يوماً\n"
-        "🔹 التصدير اليدوي غير متوفر حالياً.",
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data == "admin_logs")
 async def admin_logs(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
