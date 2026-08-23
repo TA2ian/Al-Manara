@@ -18,6 +18,7 @@ from database import get_pool
 from keyboards.inline import main_menu_inline
 from keyboards.reply import compact_reply_keyboard, phone_share_keyboard
 from services.locale_service import locale_service
+from services.media_security import validate_image_payload
 from states import VerificationStates
 
 logger = logging.getLogger(__name__)
@@ -159,8 +160,16 @@ async def receive_shamcash_identity(message: Message, state: FSMContext):
     raw = io.BytesIO()
     try:
         await message.bot.download(file=message.photo[-1].file_id, destination=raw)
+        validate_image_payload(raw.getvalue(), file_name="telegram-photo")
+    except ValueError:
+        await message.answer(
+            "❌ صورة QR غير صالحة أو غير آمنة. أرسل صورة QR واضحة بصيغة مدعومة."
+            if lang == "ar" else
+            "❌ The QR image is invalid or unsafe. Send a clear QR image in a supported format."
+        )
+        return
     except Exception:
-        logger.exception("Failed to download ShamCash verification QR")
+        logger.exception("Failed to download or validate ShamCash verification QR")
         await message.answer("❌ تعذر قراءة صورة QR. أعد إرسالها بوضوح." if lang == "ar" else "❌ Could not read the QR image. Please send it again clearly.")
         return
 
