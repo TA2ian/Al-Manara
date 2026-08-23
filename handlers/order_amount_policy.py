@@ -11,10 +11,32 @@ from keyboards.inline import cancel_keyboard, preset_amounts_keyboard, start_ver
 from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.formatters import usdt
 from services.locale_service import locale_service
+from services.settings_service import SettingsService
 from states import OrderStates, WalletStates
 
 router = Router()
 ACTIVE_STATUSES = ("pending", "waiting_payment", "receipt_received", "payment_confirmed")
+
+
+async def _runtime_order_limits() -> tuple[Decimal, Decimal, Decimal]:
+    values = []
+    defaults = (Config.MIN_ORDER, Config.MAX_ORDER, Config.DAILY_LIMIT)
+    keys = ("min_order", "max_order", "daily_limit")
+    for key, default in zip(keys, defaults):
+        raw = await SettingsService.get(key, str(default))
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            value = Decimal(str(default))
+        values.append(value)
+    minimum, maximum, daily = values
+    if minimum <= 0:
+        minimum = Decimal(str(Config.MIN_ORDER))
+    if maximum < minimum:
+        maximum = Decimal(str(Config.MAX_ORDER))
+    if daily < maximum:
+        daily = Decimal(str(Config.DAILY_LIMIT))
+    return minimum, maximum, daily
 
 
 async def _user(telegram_id: int):
@@ -97,9 +119,10 @@ async def start_order_authoritative(message: Message, state: FSMContext):
         )
         return
 
+    minimum, maximum, _ = await _runtime_order_limits()
     await state.clear()
     await state.set_state(OrderStates.waiting_amount)
-    await message.answer(locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=preset_amounts_keyboard(lang))
+    await message.answer(locale_service.get("enter_amount", lang, min=minimum, max=maximum), reply_markup=preset_amounts_keyboard(lang))
 
 
 async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, lang: str, user_id: int):
@@ -119,17 +142,18 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
         )
         await state.clear()
         return
-    if amount < Config.MIN_ORDER or amount > Config.MAX_ORDER:
-        await message.answer(locale_service.get("invalid_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER))
+    minimum, maximum, daily_limit = await _runtime_order_limits()
+    if amount < minimum or amount > maximum:
+        await message.answer(locale_service.get("invalid_amount", lang, min=minimum, max=maximum))
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
         today_total = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM orders WHERE user_id = $1 AND created_at >= CURRENT_DATE", user["id"])
-    if Decimal(str(today_total or 0)) + amount > Decimal(str(Config.DAILY_LIMIT)):
-        remaining = Decimal(str(Config.DAILY_LIMIT)) - Decimal(str(today_total or 0))
+    if Decimal(str(today_total or 0)) + amount > daily_limit:
+        remaining = daily_limit - Decimal(str(today_total or 0))
         await message.answer(
-            f"❌ تجاوز الحد اليومي.\nالحد اليومي: {usdt(Config.DAILY_LIMIT)} USDT\nالمستخدم اليوم: {usdt(today_total)} USDT\nالمبلغ المطلوب: {usdt(amount)} USDT\nالمتبقي: {usdt(max(remaining, Decimal('0')))} USDT" if lang == "ar" else
-            f"❌ The daily limit would be exceeded.\nDaily limit: {usdt(Config.DAILY_LIMIT)} USDT\nUsed today: {usdt(today_total)} USDT\nRequested: {usdt(amount)} USDT\nRemaining: {usdt(max(remaining, Decimal('0')))} USDT"
+            f"❌ تجاوز الحد اليومي.\nالحد اليومي: {usdt(daily_limit)} USDT\nالمستخدم اليوم: {usdt(today_total)} USDT\nالمبلغ المطلوب: {usdt(amount)} USDT\nالمتبقي: {usdt(max(remaining, Decimal('0')))} USDT" if lang == "ar" else
+            f"❌ The daily limit would be exceeded.\nDaily limit: {usdt(daily_limit)} USDT\nUsed today: {usdt(today_total)} USDT\nRequested: {usdt(amount)} USDT\nRemaining: {usdt(max(remaining, Decimal('0')))} USDT"
         )
         return
     await state.update_data(amount_usdt=amount, order_amount_usdt=amount)
@@ -153,7 +177,8 @@ async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
 async def enter_amount_custom(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] if user else "ar") or "ar"
-    await callback.message.edit_text(locale_service.get("enter_amount_custom", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=cancel_keyboard(lang))
+    minimum, maximum, _ = await _runtime_order_limits()
+    await callback.message.edit_text(locale_service.get("enter_amount_custom", lang, min=minimum, max=maximum), reply_markup=cancel_keyboard(lang))
     await callback.answer()
 
 
@@ -164,6 +189,7 @@ async def enter_amount(message: Message, state: FSMContext):
     try:
         amount = Decimal((message.text or "").strip().replace(",", ""))
     except (InvalidOperation, ValueError):
-        await message.answer(locale_service.get("invalid_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER))
+        minimum, maximum, _ = await _runtime_order_limits()
+        await message.answer(locale_service.get("invalid_amount", lang, min=minimum, max=maximum))
         return
     await _accept_amount(message, state, amount, lang, message.from_user.id)
