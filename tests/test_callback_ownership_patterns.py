@@ -7,19 +7,23 @@ def _matches(patterns, callback_data: str) -> bool:
     return any(pattern.match(callback_data) for pattern in patterns)
 
 
-def test_manual_receipt_review_callback_is_resource_bound():
+def test_order_callbacks_are_resource_bound():
     assert _matches(ORDER_ID_PATTERNS, "manual_receipt_review_123")
-
-
-def test_receipt_upload_callback_is_resource_bound():
     assert _matches(ORDER_ID_PATTERNS, "upload_receipt_123")
+    assert _matches(ORDER_ID_PATTERNS, "retry_receipt_123")
+    assert _matches(ORDER_ID_PATTERNS, "manual_review_123")
+    assert _matches(ORDER_ID_PATTERNS, "rate_123")
 
 
 def test_wallet_callbacks_are_resource_bound():
     assert _matches(WALLET_ID_PATTERNS, "del_addr_123")
     assert _matches(WALLET_ID_PATTERNS, "select_addr_123")
+    assert _matches(WALLET_ID_PATTERNS, "set_default_addr_123")
+    assert _matches(WALLET_ID_PATTERNS, "view_addr_123")
+    assert _matches(WALLET_ID_PATTERNS, "order_use_saved_123")
 
 
 def test_unrelated_callbacks_are_not_resource_bound():
     assert not _matches(ORDER_ID_PATTERNS, "menu_feedback")
     assert not _matches(WALLET_ID_PATTERNS, "menu_feedback")
+    assert not _matches(WALLET_ID_PATTERNS, "order_wallet_manual")
