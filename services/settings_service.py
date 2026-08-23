@@ -6,6 +6,12 @@ from database import get_pool
 logger = logging.getLogger(__name__)
 
 
+_SHAMCASH_PAYMENT_METHODS = {
+    "shamcash_usd": ("shamcash_usd", "USD"),
+    "shamcash_syp": ("shamcash_new_syp", "NEW.SYP"),
+}
+
+
 class SettingsService:
     """Settings stored in DB and cached in memory for fast access."""
 
@@ -40,17 +46,32 @@ class SettingsService:
 
     @classmethod
     async def set(cls, key: str, value: str):
-        """Persist a setting before publishing it to the process cache."""
+        """Persist a setting and keep legacy ShamCash settings synchronized with payment methods."""
         pool = await get_pool()
         if pool:
             async with pool.acquire() as conn:
-                await conn.execute(
-                    """INSERT INTO bot_settings (key, value)
-                       VALUES ($1, $2)
-                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
-                    key,
-                    value,
-                )
+                async with conn.transaction():
+                    await conn.execute(
+                        """INSERT INTO bot_settings (key, value)
+                           VALUES ($1, $2)
+                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+                        key,
+                        value,
+                    )
+                    payment_method = _SHAMCASH_PAYMENT_METHODS.get(key)
+                    if payment_method:
+                        method_code, currency = payment_method
+                        await conn.execute(
+                            """UPDATE payment_methods
+                               SET account_identifier = $1,
+                                   updated_at = NOW()
+                             WHERE provider = 'ShamCash'
+                               AND code = $2
+                               AND currency = $3""",
+                            value,
+                            method_code,
+                            currency,
+                        )
         cls._cache[key] = value
         cls._initialized = True
         logger.info("Setting saved: %s", key)
