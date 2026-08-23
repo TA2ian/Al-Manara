@@ -6,8 +6,7 @@ operational settings that have one runtime authority.
 """
 from decimal import Decimal, InvalidOperation
 
-from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -23,8 +22,12 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-async def _back_to_admin(message: Message):
-    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+async def _back_to_admin(message: Message) -> None:
+    await message.answer(
+        "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def _show_settings(callback: CallbackQuery, state: FSMContext | None = None) -> None:
@@ -55,16 +58,8 @@ async def _get_timeout_setting() -> int:
     return max(1, min(value, 1440))
 
 
-@router.message(Command("admin"))
-async def admin_panel(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("⛔ Access denied")
-        return
-    await message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-
-
 @router.callback_query(F.data == "admin_settings")
-async def admin_settings_menu(callback: CallbackQuery):
+async def admin_settings_menu(callback: CallbackQuery) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -73,7 +68,7 @@ async def admin_settings_menu(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "cancel_admin_settings")
-async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext):
+async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -82,7 +77,7 @@ async def cancel_admin_settings(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "setting_fees")
-async def setting_fees(callback: CallbackQuery, state: FSMContext):
+async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -99,7 +94,7 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AdminStates.waiting_fee_percent)
-async def admin_set_fee_percent(message: Message, state: FSMContext):
+async def admin_set_fee_percent(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
@@ -119,7 +114,7 @@ async def admin_set_fee_percent(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "setting_timeout")
-async def setting_timeout(callback: CallbackQuery, state: FSMContext):
+async def setting_timeout(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -136,7 +131,7 @@ async def setting_timeout(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AdminStates.waiting_timeout)
-async def admin_set_timeout(message: Message, state: FSMContext):
+async def admin_set_timeout(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
@@ -156,7 +151,7 @@ async def admin_set_timeout(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "setting_limits")
-async def setting_limits(callback: CallbackQuery):
+async def setting_limits(callback: CallbackQuery) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -183,7 +178,7 @@ async def setting_limits(callback: CallbackQuery):
     await callback.answer()
 
 
-async def _prompt_limit(callback: CallbackQuery, state: FSMContext, kind: str, title: str, state_name):
+async def _prompt_limit(callback: CallbackQuery, state: FSMContext, kind: str, title: str, state_name) -> None:
     minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
     maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
     daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
@@ -196,7 +191,7 @@ async def _prompt_limit(callback: CallbackQuery, state: FSMContext, kind: str, t
 
 
 @router.callback_query(F.data == "setting_limit_min")
-async def setting_limit_min(callback: CallbackQuery, state: FSMContext):
+async def setting_limit_min(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -205,7 +200,7 @@ async def setting_limit_min(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "setting_limit_max")
-async def setting_limit_max(callback: CallbackQuery, state: FSMContext):
+async def setting_limit_max(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -214,7 +209,7 @@ async def setting_limit_max(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "setting_limit_daily")
-async def setting_limit_daily(callback: CallbackQuery, state: FSMContext):
+async def setting_limit_daily(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -222,7 +217,14 @@ async def setting_limit_daily(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-async def _save_limit(message: Message, state: FSMContext, key: str, label: str, minimum: Decimal | None = None, maximum: Decimal | None = None):
+async def _save_limit(
+    message: Message,
+    state: FSMContext,
+    key: str,
+    label: str,
+    minimum: Decimal | None = None,
+    maximum: Decimal | None = None,
+) -> None:
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
@@ -248,19 +250,19 @@ async def _save_limit(message: Message, state: FSMContext, key: str, label: str,
 
 
 @router.message(AdminStates.waiting_min_order)
-async def admin_set_min_order(message: Message, state: FSMContext):
+async def admin_set_min_order(message: Message, state: FSMContext) -> None:
     maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
     await _save_limit(message, state, "min_order", "الحد الأدنى للطلب", maximum=maximum)
 
 
 @router.message(AdminStates.waiting_max_order)
-async def admin_set_max_order(message: Message, state: FSMContext):
+async def admin_set_max_order(message: Message, state: FSMContext) -> None:
     minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
     daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
     await _save_limit(message, state, "max_order", "الحد الأقصى للطلب", minimum=minimum, maximum=daily)
 
 
 @router.message(AdminStates.waiting_daily_limit)
-async def admin_set_daily_limit(message: Message, state: FSMContext):
+async def admin_set_daily_limit(message: Message, state: FSMContext) -> None:
     maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
     await _save_limit(message, state, "daily_limit", "الحد اليومي للعميل", minimum=maximum)
