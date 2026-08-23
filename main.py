@@ -26,6 +26,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_background_task(coro, name: str) -> asyncio.Task:
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 async def send_expiry_reminders(bot: Bot):
     """Warn users 10 minutes before their payment deadline."""
@@ -62,6 +71,8 @@ async def send_expiry_reminders(bot: Bot):
                             await bot.send_message(order['telegram_id'], msg, reply_markup=receipt_upload_keyboard(order['id'], lang), parse_mode='HTML')
                         except Exception as exc:
                             logger.error("Expiry reminder failed for %s: %s", order['telegram_id'], exc)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.error("Expiry reminder check failed: %s", exc)
         await asyncio.sleep(300)
@@ -81,7 +92,6 @@ async def check_expired_orders(bot: Bot):
                     )
                     for order in expired:
                         try:
-                            # Authoritative expiry transition target: "expired".
                             await transition_order(conn, order['id'], 'expired')
                         except InvalidOrderTransition:
                             continue
@@ -103,6 +113,8 @@ async def check_expired_orders(bot: Bot):
                             await bot.send_message(order['telegram_id'], exp_msg, parse_mode='HTML', reply_markup=compact_reply_keyboard(exp_lang))
                         except Exception as exc:
                             logger.error("Failed to notify user %s: %s", order['telegram_id'], exc)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.error("Expired order check failed: %s", exc)
         await asyncio.sleep(60)
@@ -121,13 +133,19 @@ async def on_startup(bot: Bot):
         await bot.set_webhook(url=Config.WEBHOOK_URL, secret_token=Config.SECRET_TOKEN, drop_pending_updates=True)
         logger.info("Webhook set: %s", Config.WEBHOOK_URL)
 
-    asyncio.create_task(check_expired_orders(bot))
-    asyncio.create_task(send_expiry_reminders(bot))
-    logger.info("Background expiry checker started")
+    _track_background_task(check_expired_orders(bot), 'order-expiry-checker')
+    _track_background_task(send_expiry_reminders(bot), 'expiry-reminder-worker')
+    logger.info("Background expiry workers started")
 
 
 async def on_shutdown(bot: Bot):
     logger.info("Shutting down...")
+    tasks = list(_background_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _background_tasks.clear()
     await bot.delete_webhook()
     await close_db()
 
@@ -156,8 +174,12 @@ async def main():
     await site.start()
     logger.info("Server started on %s:%s", Config.HOST, Config.PORT)
 
-    while True:
-        await asyncio.sleep(3600)
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
