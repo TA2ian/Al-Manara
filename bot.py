@@ -60,13 +60,19 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
 
+    # The main order-menu command must have precedence over any stale
+    # wallet-registration FSM state. Otherwise a user who previously entered
+    # a wallet label/address and then presses "Create buy order" can have that
+    # menu command consumed as wallet input instead of returning to the order
+    # flow / active-order guidance.
+    dp.include_router(order_amount_policy.router)
+
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
     dp.include_router(order_wallet_qr_policy.router)
     dp.include_router(payment_currency_policy.router)
     dp.include_router(legacy_wallet_guard.router)
     dp.include_router(wallets.router)
-    dp.include_router(order_amount_policy.router)
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
     dp.include_router(profile.router)
