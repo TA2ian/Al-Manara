@@ -17,6 +17,19 @@ class OrderCurrencyFlowSourceTests(unittest.TestCase):
         self.assertNotIn("new_syr_fee", currency_source)
         self.assertNotIn("new_syr_total", currency_source)
 
+    def test_back_to_wallet_keeps_wallet_selection_as_the_active_fsm_step(self):
+        source = Path(__file__).resolve().parents[1].joinpath("handlers", "order_wallet_policy.py").read_text(encoding="utf-8")
+
+        marker = 'async def back_to_wallet_selection'
+        start = source.index(marker)
+        end = source.index('@router.callback_query(F.data == "order_wallet_manual")', start)
+        block = source[start:end]
+
+        self.assertIn("await state.set_state(OrderStates.waiting_wallet)", block)
+        self.assertNotIn("await state.set_state(OrderStates.waiting_currency)", block)
+        self.assertIn('F.data.startswith("currency_")', source)
+        self.assertIn("reject_currency_before_wallet", source)
+
 
 if __name__ == "__main__":
     unittest.main()
