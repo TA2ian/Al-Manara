@@ -28,6 +28,8 @@ def test_legacy_compatibility_surface_is_removed():
         "handlers/order.py",
         "handlers/menu.py",
         "handlers/my_orders.py",
+        "handlers/verification.py",
+        "handlers/verification_pending_guard.py",
         "database_wallet_guards.py",
     ):
         assert not (ROOT / relative_path).exists(), relative_path
@@ -45,7 +47,9 @@ def test_canonical_order_constraint_surface_is_active():
 def test_release_gate_covers_authoritative_services_and_removed_surface():
     source = (ROOT / "tests/test_release_gate.py").read_text(encoding="utf-8")
     assert "handlers.admin_settings_policy" in source
+    assert "handlers.verification_policy" in source
     assert "handlers.verification_pending_guard" in source
+    assert "services.legal_policy" in source
     assert "services.order_state_service" in source
     assert "services.order_completion_service" in source
     assert "services.receipt_service" in source
