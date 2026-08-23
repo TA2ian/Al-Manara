@@ -49,7 +49,7 @@ def test_authoritative_order_services_import():
     for module_name in (
         "services.order_state_service", "services.order_completion_service",
         "services.receipt_verifier", "services.exchange_service", "services.settings_service",
-        "services.receipt_service", "database_order_constraints",
+        "services.receipt_service", "database_order_constraints", "services.legal_policy",
     ):
         importlib.import_module(module_name)
 
