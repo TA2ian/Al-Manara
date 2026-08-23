@@ -1,25 +1,23 @@
-"""Regression tests for the decomposed admin-router stack."""
+"""Regression tests for the authoritative decomposed admin-router stack."""
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_admin_facade_registers_only_nested_policies():
-    admin = (ROOT / "handlers" / "admin.py").read_text(encoding="utf-8")
-    required = [
+def test_admin_facade_and_alias_modules_are_removed():
+    assert not (ROOT / "handlers" / "admin.py").exists()
+    assert not (ROOT / "handlers" / "admin_settings_alias_policy.py").exists()
+
+
+def test_authoritative_admin_policies_are_registered_directly():
+    bot = (ROOT / "bot.py").read_text(encoding="utf-8")
+    for marker in (
         "admin_order_list_policy.router",
         "admin_user_management_policy.router",
         "admin_utility_policy.router",
         "admin_maintenance_policy.router",
         "admin_settings_policy.router",
-        "admin_settings_alias_policy.router",
-    ]
-    for marker in required:
-        assert marker in admin
-
-    # Authoritative policies are registered directly by bot.py and must not be nested again.
-    for marker in (
         "admin_rejection_policy.router",
         "admin_broadcast_policy.router",
         "admin_rate_policy.router",
@@ -29,7 +27,7 @@ def test_admin_facade_registers_only_nested_policies():
         "admin_transfer_policy.router",
         "admin_note_policy.router",
     ):
-        assert marker not in admin
+        assert marker in bot
 
 
 def test_removed_financial_dashboard_module_is_not_referenced():
@@ -46,8 +44,3 @@ def test_handler_package_initializer_is_side_effect_free():
     init = (ROOT / "handlers" / "__init__.py").read_text(encoding="utf-8")
     assert "from . import order" not in init
     assert "from . import admin_rejection_policy" not in init
-
-
-def test_legacy_admin_module_is_now_a_small_compatibility_facade():
-    admin = (ROOT / "handlers" / "admin.py").read_text(encoding="utf-8")
-    assert len(admin) < 10000
