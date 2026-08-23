@@ -12,6 +12,7 @@ from keyboards.inline import order_admin_keyboard
 from services.formatters import money, usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
 from services.receipt_media import normalize_receipt_media
+from services.receipt_processing_lock import serialize_receipt_handler
 from services.receipt_verifier import ReceiptVerifier
 from states import ReceiptStates
 
@@ -69,6 +70,7 @@ async def start_exported_receipt_upload(callback, state: FSMContext):
 
 
 @router.message(ReceiptStates.waiting_receipt, F.document)
+@serialize_receipt_handler
 async def handle_exported_receipt_document(message: Message, state: FSMContext):
     data = await state.get_data()
     order_id = data.get("receipt_order_id")
