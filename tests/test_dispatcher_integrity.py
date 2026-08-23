@@ -63,13 +63,15 @@ class DispatcherIntegrityTests(unittest.TestCase):
         self.assertIn('F.text.in_({"⚙️ القائمة", "⚙️ Menu", "⚙️ الإعدادات", "⚙️ Settings"})', settings)
         self.assertIn('F.data == "quick_reorder"', navigation)
 
-    def test_customer_dashboard_has_no_legacy_duplicate_navigation_owners(self):
-        menu = (ROOT / "handlers/menu.py").read_text(encoding="utf-8")
-        self.assertNotIn('F.data == "quick_reorder"', menu)
-        self.assertNotIn('F.data == "quick_change_lang"', menu)
-        self.assertNotIn('F.data == "menu_rate"', menu)
-        self.assertNotIn('F.data == "menu_profile"', menu)
-        self.assertNotIn('F.data == "menu_wallets"', menu)
+    def test_customer_navigation_has_single_authority(self):
+        source = (ROOT / "handlers/customer_navigation_policy.py").read_text(encoding="utf-8")
+        self.assertIn('F.data == "quick_reorder"', source)
+        self.assertIn('F.data == "menu_help"', source)
+        self.assertIn('F.data == "menu_disclaimer"', source)
+        self.assertIn('F.data == "quick_saved_addresses"', source)
+        self.assertIn('F.data.startswith("view_addr_")', source)
+        self.assertIn('F.data.startswith("del_addr_")', source)
+        self.assertFalse((ROOT / "handlers/menu.py").exists())
 
 
 if __name__ == "__main__":
