@@ -14,7 +14,8 @@ from aiogram.types import Message
 
 from config import Config
 from database import get_pool
-from keyboards.inline import manual_receipt_review_keyboard, order_admin_keyboard
+from keyboards.receipt import manual_receipt_review_keyboard
+from keyboards.inline import order_admin_keyboard
 from services.formatters import money, rate, usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
 from services.receipt_media import normalize_receipt_media
@@ -119,9 +120,9 @@ async def _persist_receipt(
 
 
 async def _start_progress(message: Message, lang: str) -> tuple[Message, dict, asyncio.Task]:
-    state = {"label": "استلام الملف", "percent": 10}
-    started = time.monotonic()
+    state = {"label": "استلام الملف", "percent": 10, "started": time.monotonic()}
     frames = ("▰▱▱▱▱", "▰▰▱▱▱", "▰▰▰▱▱", "▰▰▰▰▱", "▰▰▰▰▰")
+    started = state["started"]
 
     def render() -> str:
         elapsed = int(time.monotonic() - started)
@@ -158,19 +159,30 @@ async def _start_progress(message: Message, lang: str) -> tuple[Message, dict, a
     return progress, state, task
 
 
-async def _set_progress_stage(progress: Message, state: dict, label: str, percent: int) -> None:
+async def _set_progress_stage(progress: Message, state: dict, label: str, percent: int, lang: str) -> None:
     state["label"] = label
     state["percent"] = percent
-    try:
-        elapsed = int(time.monotonic() - state.get("started", time.monotonic()))
-        await progress.edit_text(
-            f"⏳ <b>جارٍ فحص إثبات الدفع</b>\n\n"
-            f"▰{'▰' * max(0, min(4, percent // 20 - 1))}{'▱' * max(0, 4 - min(4, percent // 20 - 1))} <b>{percent}%</b>\n"
+    elapsed = int(time.monotonic() - state["started"])
+    if lang == "ar":
+        text = (
+            "⏳ <b>جارٍ فحص إثبات الدفع</b>\n\n"
+            f"{'▰' * max(1, min(5, (percent + 19) // 20))}{'▱' * max(0, 5 - min(5, (percent + 19) // 20))} <b>{percent}%</b>\n"
             f"🔎 الحالة: <b>{html.escape(label)}</b>\n"
             f"⏱ الزمن المنقضي: <b>{elapsed} ثانية</b>\n\n"
-            "لا ترسل ملفاً آخر حتى تظهر النتيجة.",
-            parse_mode="HTML",
+            "لا ترسل ملفاً آخر حتى تظهر النتيجة."
         )
+    else:
+        text = (
+            "⏳ <b>Checking your payment proof</b>\n\n"
+            f"{'▰' * max(1, min(5, (percent + 19) // 20))}{'▱' * max(0, 5 - min(5, (percent + 19) // 20))} <b>{percent}%</b>\n"
+            f"🔎 Status: <b>{html.escape(label)}</b>\n"
+            f"⏱ Elapsed: <b>{elapsed} seconds</b>\n\n"
+            "Please do not send another file until the result appears."
+        )
+    try:
+        await progress.edit_text(text, parse_mode="HTML")
+    except TelegramBadRequest:
+        logger.debug("Receipt progress message was already replaced or removed")
     except Exception:
         logger.debug("Receipt progress stage update failed", exc_info=True)
 
@@ -180,31 +192,44 @@ def _customer_result_message(
     remaining_attempts: int,
     auto_verified: bool,
     order_id: int,
+    lang: str,
 ) -> tuple[str, str, Any | None]:
     score = int(verification_result.get("score", 0))
     label = html.escape(str(verification_result.get("score_label", "فاشل")))
     if auto_verified:
+        if lang == "en":
+            return (
+                f"✅ <b>Receipt verified automatically.</b>\n\n📊 Match score: <b>{score}%</b> ({label})\n📦 The receipt was sent to administration for final review.",
+                "HTML",
+                None,
+            )
         return (
-            f"✅ <b>تم التحقق من الإيصال آلياً.</b>\n\n"
-            f"📊 نسبة التطابق: <b>{score}%</b> ({label})\n"
-            "📦 تم إرسال الإيصال للمراجعة النهائية من الإدارة.",
+            f"✅ <b>تم التحقق من الإيصال آلياً.</b>\n\n📊 نسبة التطابق: <b>{score}%</b> ({label})\n📦 تم إرسال الإيصال للمراجعة النهائية من الإدارة.",
             "HTML",
             None,
         )
     if remaining_attempts <= 0:
+        if lang == "en":
+            return (
+                "❌ <b>Automatic verification attempts are exhausted.</b>\n\n📨 The latest receipt was sent to administration for manual review.",
+                "HTML",
+                None,
+            )
         return (
-            "❌ <b>تم استنفاد محاولات التحقق الآلي.</b>\n\n"
-            "📨 تم إرسال آخر إيصال إلى الإدارة للمراجعة اليدوية.",
+            "❌ <b>تم استنفاد محاولات التحقق الآلي.</b>\n\n📨 تم إرسال آخر إيصال إلى الإدارة للمراجعة اليدوية.",
             "HTML",
             None,
         )
+    if lang == "en":
+        return (
+            f"⚠️ <b>Automatic verification failed.</b>\n\n📊 Match score: <b>{score}%</b> ({label})\n\n🔄 Remaining attempts: <b>{remaining_attempts}</b>.\nYou can upload another proof or request manual review of this receipt.",
+            "HTML",
+            manual_receipt_review_keyboard(order_id, "en"),
+        )
     return (
-        f"⚠️ <b>تعذر التحقق من الإيصال آلياً.</b>\n\n"
-        f"📊 نسبة التطابق: <b>{score}%</b> ({label})\n\n"
-        f"🔄 لديك <b>{remaining_attempts}</b> محاولات متبقية.\n"
-        "يمكنك إعادة الرفع، أو طلب مراجعة هذا الإيصال يدوياً من الإدارة.",
+        f"⚠️ <b>تعذر التحقق من الإيصال آلياً.</b>\n\n📊 نسبة التطابق: <b>{score}%</b> ({label})\n\n🔄 لديك <b>{remaining_attempts}</b> محاولات متبقية.\nيمكنك إعادة الرفع، أو طلب مراجعة هذا الإيصال يدوياً من الإدارة.",
         "HTML",
-        manual_receipt_review_keyboard(order_id),
+        manual_receipt_review_keyboard(order_id, "ar"),
     )
 
 
@@ -284,7 +309,7 @@ async def notify_admins_receipt(
 
 
 async def request_manual_receipt_review(bot: Bot, order_id: int, telegram_id: int, username: str) -> tuple[bool, str]:
-    """Transition the customer's latest failed receipt to manual review exactly once."""
+    """Transition the latest failed receipt to manual review exactly once."""
     order = await _load_owned_order(order_id, telegram_id)
     if not order:
         return False, "❌ الطلب غير موجود أو لا تملك هذا الطلب."
@@ -309,7 +334,6 @@ async def request_manual_receipt_review(bot: Bot, order_id: int, telegram_id: in
     if updated is None:
         return False, "❌ تعذر تثبيت طلب المراجعة اليدوية."
 
-    bot_message_type = None
     await notify_admins_receipt(
         bot=bot,
         order=dict(updated),
@@ -318,7 +342,7 @@ async def request_manual_receipt_review(bot: Bot, order_id: int, telegram_id: in
         verification_result=None,
         username=username,
         is_auto_verified=False,
-        is_document=bot_message_type,
+        is_document=None,
         manual_review_requested=True,
     )
     return True, "📨 تم إرسال الإيصال إلى الإدارة للمراجعة اليدوية. سيتم إشعارك عند اتخاذ القرار."
@@ -364,12 +388,10 @@ async def handle_receipt_upload(message: Message, state: FSMContext) -> None:
             return
 
         progress = None
-        progress_state = None
         progress_task = None
         try:
             lang = order["language"] if order["language"] in ("ar", "en") else "ar"
             progress, progress_state, progress_task = await _start_progress(message, lang)
-            progress_state["started"] = time.monotonic()
 
             try:
                 await _set_progress_stage(
@@ -377,6 +399,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext) -> None:
                     progress_state,
                     "تجهيز الملف للتحليل" if lang == "ar" else "Preparing file",
                     30,
+                    lang,
                 )
                 file_id, file_name, image_bytes, _ = await _download_submission(bot, message)
             except ValueError as exc:
@@ -395,6 +418,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext) -> None:
                 progress_state,
                 "تحليل الإيصال عبر OCR" if lang == "ar" else "Running OCR analysis",
                 70,
+                lang,
             )
             verification_result = await _verify_receipt(order, image_bytes)
             await _set_progress_stage(
@@ -402,6 +426,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext) -> None:
                 progress_state,
                 "مطابقة البيانات وإعداد النتيجة" if lang == "ar" else "Matching data and preparing result",
                 90,
+                lang,
             )
             auto_verified = bool(verification_result.get("auto_verified"))
             remaining_attempts = MAX_RECEIPT_ATTEMPTS - attempt_count
@@ -422,6 +447,7 @@ async def handle_receipt_upload(message: Message, state: FSMContext) -> None:
                 remaining_attempts,
                 auto_verified,
                 int(order_id),
+                lang,
             )
             await message.answer(text, parse_mode=parse_mode, reply_markup=keyboard)
 
