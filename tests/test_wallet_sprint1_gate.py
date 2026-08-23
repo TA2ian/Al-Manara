@@ -44,3 +44,18 @@ def test_dispatcher_order_keeps_qr_first_before_wallet_registry():
     assert source.index("dp.include_router(wallet_qr_first_policy.router)") < source.index("dp.include_router(wallets.router)")
     assert source.index("dp.include_router(legacy_wallet_guard.router)") < source.index("dp.include_router(wallet_qr_first_policy.router)")
     assert source.index("dp.include_router(saved_wallets.router)") < source.index("dp.include_router(order_wallet_policy.router)")
+
+
+def test_back_to_wallet_returns_to_wallet_state_not_currency_state():
+    source = (ROOT / "handlers/order_wallet_policy.py").read_text(encoding="utf-8")
+    back_block = source.split("@router.callback_query(F.data == \"back_to_wallet\")", 1)[1].split("@router.callback_query", 1)[0]
+
+    assert "await state.set_state(OrderStates.waiting_wallet)" in back_block
+    assert "await state.set_state(OrderStates.waiting_currency)" not in back_block
+    assert "qr_photo_id IS NOT NULL" in back_block
+
+
+def test_stale_currency_callbacks_are_blocked_while_selecting_wallet():
+    source = (ROOT / "handlers/order_wallet_policy.py").read_text(encoding="utf-8")
+    assert '@router.callback_query(OrderStates.waiting_wallet, F.data.startswith("currency_"))' in source
+    assert "Select a wallet first to continue." in source or "اختر المحفظة أولاً لمتابعة الطلب." in source
