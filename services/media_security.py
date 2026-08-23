@@ -57,7 +57,9 @@ def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file
     validate_upload_size(payload)
     mime = _normalized_mime(mime_type)
     suffix = _suffix(file_name)
-    if mime not in ALLOWED_IMAGE_MIMES and suffix not in ALLOWED_IMAGE_SUFFIXES:
+    if mime and mime not in ALLOWED_IMAGE_MIMES and suffix not in ALLOWED_IMAGE_SUFFIXES:
+        raise ValueError("unsupported image type")
+    if suffix and suffix not in ALLOWED_IMAGE_SUFFIXES and mime not in ALLOWED_IMAGE_MIMES:
         raise ValueError("unsupported image type")
 
     try:
@@ -86,8 +88,19 @@ def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file
     except Exception as exc:
         raise ValueError("unable to determine image format") from exc
 
-    if actual_mime is None or (mime and mime in ALLOWED_IMAGE_MIMES and mime != actual_mime):
+    if actual_mime is None:
+        raise ValueError("uploaded file is not a supported image format")
+    if mime and mime in ALLOWED_IMAGE_MIMES and mime != actual_mime:
         raise ValueError("image content does not match its declared type")
+    if suffix and suffix in ALLOWED_IMAGE_SUFFIXES:
+        expected_suffix_mime = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+        }[suffix]
+        if expected_suffix_mime != actual_mime:
+            raise ValueError("image content does not match its file extension")
 
     return MediaDescriptor("image", actual_mime, len(payload), file_name or "upload")
 
@@ -97,10 +110,16 @@ def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_n
     validate_upload_size(payload)
     mime = _normalized_mime(mime_type)
     suffix = _suffix(file_name)
-    if mime not in ALLOWED_DOCUMENT_MIMES and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
+    if mime and mime not in ALLOWED_DOCUMENT_MIMES and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
+        raise ValueError("unsupported PDF type")
+    if suffix and suffix not in ALLOWED_DOCUMENT_SUFFIXES and mime not in ALLOWED_DOCUMENT_MIMES:
         raise ValueError("unsupported PDF type")
     if not payload.startswith(b"%PDF-"):
         raise ValueError("uploaded file is not a valid PDF")
+    if mime and mime not in ALLOWED_DOCUMENT_MIMES:
+        raise ValueError("PDF content does not match its declared type")
+    if suffix and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
+        raise ValueError("PDF content does not match its file extension")
 
     try:
         document = fitz.open(stream=payload, filetype="pdf")
