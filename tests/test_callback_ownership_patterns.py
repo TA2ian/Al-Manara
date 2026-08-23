@@ -17,6 +17,7 @@ def test_receipt_upload_callback_is_resource_bound():
 
 def test_wallet_callbacks_are_resource_bound():
     assert _matches(WALLET_ID_PATTERNS, "del_addr_123")
+    assert _matches(WALLET_ID_PATTERNS, "select_addr_123")
 
 
 def test_unrelated_callbacks_are_not_resource_bound():
