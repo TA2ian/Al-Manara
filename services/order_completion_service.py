@@ -40,7 +40,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 updates={
                     "txid": txid,
                     "completed_at": datetime.now(),
-                    "wallet_qr_photo_id": None,
                     "receipt_photo_id": None,
                 },
             )
