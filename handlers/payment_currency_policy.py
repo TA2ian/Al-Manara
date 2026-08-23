@@ -85,10 +85,6 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
         pool = await get_pool()
         data = await state.get_data()
 
-        # Orders are database-enforced to use a verified wallet with a stored QR.
-        # A legacy wallet-skip session may still reach currency selection, so stop
-        # it here and return to the QR verification step instead of creating a
-        # quote that will later fail at the database guard.
         if data.get("wallet_qr_skipped") or not data.get("wallet_qr_photo_id"):
             wallet = data.get("wallet_address")
             network = data.get("network")
@@ -97,7 +93,6 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
                     "❌ بيانات المحفظة غير مكتملة. أعد إضافة المحفظة قبل متابعة الطلب." if lang == "ar" else
                     "❌ Wallet data is incomplete. Register the wallet again before continuing."
                 )
-                await state.clear()
                 return
             await state.update_data(return_to_order=True, wallet_qr_skipped=False)
             await state.set_state(WalletStates.waiting_qr)
@@ -129,13 +124,19 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
             )
             return
 
-        amount = data.get("amount_usdt")
+        amount = data.get("amount_usdt") or data.get("order_amount_usdt")
         wallet = data.get("wallet_address")
         network = data.get("network")
         if amount is None or not wallet or not network:
-            await callback.message.answer("❌ بيانات الطلب غير مكتملة. أعد إنشاء الطلب من القائمة الرئيسية." if lang == "ar" else "❌ The order data is incomplete. Please start the order again from the main menu.")
-            await state.clear()
+            await callback.message.answer(
+                "❌ بيانات الطلب غير مكتملة. أعد إنشاء الطلب من القائمة الرئيسية."
+                if lang == "ar" else
+                "❌ The order data is incomplete. Please start the order again from the main menu."
+            )
             return
+
+        if data.get("amount_usdt") is None:
+            await state.update_data(amount_usdt=amount)
 
         calculation = await ExchangeService(pool).calculate_order(amount, currency)
         await state.update_data(payment_currency=calculation["payment_currency"], calculation=calculation)
