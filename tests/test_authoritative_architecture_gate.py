@@ -2,6 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HANDLERS = ROOT / "handlers"
+RUNTIME_ROOTS = (ROOT / "bot.py", ROOT / "database.py", ROOT / "database_order_constraints.py", ROOT / "services", ROOT / "handlers")
 
 
 def test_retired_compatibility_modules_are_absent():
@@ -14,6 +15,25 @@ def test_retired_compatibility_modules_are_absent():
         "database_wallet_guards.py",
     ):
         assert not (ROOT / relative_path).exists()
+
+
+def test_retired_runtime_references_are_absent():
+    forbidden_tokens = (
+        "database_wallet_guards",
+        "install_order_wallet_guard",
+        "services.order_wallet_guard",
+        "handlers.legacy_wallet_guard",
+    )
+    files = []
+    for root in RUNTIME_ROOTS:
+        if root.is_file():
+            files.append(root)
+        elif root.exists():
+            files.extend(path for path in root.rglob("*.py") if path.is_file())
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden_tokens:
+            assert token not in source, f"retired runtime reference {token!r} found in {path}"
 
 
 def test_canonical_database_constraints_are_runtime_owned():
