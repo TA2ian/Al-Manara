@@ -133,14 +133,12 @@ async def init_db():
                 if not canonical_syp["account_identifier"] and legacy_method["account_identifier"]:
                     await conn.execute(
                         "UPDATE payment_methods SET account_identifier = $1, updated_at = NOW() WHERE id = $2",
-                        legacy_method["account_identifier"],
-                        canonical_syp["id"],
+                        legacy_method["account_identifier"], canonical_syp["id"],
                     )
                 if not canonical_syp["qr_photo_id"] and legacy_method["qr_photo_id"]:
                     await conn.execute(
                         "UPDATE payment_methods SET qr_photo_id = $1, updated_at = NOW() WHERE id = $2",
-                        legacy_method["qr_photo_id"],
-                        canonical_syp["id"],
+                        legacy_method["qr_photo_id"], canonical_syp["id"],
                     )
                 await conn.execute("DELETE FROM payment_methods WHERE id = $1", legacy_method["id"])
             else:
@@ -160,6 +158,27 @@ async def init_db():
             (code, provider, currency, display_name, account_identifier, enabled)
             VALUES ('shamcash_new_syp', 'ShamCash', 'NEW.SYP', 'ShamCash NEW.SYP', $1, TRUE)
             ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_syp())
+
+        # Runtime payment methods have exactly two canonical ShamCash codes.
+        # Any non-canonical row is rejected rather than becoming a second path.
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION enforce_canonical_payment_method_row()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.provider = 'ShamCash' AND NEW.code NOT IN ('shamcash_usd', 'shamcash_new_syp') THEN
+                    RAISE EXCEPTION 'non-canonical ShamCash payment method code: %', NEW.code USING ERRCODE='23514';
+                END IF;
+                IF NEW.provider = 'ShamCash' AND NEW.currency NOT IN ('USD', 'NEW.SYP') THEN
+                    RAISE EXCEPTION 'non-canonical ShamCash payment currency: %', NEW.currency USING ERRCODE='23514';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_canonical_payment_method_row ON payment_methods")
+        await conn.execute("""CREATE TRIGGER trg_enforce_canonical_payment_method_row
+            BEFORE INSERT OR UPDATE OF code, currency, provider ON payment_methods
+            FOR EACH ROW EXECUTE FUNCTION enforce_canonical_payment_method_row()""")
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
