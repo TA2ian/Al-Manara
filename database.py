@@ -203,8 +203,12 @@ async def init_db():
                 IF NEW.payment_currency = 'SYP' THEN NEW.payment_currency := 'NEW.SYP'; END IF;
                 IF NEW.payment_currency IN ('USD', 'NEW.SYP') AND NEW.payment_method_code IS NULL THEN
                     SELECT code, account_identifier, qr_photo_id INTO method_row
-                    FROM payment_methods WHERE provider = 'ShamCash' AND currency = NEW.payment_currency
-                      AND enabled = TRUE ORDER BY id ASC LIMIT 1;
+                    FROM payment_methods
+                    WHERE provider = 'ShamCash'
+                      AND currency = NEW.payment_currency
+                      AND code IN ('shamcash_usd', 'shamcash_new_syp')
+                      AND enabled = TRUE
+                    ORDER BY id ASC LIMIT 1;
                     IF FOUND THEN
                         NEW.payment_method_code := method_row.code;
                         NEW.payment_account_snapshot := method_row.account_identifier;
