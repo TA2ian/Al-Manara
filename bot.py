@@ -18,7 +18,6 @@ def create_dispatcher() -> Dispatcher:
         active_order_policy,
         receipt_processing_policy,
         receipt_document_policy,
-        receipt_transition_policy,
         customer_orders_policy,
         feedback,
         admin_entry,
@@ -75,7 +74,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(profile.router)
     dp.include_router(receipt_processing_policy.router)
     dp.include_router(receipt_document_policy.router)
-    dp.include_router(receipt_transition_policy.router)
     dp.include_router(customer_orders_policy.router)
     dp.include_router(feedback.router)
 
