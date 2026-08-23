@@ -26,12 +26,7 @@ class ReceiptVerifier:
         image.thumbnail((OCR_MAX_DIMENSION, OCR_MAX_DIMENSION), Image.Resampling.LANCZOS)
         grayscale = ImageOps.grayscale(image)
         grayscale = ImageOps.autocontrast(grayscale)
-        return pytesseract.image_to_string(
-            grayscale,
-            lang="ara+eng",
-            config="--psm 6 --oem 3",
-            timeout=OCR_TIMEOUT_SECONDS,
-        )
+        return pytesseract.image_to_string(grayscale, lang="ara+eng", config="--psm 6 --oem 3", timeout=OCR_TIMEOUT_SECONDS)
 
     @staticmethod
     async def _ocr(image_bytes: bytes) -> str:
@@ -40,31 +35,23 @@ class ReceiptVerifier:
         try:
             return await asyncio.to_thread(ReceiptVerifier._ocr_sync, image_bytes)
         finally:
-            elapsed = time.perf_counter() - started
-            logger.info("receipt_ocr_completed elapsed_seconds=%.3f bytes=%d", elapsed, len(image_bytes))
+            logger.info("receipt_ocr_completed elapsed_seconds=%.3f bytes=%d", time.perf_counter() - started, len(image_bytes))
 
     @staticmethod
     def _normalize_ocr_text(text: str) -> str:
-        """Normalize OCR output without changing semantic receipt content."""
         if not text:
             return ""
         translation = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-        text = text.translate(translation)
-        text = text.replace("٫", ".").replace("٬", ",").replace("：", ":")
-        return text
+        return text.translate(translation).replace("٫", ".").replace("٬", ",").replace("：", ":")
 
     @staticmethod
     def _numeric_value(value: str) -> float | None:
         if not value:
             return None
-        normalized = ReceiptVerifier._normalize_ocr_text(value)
-        normalized = normalized.replace(" ", "")
+        normalized = ReceiptVerifier._normalize_ocr_text(value).replace(" ", "")
         if normalized.count(",") == 1 and normalized.count(".") == 0:
             left, right = normalized.split(",")
-            if len(right) <= 2:
-                normalized = f"{left}.{right}"
-            else:
-                normalized = normalized.replace(",", "")
+            normalized = f"{left}.{right}" if len(right) <= 2 else normalized.replace(",", "")
         else:
             normalized = normalized.replace(",", "")
         normalized = re.sub(r"[^0-9.]", "", normalized)
@@ -85,21 +72,16 @@ class ReceiptVerifier:
             tolerance = float(expected_amount) * 0.02
             matched_amount = next((a for a in amounts if abs(a - float(expected_amount)) <= tolerance), None)
             amount_match = matched_amount is not None
-
             if amount_match and has_text:
-                confidence = "high"
-                message = f"✅ تم التحقق آلياً: المبلغ {money(matched_amount)} مطابق للقيمة المتوقعة {money(expected_amount)}"
+                confidence, message = "high", f"✅ تم التحقق آلياً: المبلغ {money(matched_amount)} مطابق للقيمة المتوقعة {money(expected_amount)}"
             elif has_text and amounts:
                 confidence = "medium"
                 nearest = min(amounts, key=lambda x: abs(x - float(expected_amount)))
                 message = f"⚠️ تطابق جزئي: الأقرب {money(nearest)} بينما المتوقع {money(expected_amount)}"
             elif has_text:
-                confidence = "low"
-                message = "⚠️ تم العثور على نص لكن لم يتم التعرف على مبلغ واضح"
+                confidence, message = "low", "⚠️ تم العثور على نص لكن لم يتم التعرف على مبلغ واضح"
             else:
-                confidence = "none"
-                message = "❌ لم يتم التعرف على نص في الإيصال"
-
+                confidence, message = "none", "❌ لم يتم التعرف على نص في الإيصال"
             return {"success": True, "text": text[:1000], "extracted_amounts": amounts, "amount_match": amount_match, "has_text": has_text, "confidence": confidence, "message": message, "matched_amount": matched_amount}
         except Exception as exc:
             logger.exception("Receipt analysis failed")
@@ -142,7 +124,6 @@ class ReceiptVerifier:
             expected = float(expected_amount or 0)
             if extracted_amount > 0 and expected > 0:
                 matches["amount"] = abs(extracted_amount - expected) <= expected * 0.02
-
             details = [
                 f"{'✅' if matches['date'] else '❌'} التاريخ: {extracted.get('date') or 'غير معروف'}",
                 f"{'✅' if matches['sender_name'] else '❌'} اسم المرسل: {extracted.get('sender_name') or 'غير معروف'}",
@@ -172,13 +153,11 @@ class ReceiptVerifier:
         date_match = re.search(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})", text)
         if date_match:
             result["date"] = date_match.group(1)
-
         sender_name_labels = r"اسم\s*المرسل|المرسل|sender|from"
         recipient_name_labels = r"اسم\s*المستلم|المستلم|المستفيد|recipient|beneficiary|to"
         sender_account_labels = r"حساب\s*المرسل|رقم\s*المرسل|حساب\s*الدافع|sender\s*(?:account|id)|from\s*(?:account|id)"
         recipient_account_labels = r"حساب\s*المستلم|رقم\s*المستلم|حساب\s*المستفيد|recipient\s*(?:account|id)|beneficiary\s*(?:account|id)|to\s*(?:account|id)"
         amount_labels = r"المبلغ|القيمة|الإجمالي|المجموع|amount|total|payment|value"
-
         for i, line in enumerate(lines):
             if re.search(sender_name_labels, line, re.IGNORECASE) and not result["sender_name"]:
                 result["sender_name"] = ReceiptVerifier._label_value(line, sender_name_labels) or (lines[i + 1] if i + 1 < len(lines) else "")
@@ -194,7 +173,6 @@ class ReceiptVerifier:
                 amount_match = re.search(r"([\d,]+(?:\.\d+)?)", line)
                 if amount_match:
                     result["amount"] = ReceiptVerifier._numeric_value(amount_match.group(1)) or 0.0
-
         masked = re.findall(r"(\d{3,}\*+|\d{3,}\s*[*xX]+)", text)
         if not result["sender_account"] and masked:
             result["sender_account"] = ReceiptVerifier._clean_account(masked[0])
@@ -204,10 +182,6 @@ class ReceiptVerifier:
             currency_match = re.search(r"(?:\$|USDT|USD|SYP|NEW\.SYP|ل\.س|دولار|ليرة|ريال)\s*[:\s]*([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
             if currency_match:
                 result["amount"] = ReceiptVerifier._numeric_value(currency_match.group(1)) or 0.0
-        if not result["amount"]:
-            amounts = ReceiptVerifier._extract_amounts(text)
-            if amounts:
-                result["amount"] = min(amounts, key=lambda value: abs(value - 0.0))
         return result
 
     @staticmethod
@@ -270,7 +244,6 @@ class ReceiptVerifier:
             prefix_len = min(4, len(extracted_digits), len(expected_digits))
             suffix_len = min(4, len(extracted_digits), len(expected_digits))
             return extracted_digits[:prefix_len] == expected_digits[:prefix_len] or extracted_digits[-suffix_len:] == expected_digits[-suffix_len:]
-
         extracted_mask = re.sub(r"[^0-9*Xx]", "", extracted).lower()
         expected_digits = re.sub(r"[^0-9]", "", expected)
         if not extracted_mask or not expected_digits:
