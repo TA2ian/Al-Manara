@@ -1,20 +1,18 @@
-"""Customer receipt-file policy.
-
-ShamCash may prevent screenshots inside its app, so customers can export the
-transaction proof and send it to Telegram as a document. Exported proofs are
-kept as original Telegram files and sent to admins for manual review.
-"""
+"""Canonical customer receipt document policy with image/PDF OCR validation."""
 import html
 import logging
 
-from aiogram import Router, F, Bot
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import Message
 
 from config import Config
 from database import get_pool
+from keyboards.inline import order_admin_keyboard
 from services.formatters import money, usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
+from services.receipt_media import normalize_receipt_media
+from services.receipt_verifier import ReceiptVerifier
 from states import ReceiptStates
 
 logger = logging.getLogger(__name__)
@@ -42,8 +40,7 @@ async def _load_owned_order(order_id: int, telegram_id: int):
 
 
 @router.callback_query(F.data.startswith("upload_receipt_"))
-async def start_exported_receipt_upload(callback: CallbackQuery, state: FSMContext):
-    """Start the receipt flow with explicit support for exported ShamCash files."""
+async def start_exported_receipt_upload(callback, state: FSMContext):
     order_id = int(callback.data.replace("upload_receipt_", ""))
     order = await _load_owned_order(order_id, callback.from_user.id)
     lang = await _lang(callback.from_user.id)
@@ -56,18 +53,15 @@ async def start_exported_receipt_upload(callback: CallbackQuery, state: FSMConte
     if int(order["receipt_upload_count"] or 0) >= MAX_RECEIPT_ATTEMPTS:
         await callback.answer("❌ استنفدت محاولات رفع الإثبات" if lang == "ar" else "❌ Receipt attempts exhausted", show_alert=True)
         return
-
     await state.update_data(receipt_order_id=order_id)
     prompt = (
         f"📎 <b>إرسال إثبات الدفع — الطلب #{order['order_number']}</b>\n\n"
-        "بسبب منع شام كاش التقاط الشاشة داخل التطبيق، يمكنك تصدير/تنزيل إثبات العملية من شام كاش ثم إرساله هنا <b>كملف</b>.\n\n"
-        "يمكنك أيضاً إرسال صورة إذا كانت متاحة.\n\n"
-        "⚠️ تأكد من أن الملف يُظهر بوضوح تاريخ العملية والمبلغ وبيانات المرسل والمستلم."
+        "أرسل صورة JPG/PNG/WebP أو ملف PDF مُصدّراً من ShamCash. سيتم التحقق من نوع الملف وقراءته آلياً عبر OCR قبل إرساله للمراجعة.\n\n"
+        "⚠️ الحد الأقصى 12 MB، وPDF يجب ألا يتجاوز 3 صفحات."
         if lang == "ar" else
         f"📎 <b>Payment proof — order #{order['order_number']}</b>\n\n"
-        "Because ShamCash may block screenshots inside its app, export/download the transaction proof from ShamCash and send it here <b>as a file</b>.\n\n"
-        "You can also send an image if available.\n\n"
-        "⚠️ Make sure the file clearly shows the transaction date, amount, sender, and recipient."
+        "Send a JPG/PNG/WebP image or a PDF exported from ShamCash. The file type will be validated and its contents checked with OCR before review.\n\n"
+        "⚠️ Maximum 12 MB; PDFs may contain up to 3 pages."
     )
     await callback.message.answer(prompt, parse_mode="HTML")
     await state.set_state(ReceiptStates.waiting_receipt)
@@ -76,22 +70,17 @@ async def start_exported_receipt_upload(callback: CallbackQuery, state: FSMConte
 
 @router.message(ReceiptStates.waiting_receipt, F.document)
 async def handle_exported_receipt_document(message: Message, state: FSMContext):
-    """Accept exported ShamCash proof as a Telegram document."""
     data = await state.get_data()
     order_id = data.get("receipt_order_id")
     lang = await _lang(message.from_user.id)
     if not order_id:
-        await message.answer("❌ لم يتم العثور على الطلب الحالي. أعد فتح طلبك من «طلباتي»." if lang == "ar" else "❌ No active receipt request was found. Open the order again from Orders.")
+        await message.answer("❌ لم يتم العثور على الطلب الحالي." if lang == "ar" else "❌ No active receipt request was found.")
         await state.clear()
         return
 
     order = await _load_owned_order(order_id, message.from_user.id)
-    if not order:
-        await message.answer("❌ الطلب غير موجود." if lang == "ar" else "❌ Order not found.")
-        await state.clear()
-        return
-    if order["status"] != "waiting_payment":
-        await message.answer("⚠️ لم يعد هذا الطلب بانتظار إثبات الدفع." if lang == "ar" else "⚠️ This order is no longer awaiting payment proof.")
+    if not order or order["status"] != "waiting_payment":
+        await message.answer("❌ الطلب غير موجود أو لم يعد بانتظار إثبات الدفع." if lang == "ar" else "❌ Order not found or no longer awaiting payment proof.")
         await state.clear()
         return
 
@@ -101,72 +90,89 @@ async def handle_exported_receipt_document(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    file_id = message.document.file_id
-    file_name = message.document.file_name or "payment_proof"
-    mime_type = message.document.mime_type or "application/octet-stream"
-
+    document = message.document
+    file_id = document.file_id
+    file_name = document.file_name or "payment_proof"
+    mime_type = document.mime_type or "application/octet-stream"
+    bot = Bot(token=Config.BOT_TOKEN)
     try:
+        try:
+            file_info = await bot.get_file(file_id)
+            downloaded = await bot.download_file(file_info.file_path)
+            normalized, _ = normalize_receipt_media(downloaded.read(), mime_type, file_name)
+        except ValueError as exc:
+            await message.answer(f"❌ <b>نوع الملف غير مقبول أو الملف تالف.</b>\n\n{html.escape(str(exc))}", parse_mode="HTML")
+            return
+        except Exception:
+            logger.exception("Failed to download receipt document for order %s", order_id)
+            await message.answer("❌ تعذر قراءة الملف. أعد إرساله بصيغة JPG/PNG/WebP أو PDF صالح.")
+            return
+
+        payment_currency = order["payment_currency"] or "USD"
+        admin_account = Config.get_shamcash_syp() if payment_currency in ("SYP", "NEW.SYP") else Config.get_shamcash_usd()
+        verification_result = await ReceiptVerifier.verify_shamcash_receipt(
+            image_bytes=normalized,
+            order_date=order["created_at"],
+            customer_name=order["full_name"] or "",
+            customer_shamcash_account=order["shamcash_account"] or "",
+            admin_name=Config.get_shamcash_name(),
+            admin_shamcash_account=admin_account,
+            expected_amount=float(order["total_amount"]),
+            payment_currency=payment_currency,
+        )
+        score = int(verification_result.get("score", 0))
+        auto_verified = bool(verification_result.get("auto_verified"))
+        remaining_attempts = MAX_RECEIPT_ATTEMPTS - attempt_count
+
         pool = await get_pool()
         async with pool.acquire() as conn:
-            order = await transition_order(
-                conn,
-                order_id,
-                "receipt_received",
-                updates={"receipt_photo_id": file_id, "receipt_upload_count": attempt_count},
-            )
-    except InvalidOrderTransition:
-        await message.answer("⚠️ لم يعد هذا الطلب بانتظار إثبات الدفع." if lang == "ar" else "⚠️ This order is no longer awaiting payment proof.")
-        await state.clear()
-        return
+            if auto_verified or remaining_attempts <= 0:
+                try:
+                    updated = await transition_order(conn, order_id, "receipt_received", updates={"receipt_photo_id": file_id, "receipt_upload_count": attempt_count})
+                except InvalidOrderTransition:
+                    await message.answer("⚠️ تغيرت حالة الطلب أثناء المعالجة. افتح طلباتك للتحقق.")
+                    await state.clear()
+                    return
+            else:
+                await conn.execute("UPDATE orders SET receipt_photo_id=$1, receipt_upload_count=$2 WHERE id=$3", file_id, attempt_count, order_id)
+                updated = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
 
+        if auto_verified:
+            await message.answer(f"✅ <b>تمت قراءة الإيصال والتحقق منه آلياً.</b>\n\n📊 نسبة المطابقة: <b>{score}%</b>\n📦 أُرسل للمراجعة النهائية من الإدارة.", parse_mode="HTML")
+        elif remaining_attempts <= 0:
+            await message.answer("❌ <b>تعذر التحقق آلياً بعد استنفاد المحاولات.</b>\n\nتم إرسال الإثبات للإدارة للمراجعة اليدوية.", parse_mode="HTML")
+        else:
+            await message.answer(f"⚠️ <b>تمت قراءة الملف لكن لم يكتمل التطابق.</b>\n\n📊 نسبة المطابقة: <b>{score}%</b>\n🔄 المحاولات المتبقية: <b>{remaining_attempts}</b>.", parse_mode="HTML")
+
+        admin_text = (
+            "📎 <b>إثبات دفع — تحقق OCR</b>\n\n"
+            f"📦 الطلب: <b>#{order['order_number']}</b>\n"
+            f"💰 المبلغ: <b>{usdt(order['amount_usdt'])} USDT</b> → {html.escape(order['network'])}\n"
+            f"💳 المطلوب: <b>{money(order['total_amount'])} {html.escape(order['payment_currency'])}</b>\n"
+            f"👤 العميل: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
+            f"📄 الملف: <code>{html.escape(file_name)}</code>\n"
+            f"🧾 النوع: <code>{html.escape(mime_type)}</code>\n"
+            f"🤖 OCR: <b>{score}%</b> — {html.escape(verification_result.get('score_label', 'فاشل'))}\n\n"
+            + "\n".join(verification_result.get("details", []))
+        )
+        for admin_id in Config.ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, admin_text, reply_markup=order_admin_keyboard(order_id, "receipt_received"), parse_mode="HTML")
+                await bot.send_document(admin_id, file_id, caption=f"📄 إثبات الدفع الأصلي — #{order['order_number']}")
+            except Exception:
+                logger.exception("Failed to notify admin %s about receipt %s", admin_id, order_id)
+
+        if remaining_attempts <= 0 or auto_verified:
+            await state.clear()
+    finally:
+        await bot.session.close()
+
+
+@router.message(ReceiptStates.waiting_receipt)
+async def reject_unsupported_receipt_document(message: Message):
+    lang = await _lang(message.from_user.id)
     await message.answer(
-        (
-            f"⏳ <b>تم استلام إثبات الدفع</b>\n\n📦 الطلب: <b>#{order['order_number']}</b>\n"
-            f"📄 الملف: <code>{html.escape(file_name)}</code>\n\n"
-            "تم استلام الملف بنجاح وجارٍ إرساله للمراجعة والتحقق."
-        ) if lang == "ar" else (
-            f"⏳ <b>Payment proof received</b>\n\n📦 Order: <b>#{order['order_number']}</b>\n"
-            f"📄 File: <code>{html.escape(file_name)}</code>\n\n"
-            "The file was received successfully and is being sent for review and verification."
-        ),
-        parse_mode="HTML",
-    )
-
-    bot = Bot(token=Config.BOT_TOKEN)
-    admin_text = (
-        "📎 <b>إثبات دفع مُصدّر من شام كاش</b>\n\n"
-        f"📦 الطلب: <b>#{order['order_number']}</b>\n"
-        f"💰 المبلغ: <b>{usdt(order['amount_usdt'])} USDT</b> → {html.escape(order['network'])}\n"
-        f"💳 المطلوب: <b>{money(order['total_amount'])} {html.escape(order['payment_currency'])}</b>\n"
-        f"👤 العميل: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
-        f"🏦 حساب العميل: <code>{html.escape(order['shamcash_account'] or 'N/A')}</code>\n"
-        f"📄 الملف: <code>{html.escape(file_name)}</code>\n"
-        f"🧾 النوع: <code>{html.escape(mime_type)}</code>\n"
-        f"🔢 المحاولة: {attempt_count}\n\n"
-        "ℹ️ تم استلام الملف الأصلي من العميل، ويحتاج إلى المراجعة قبل تأكيد الدفع."
+        "❌ صيغة الإثبات غير مدعومة. أرسل JPG أو PNG أو WebP أو PDF صالحاً من ShamCash."
         if lang == "ar" else
-        "📎 <b>Exported ShamCash payment proof</b>\n\n"
-        f"📦 Order: <b>#{order['order_number']}</b>\n"
-        f"💰 Amount: <b>{usdt(order['amount_usdt'])} USDT</b> → {html.escape(order['network'])}\n"
-        f"💳 Required: <b>{money(order['total_amount'])} {html.escape(order['payment_currency'])}</b>\n"
-        f"👤 Customer: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
-        f"🏦 Customer account: <code>{html.escape(order['shamcash_account'] or 'N/A')}</code>\n"
-        f"📄 File: <code>{html.escape(file_name)}</code>\n"
-        f"🧾 Type: <code>{html.escape(mime_type)}</code>\n"
-        f"🔢 Attempt: {attempt_count}\n\n"
-        "ℹ️ The original exported file was received and requires review before payment confirmation."
+        "❌ Unsupported proof format. Send a valid ShamCash JPG, PNG, WebP, or PDF."
     )
-
-    from keyboards.inline import order_admin_keyboard
-    for admin_id in Config.ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, admin_text, reply_markup=order_admin_keyboard(order_id, "receipt_received"), parse_mode="HTML")
-            await bot.send_document(
-                admin_id,
-                file_id,
-                caption=(f"📄 إثبات الدفع الأصلي — #{order['order_number']}" if lang == "ar" else f"📄 Original payment proof — #{order['order_number']}"),
-            )
-        except Exception as exc:
-            logger.error("Failed to forward exported receipt for order %s: %s", order_id, exc)
-
-    await state.clear()
