@@ -151,9 +151,11 @@ async def _start_progress(message: Message, lang: str) -> tuple[Message, dict, a
             try:
                 await progress.edit_text(render(), parse_mode="HTML")
             except TelegramBadRequest:
-                return
+                logger.debug("Receipt progress edit rejected by Telegram; continuing ticker", exc_info=True)
+                continue
             except Exception:
                 logger.debug("Receipt progress update failed", exc_info=True)
+                continue
 
     task = asyncio.create_task(ticker())
     return progress, state, task
