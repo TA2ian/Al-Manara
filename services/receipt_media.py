@@ -6,11 +6,16 @@ import io
 import fitz
 from PIL import Image, ImageOps
 
-MAX_RECEIPT_BYTES = 12 * 1024 * 1024
-MAX_PDF_PAGES = 3
+from services.media_security import (
+    MAX_PDF_PAGES,
+    validate_image_payload,
+    validate_pdf_payload,
+)
+
 OCR_MAX_DIMENSION = 1400
 ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_DOCUMENT_MIMES = ALLOWED_IMAGE_MIMES | {"application/pdf"}
+MAX_RECEIPT_BYTES = 12 * 1024 * 1024
 
 
 def normalize_receipt_media(payload: bytes, mime_type: str | None, file_name: str | None) -> tuple[bytes, str]:
@@ -20,15 +25,13 @@ def normalize_receipt_media(payload: bytes, mime_type: str | None, file_name: st
 
     mime = (mime_type or "").split(";", 1)[0].strip().lower()
     suffix = (file_name or "").lower().rsplit(".", 1)[-1] if "." in (file_name or "") else ""
-    if mime not in ALLOWED_DOCUMENT_MIMES and suffix not in {"jpg", "jpeg", "png", "webp", "pdf"}:
-        raise ValueError("unsupported receipt file type")
 
     if mime == "application/pdf" or suffix == "pdf":
+        validate_pdf_payload(payload, mime_type=mime_type, file_name=file_name)
         return _pdf_to_png(payload)
 
+    validate_image_payload(payload, mime_type=mime_type, file_name=file_name)
     try:
-        image = Image.open(io.BytesIO(payload))
-        image.verify()
         image = Image.open(io.BytesIO(payload)).convert("RGB")
     except Exception as exc:
         raise ValueError("uploaded file is not a valid image") from exc
@@ -49,6 +52,10 @@ def _pdf_to_png(payload: bytes) -> tuple[bytes, str]:
         pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
         image = Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB")
         return _normalize_image(image), "image/png"
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("failed to safely render PDF") from exc
     finally:
         document.close()
 
