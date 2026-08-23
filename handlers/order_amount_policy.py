@@ -97,9 +97,6 @@ async def start_order_authoritative(message: Message, state: FSMContext):
         )
         return
 
-    # A new order must always start from a clean FSM snapshot. This prevents
-    # stale data from a previous/abandoned order confirmation from leaking into
-    # the new flow and producing misleading "incomplete order" errors.
     await state.clear()
     await state.set_state(OrderStates.waiting_amount)
     await message.answer(locale_service.get("enter_amount", lang, min=Config.MIN_ORDER, max=Config.MAX_ORDER), reply_markup=preset_amounts_keyboard(lang))
@@ -117,7 +114,7 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
     if active:
         await message.answer(
             "⚠️ <b>لديك طلب نشط بالفعل.</b> افتح طلباتي لمتابعته ولا يمكنك إنشاء طلب جديد قبل اكتماله." if lang == "ar" else
-            "⚠️ <b>You already have an active order.</b> Open Orders to follow it; a new order cannot be created until it is completed.",
+            "⚠️ <b>You already have an active order</b> Open Orders to follow it; a new order cannot be created until it is completed.",
             parse_mode="HTML",
         )
         await state.clear()
@@ -135,7 +132,7 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
             f"❌ The daily limit would be exceeded.\nDaily limit: {usdt(Config.DAILY_LIMIT)} USDT\nUsed today: {usdt(today_total)} USDT\nRequested: {usdt(amount)} USDT\nRemaining: {usdt(max(remaining, Decimal('0')))} USDT"
         )
         return
-    await state.update_data(amount_usdt=amount)
+    await state.update_data(amount_usdt=amount, order_amount_usdt=amount)
     await _show_verified_wallets(message, state, user["id"], lang)
 
 
