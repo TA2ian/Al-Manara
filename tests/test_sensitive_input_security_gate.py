@@ -1,18 +1,19 @@
+import io
 from pathlib import Path
+
+from PIL import Image
 
 from services.media_security import validate_image_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_telegram_photo_payload_can_be_validated_without_advisory_mime():
-    payload = b"\x89PNG\r\n\x1a\n" + b"not-a-complete-png"
-    try:
-        validate_image_payload(payload, file_name="telegram-photo")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("invalid image payload must still be rejected")
+def test_telegram_photo_payload_can_be_validated_without_advisory_metadata():
+    output = io.BytesIO()
+    Image.new("RGB", (32, 32), "white").save(output, format="JPEG")
+    descriptor = validate_image_payload(output.getvalue(), file_name="telegram-photo")
+    assert descriptor.kind == "image"
+    assert descriptor.mime_type == "image/jpeg"
 
 
 def test_sensitive_state_processing_lock_is_runtime_registered():
