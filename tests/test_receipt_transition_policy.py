@@ -4,11 +4,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_receipt_transition_policy_is_registered_before_legacy_receipt_handler():
+def test_receipt_transition_policy_is_registered_in_the_authoritative_router_graph():
     bot = (ROOT / "bot.py").read_text(encoding="utf-8")
-    transition_pos = bot.index("dp.include_router(receipt_transition_policy.router)")
-    legacy_pos = bot.index("dp.include_router(my_orders.router)")
-    assert transition_pos < legacy_pos
+    assert "dp.include_router(receipt_processing_policy.router)" in bot
+    assert "dp.include_router(receipt_document_policy.router)" in bot
+    assert "dp.include_router(receipt_transition_policy.router)" in bot
+    assert "dp.include_router(my_orders.router)" not in bot
+    assert not (ROOT / "handlers" / "my_orders.py").exists()
 
 
 def test_receipt_transition_policy_uses_atomic_order_transition():
