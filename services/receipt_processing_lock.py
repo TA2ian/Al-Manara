@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from functools import wraps
 
 from database import get_pool
 
@@ -27,3 +28,19 @@ async def receipt_processing_lock(order_id: int):
                 f"al-manara:receipt:{int(order_id)}",
             )
         await pool.release(connection)
+
+
+def serialize_receipt_handler(handler):
+    """Serialize a Telegram receipt handler by the order id stored in FSM data."""
+    @wraps(handler)
+    async def wrapped(message, state, *args, **kwargs):
+        data = await state.get_data()
+        order_id = data.get("receipt_order_id")
+        if not order_id:
+            return await handler(message, state, *args, **kwargs)
+        async with receipt_processing_lock(int(order_id)) as acquired:
+            if not acquired:
+                await message.answer("⏳ جارٍ التحقق من إيصال آخر لهذا الطلب. انتظر النتيجة قبل إرسال إثبات آخر.")
+                return
+            return await handler(message, state, *args, **kwargs)
+    return wrapped
