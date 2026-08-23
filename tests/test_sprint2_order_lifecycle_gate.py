@@ -68,8 +68,9 @@ def test_central_numeric_formatters_exist_for_all_financial_classes():
 def test_expiry_worker_uses_authoritative_transition():
     source = (ROOT / "main.py").read_text(encoding="utf-8")
     assert "transition_order" in source
-    assert '"expired"' in source
+    assert "'expired'" in source
     assert "payment_deadline" in source
+    assert "_track_background_task(check_expired_orders(bot), 'order-expiry-checker')" in source
 
 
 def test_order_confirmation_snapshots_verified_wallet_and_payment_data():
