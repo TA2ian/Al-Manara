@@ -12,8 +12,8 @@ def test_database_migrates_legacy_syp_method_into_canonical_new_syp():
     assert "DELETE FROM payment_methods WHERE id = $1" in source
 
 
-def test_database_keeps_only_canonical_payment_method_codes_for_shamcash():
+def test_database_defines_only_canonical_runtime_payment_method_codes():
     source = (ROOT / "database.py").read_text(encoding="utf-8")
     assert "shamcash_usd" in source
     assert "shamcash_new_syp" in source
-    assert "currency = 'SYP'" not in source
+    assert "payment_methods WHERE provider = 'ShamCash'" in source
