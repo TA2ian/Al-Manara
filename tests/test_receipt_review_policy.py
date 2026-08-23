@@ -16,7 +16,7 @@ class ReceiptReviewPolicyTests(unittest.TestCase):
             order_id=41,
             lang="ar",
         )
-        self.assertIn("المراجعة اليدوية", text)
+        self.assertIn("طلب مراجعة", text)
         self.assertEqual(parse_mode, "HTML")
         self.assertIsNotNone(keyboard)
         self.assertEqual(keyboard.inline_keyboard[0][0].callback_data, "manual_receipt_review_41")
