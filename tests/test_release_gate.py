@@ -20,7 +20,6 @@ POLICY_MODULES = [
     "handlers.verification_pending_policy", "handlers.wallet_qr_first_policy", "handlers.wallets",
 ]
 
-
 REMOVED_MODULES = (
     "handlers.admin",
     "handlers.admin_settings_alias_policy",
@@ -28,13 +27,16 @@ REMOVED_MODULES = (
     "handlers.verification_pending_guard",
     "services.order_wallet_guard",
     "database_wallet_guards",
+    "handlers.my_orders",
 )
+
 
 
 def test_release_policy_modules_import():
     for module_name in POLICY_MODULES:
         module = importlib.import_module(module_name)
         assert hasattr(module, "router"), module_name
+
 
 
 def test_removed_compatibility_modules_are_not_importable_from_the_repository():
@@ -44,14 +46,18 @@ def test_removed_compatibility_modules_are_not_importable_from_the_repository():
         assert not (root / relative).with_suffix(".py").exists()
 
 
+
 def test_authoritative_order_services_import():
     for module_name in (
         "services.order_state_service", "services.order_completion_service",
         "services.receipt_verifier", "services.exchange_service", "services.settings_service",
-        "database_order_constraints",
+        "services.receipt_service", "database_order_constraints",
     ):
         importlib.import_module(module_name)
 
 
+
 def test_release_gate_does_not_require_retired_monolithic_order_handler():
-    assert not (Path(__file__).resolve().parents[1] / "handlers" / "order.py").exists()
+    root = Path(__file__).resolve().parents[1]
+    assert not (root / "handlers" / "order.py").exists()
+    assert not (root / "handlers" / "my_orders.py").exists()
