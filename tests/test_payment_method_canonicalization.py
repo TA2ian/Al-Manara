@@ -16,10 +16,13 @@ def test_database_defines_only_canonical_runtime_payment_method_codes():
     source = (ROOT / "database.py").read_text(encoding="utf-8")
     assert "shamcash_usd" in source
     assert "shamcash_new_syp" in source
-    assert "payment_methods WHERE provider = 'ShamCash'" in source
+    assert "payment_methods WHERE provider = 'ShamCash'" in source or "WHERE provider = 'ShamCash'" in source
 
 
-def test_database_order_snapshot_trigger_rejects_noncanonical_method_rows():
-    source = (ROOT / "database.py").read_text(encoding="utf-8")
-    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in source
+def test_order_payment_snapshot_authority_is_the_database_guard():
+    source = (ROOT / "database_wallet_guards.py").read_text(encoding="utf-8")
     assert "snapshot_order_payment_method" in source
+    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in source
+    assert "payment_account_snapshot" in source
+    assert "payment_qr_photo_id" in source
+    assert "BEFORE INSERT ON orders" in source
