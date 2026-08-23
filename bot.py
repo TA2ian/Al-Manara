@@ -42,7 +42,6 @@ def create_dispatcher() -> Dispatcher:
         verification,
         customer_navigation_policy,
         customer_settings_policy,
-        menu,
         admin_tools_policy,
         admin_search_policy,
     )
@@ -100,6 +99,5 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(verification.router)
     dp.include_router(customer_navigation_policy.router)
     dp.include_router(customer_settings_policy.router)
-    dp.include_router(menu.router)
 
     return dp
