@@ -21,9 +21,17 @@ def test_canonical_receipt_service_serializes_all_media_processing():
 
 def test_document_receipt_handler_delegates_to_canonical_service():
     source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
-    assert "from services.receipt_service import MAX_RECEIPT_ATTEMPTS, handle_receipt_upload" in source
+    assert "from services.receipt_service import (" in source
+    assert "handle_receipt_upload" in source
     assert "await handle_receipt_upload(message, state)" in source
     assert "@serialize_receipt_handler" not in source
+
+
+def test_photo_receipt_handler_delegates_to_the_same_canonical_service():
+    source = (ROOT / "handlers/receipt_processing_policy.py").read_text(encoding="utf-8")
+    assert "from services.receipt_service import handle_receipt_upload" in source
+    assert "await handle_receipt_upload(message, state)" in source
+    assert "@router.message(ReceiptStates.waiting_receipt, F.photo)" in source
 
 
 def test_multiple_receipts_do_not_create_parallel_attempts_for_one_order():
