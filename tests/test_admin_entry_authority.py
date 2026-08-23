@@ -22,6 +22,7 @@ def test_settings_policy_contains_only_operational_settings():
 
 def test_admin_entry_is_the_only_dashboard_message_owner():
     entry = (ROOT / "handlers/admin_entry.py").read_text(encoding="utf-8")
-    assert "reply_markup=admin_menu_keyboard()" in entry
+    assert "reply_markup=enhanced_admin_menu_keyboard()" in entry
+    assert "reply_markup=admin_menu_keyboard()" not in entry
     settings = (ROOT / "handlers/admin_settings_policy.py").read_text(encoding="utf-8")
     assert "Command" not in settings
