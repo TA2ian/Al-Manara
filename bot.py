@@ -57,6 +57,12 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(start.router)
 
+    # The payment-methods router owns the authoritative admin_menu callback.
+    # It must precede all compatibility/policy routers that still contain
+    # historical admin_menu handlers so the enhanced dashboard is always the
+    # first and only effective navigation target.
+    dp.include_router(payment_methods.router)
+
     # Dedicated input routers must precede broad legacy catch-alls.
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
@@ -98,10 +104,8 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_rejection_policy.router)
     dp.include_router(admin_payment_confirmation_policy.router)
     dp.include_router(admin_transfer_policy.router)
-    dp.include_router(payment_methods.router)
-    # This guard must precede the legacy verification router. It blocks a
-    # second request when the database status is already pending, while
-    # delegating rejected/not-verified submissions to the existing flow.
+    dp.include_router(admin.router)
+    # Payment methods is already registered above because it owns admin_menu.
     dp.include_router(verification_pending_guard.router)
     dp.include_router(verification.router)
     dp.include_router(customer_navigation_policy.router)
