@@ -19,6 +19,7 @@ def test_completion_is_authoritative_and_only_from_payment_confirmed():
     assert "transition_order" in source
     assert "txid" in source
     assert "completed_at" in source
+    assert '"wallet_qr_photo_id": None' not in source
 
 
 def test_admin_rejection_has_separate_order_and_receipt_paths():
