@@ -1,7 +1,8 @@
 """Customer receipt-processing UX policy.
 
-Displays a localized processing message while the canonical receipt upload
-implementation performs OCR, verification, persistence, and admin notification.
+This router owns the customer photo-upload entrypoint. Processing itself is
+implemented by the canonical receipt service and is not registered as another
+router, preventing duplicate Telegram handler ownership.
 """
 import logging
 
@@ -10,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from database import get_pool
+from services.receipt_service import handle_receipt_upload
 from states import ReceiptStates
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ async def _get_lang(telegram_id: int) -> str:
 
 @router.message(ReceiptStates.waiting_receipt, F.photo)
 async def process_receipt_with_progress(message: Message, state: FSMContext):
-    """Display localized progress while the canonical receipt flow processes the image."""
+    """Display localized progress while the canonical receipt service processes the image."""
     lang = await _get_lang(message.from_user.id)
     progress_text = (
         "⏳ <b>جارٍ معالجة صورة الإيصال...</b>\n\n"
@@ -49,7 +51,6 @@ async def process_receipt_with_progress(message: Message, state: FSMContext):
 
     progress = await message.answer(progress_text, parse_mode="HTML")
     try:
-        from handlers.my_orders import handle_receipt_upload
         await handle_receipt_upload(message, state)
     except Exception:
         logger.exception("Receipt processing failed for order in customer flow")
