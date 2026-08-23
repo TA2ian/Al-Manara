@@ -61,7 +61,11 @@ async def _continue_to_currency(message_or_callback, state: FSMContext, lang: st
 @router.callback_query(F.data == "back_to_wallet")
 async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
     """Return to verified-wallet selection without restarting address entry."""
+    # Acknowledge immediately so Telegram does not leave the button in a loading state
+    # while the wallet list is being read from the database.
+    await callback.answer()
     lang = await _lang(callback.from_user.id)
+    draft = await state.get_data()
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow("SELECT id FROM users WHERE telegram_id = $1", callback.from_user.id)
@@ -79,6 +83,16 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
             )
 
     if rows:
+        # Keep the order draft intact when navigating backward. In particular,
+        # preserve the selected amount under both keys used by the order flow.
+        preserved = {}
+        if draft.get("amount_usdt") is not None:
+            preserved["amount_usdt"] = draft["amount_usdt"]
+        if draft.get("order_amount_usdt") is not None:
+            preserved["order_amount_usdt"] = draft["order_amount_usdt"]
+        if preserved:
+            await state.update_data(**preserved)
+        await state.set_state(OrderStates.waiting_currency)
         await callback.message.edit_text(
             "👛 <b>اختر محفظة موثقة</b>\n\nاختر العنوان الذي تريد استخدامه لهذا الطلب. سيتم استخدام QR المحفوظ تلقائياً."
             if lang == "ar" else
@@ -86,7 +100,6 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
             reply_markup=_wallet_choice_keyboard(rows, lang),
             parse_mode="HTML",
         )
-        await callback.answer()
         return
 
     await state.update_data(return_to_order=True)
@@ -100,7 +113,6 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
         reply_markup=_cancel_order_keyboard(lang),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "order_wallet_manual")
@@ -138,7 +150,6 @@ async def redirect_manual_wallet_message_to_registry(message: Message, state: FS
             "The network and address will be validated automatically, then the matching QR will be requested once.\n\n🔒 You will not need to send the QR again for this address."
         ),
         reply_markup=_cancel_order_keyboard(lang),
-        parse_mode="HTML",
     )
 
 
