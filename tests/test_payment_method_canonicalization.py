@@ -19,10 +19,14 @@ def test_database_defines_only_canonical_runtime_payment_method_codes():
     assert "payment_methods WHERE provider = 'ShamCash'" in source or "WHERE provider = 'ShamCash'" in source
 
 
-def test_order_payment_snapshot_authority_is_the_database_guard():
-    source = (ROOT / "database_wallet_guards.py").read_text(encoding="utf-8")
-    assert "snapshot_order_payment_method" in source
-    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in source
-    assert "payment_account_snapshot" in source
-    assert "payment_qr_photo_id" in source
-    assert "BEFORE INSERT ON orders" in source
+def test_order_payment_snapshot_authority_is_the_canonical_database_constraints_module():
+    database_source = (ROOT / "database.py").read_text(encoding="utf-8")
+    constraints_source = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
+    assert "database_wallet_guards" not in database_source
+    assert "from database_order_constraints import install_order_constraints" in database_source
+    assert "await install_order_constraints(conn)" in database_source
+    assert "snapshot_order_payment_method" in constraints_source
+    assert "code IN ('shamcash_usd', 'shamcash_new_syp')" in constraints_source
+    assert "payment_account_snapshot" in constraints_source
+    assert "payment_qr_photo_id" in constraints_source
+    assert "BEFORE INSERT ON orders" in constraints_source
