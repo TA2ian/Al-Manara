@@ -31,6 +31,15 @@ def _order_number() -> str:
     return f"ORD_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6].upper()}"
 
 
+async def _payment_timeout_minutes() -> int:
+    raw = await SettingsService.get("payment_timeout_minutes", str(Config.PAYMENT_TIMEOUT))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = Config.PAYMENT_TIMEOUT
+    return max(1, min(value, 1440))
+
+
 @router.callback_query(OrderStates.waiting_confirmation, lambda c: c.data == "confirm_order")
 async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext):
     allowed, _ = global_rate_limiter.check(callback.from_user.id, "order_confirm")
@@ -94,9 +103,6 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await state.clear()
                 return
 
-            # The database is the source of truth for the receiving wallet.
-            # Never trust a wallet address/QR carried only by the FSM at the
-            # final order boundary.
             wallet = await conn.fetchrow(
                 """SELECT id, address, network, qr_photo_id, verification_status
                    FROM saved_addresses
@@ -183,7 +189,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             )
             auto_approved = bool(await SettingsService.get_bool("auto_approve", False) and completed_count >= 3)
             if auto_approved:
-                deadline = datetime.now() + timedelta(minutes=Config.PAYMENT_TIMEOUT)
+                deadline = datetime.now() + timedelta(minutes=await _payment_timeout_minutes())
                 try:
                     await transition_order(
                         conn,
