@@ -92,7 +92,12 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
             preserved["order_amount_usdt"] = draft["order_amount_usdt"]
         if preserved:
             await state.update_data(**preserved)
-        await state.set_state(OrderStates.waiting_currency)
+
+        # The wallet list is an intermediate step. Keeping the FSM in
+        # waiting_wallet prevents currency callbacks from being accepted before
+        # a wallet is selected and avoids the misleading "incomplete order"
+        # error seen after pressing Back.
+        await state.set_state(OrderStates.waiting_wallet)
         await callback.message.edit_text(
             "👛 <b>اختر محفظة موثقة</b>\n\nاختر العنوان الذي تريد استخدامه لهذا الطلب. سيتم استخدام QR المحفوظ تلقائياً."
             if lang == "ar" else
@@ -112,6 +117,17 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
         "After the address is validated, we will request the matching QR once.\n\n🔒 After saving, the QR will be reused automatically for future orders.",
         reply_markup=_cancel_order_keyboard(lang),
         parse_mode="HTML",
+    )
+
+
+@router.callback_query(OrderStates.waiting_wallet, F.data.startswith("currency_"))
+async def reject_currency_before_wallet(callback: CallbackQuery, state: FSMContext):
+    """Do not allow a stale currency keyboard to bypass wallet selection."""
+    lang = await _lang(callback.from_user.id)
+    await callback.answer(
+        "👛 اختر المحفظة أولاً لمتابعة الطلب." if lang == "ar" else
+        "👛 Select a wallet first to continue.",
+        show_alert=True,
     )
 
 
