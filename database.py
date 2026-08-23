@@ -1,14 +1,14 @@
 import asyncpg
 import logging
 from config import Config
-from database_wallet_guards import install_order_wallet_guard
+from database_order_constraints import install_order_constraints
 
 logger = logging.getLogger(__name__)
 _pool = None
 
 
 async def init_db():
-    """Initialize database connection pool and apply additive schema changes."""
+    """Initialize database connection pool and apply canonical schema constraints."""
     global _pool
     if not Config.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is required")
@@ -159,8 +159,6 @@ async def init_db():
             VALUES ('shamcash_new_syp', 'ShamCash', 'NEW.SYP', 'ShamCash NEW.SYP', $1, TRUE)
             ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_syp())
 
-        # Runtime payment methods have exactly two canonical ShamCash codes.
-        # The legacy shamcash_syp row is migration-only and must never become an active runtime path.
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_canonical_payment_method_row()
             RETURNS TRIGGER AS $$
@@ -236,7 +234,7 @@ async def init_db():
             BEFORE INSERT OR UPDATE OF user_id, status ON orders
             FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()""")
 
-        await install_order_wallet_guard(conn)
+        await install_order_constraints(conn)
 
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_order_state_transition()
