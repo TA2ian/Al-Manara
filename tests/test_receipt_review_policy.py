@@ -1,6 +1,9 @@
 import unittest
+from pathlib import Path
 
 from services.receipt_service import _customer_result_message
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReceiptReviewPolicyTests(unittest.TestCase):
@@ -38,6 +41,26 @@ class ReceiptReviewPolicyTests(unittest.TestCase):
             lang="ar",
         )
         self.assertIsNone(keyboard)
+
+    def test_admin_handoff_is_gated_by_success_or_exhaustion(self):
+        source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
+        self.assertIn("if auto_verified or remaining_attempts <= 0:", source)
+        self.assertIn("await notify_admins_receipt(", source)
+        self.assertIn("manual_review_requested=True", source)
+
+    def test_progress_pipeline_and_elapsed_timer_are_present(self):
+        source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
+        self.assertIn("_start_progress", source)
+        self.assertIn("_set_progress_stage", source)
+        self.assertIn("الزمن المنقضي", source)
+        self.assertIn("Running OCR analysis", source)
+        self.assertIn("لا ترسل ملفاً آخر حتى تظهر النتيجة", source)
+
+    def test_document_and_photo_use_the_same_canonical_service(self):
+        photo_source = (ROOT / "handlers/receipt_processing_policy.py").read_text(encoding="utf-8")
+        document_source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
+        self.assertIn("handle_receipt_upload", photo_source)
+        self.assertIn("handle_receipt_upload", document_source)
 
 
 if __name__ == "__main__":
