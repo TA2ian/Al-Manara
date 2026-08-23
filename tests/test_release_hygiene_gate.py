@@ -27,6 +27,7 @@ def test_legacy_compatibility_surface_is_removed():
         "services/order_wallet_guard.py",
         "handlers/order.py",
         "handlers/menu.py",
+        "handlers/my_orders.py",
         "database_wallet_guards.py",
     ):
         assert not (ROOT / relative_path).exists(), relative_path
@@ -47,5 +48,7 @@ def test_release_gate_covers_authoritative_services_and_removed_surface():
     assert "handlers.verification_pending_guard" in source
     assert "services.order_state_service" in source
     assert "services.order_completion_service" in source
+    assert "services.receipt_service" in source
     assert "handlers.legacy_wallet_guard" in source
+    assert "handlers.my_orders" in source
     assert "handlers.admin" in source
