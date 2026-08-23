@@ -49,7 +49,7 @@ def test_receipt_verification_never_completes_payment_by_itself():
 
 
 def test_payment_snapshot_and_new_syp_contract_are_present():
-    source = (ROOT / "database_wallet_guards.py").read_text(encoding="utf-8")
+    source = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
     assert "payment_account_snapshot" in source
     assert "payment_qr_photo_id" in source
     assert "NEW.SYP" in source
