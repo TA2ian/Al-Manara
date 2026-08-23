@@ -15,13 +15,14 @@ def test_admin_approval_requires_snapshot_and_rolls_back_if_delivery_fails():
 
 def test_customer_receipt_flow_supports_image_processing_and_manual_review():
     processing = (ROOT / "handlers/receipt_processing_policy.py").read_text(encoding="utf-8")
-    transition = (ROOT / "handlers/receipt_transition_policy.py").read_text(encoding="utf-8")
+    receipt_service = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
     document = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
     assert "ReceiptStates.waiting_receipt" in processing
     assert "handle_receipt_upload" in processing
-    assert "manual_review_" in transition
-    assert "receipt_received" in transition
-    assert "is_auto_verified=False" in transition
+    assert "request_manual_receipt_review" in receipt_service
+    assert 'order["status"] != "waiting_payment"' in receipt_service
+    assert '"receipt_received"' in receipt_service
+    assert "is_auto_verified=False" in receipt_service
     assert "ReceiptStates.waiting_receipt" in document
 
 
