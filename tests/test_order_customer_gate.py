@@ -47,6 +47,7 @@ class OrderCustomerGateTests(unittest.IsolatedAsyncioTestCase):
                     provider TEXT,
                     currency TEXT,
                     enabled BOOLEAN DEFAULT TRUE,
+                    recipient_name TEXT,
                     account_identifier TEXT,
                     qr_photo_id TEXT
                 )
@@ -61,14 +62,15 @@ class OrderCustomerGateTests(unittest.IsolatedAsyncioTestCase):
                     status TEXT DEFAULT 'pending',
                     payment_currency TEXT DEFAULT 'USD',
                     payment_method_code TEXT,
+                    payment_recipient_name_snapshot TEXT,
                     payment_account_snapshot TEXT,
                     payment_qr_photo_id TEXT
                 )
             """)
             await conn.execute("""
                 INSERT INTO payment_methods(
-                    code, provider, currency, enabled, account_identifier, qr_photo_id
-                ) VALUES ('SHAM_USD', 'ShamCash', 'USD', TRUE, 'acct', 'payqr')
+                    code, provider, currency, enabled, recipient_name, account_identifier, qr_photo_id
+                ) VALUES ('shamcash_usd', 'ShamCash', 'USD', TRUE, 'ShamCash Test Recipient', 'acct', 'payqr')
             """)
             await conn.execute("""
                 INSERT INTO users(
