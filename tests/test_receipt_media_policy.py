@@ -5,11 +5,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_receipt_document_policy_accepts_pdf_and_image_formats():
     document_source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
+    service_source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
     media_source = (ROOT / "services/receipt_media.py").read_text(encoding="utf-8")
+    verifier_source = (ROOT / "services/receipt_verifier.py").read_text(encoding="utf-8")
     assert "application/pdf" in media_source
     assert "JPG/PNG/WebP" in document_source
-    assert "normalize_receipt_media" in document_source
-    assert "verify_shamcash_receipt" in document_source
+    assert "handle_receipt_upload" in document_source
+    assert "normalize_receipt_media" in service_source
+    assert "verify_shamcash_receipt" in service_source
+    assert "verify_shamcash_receipt" in verifier_source
 
 
 def test_receipt_media_enforces_size_and_pdf_page_limits():
