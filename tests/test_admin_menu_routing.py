@@ -5,11 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_payment_methods_router_precedes_admin_navigation():
+def test_payment_method_router_is_registered_directly_without_the_retired_module():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    payment_index = source.index("dp.include_router(payment_methods.router)")
-    admin_policy_index = source.index("dp.include_router(admin_navigation_policy.router)")
-    assert payment_index < admin_policy_index
+    assert "dp.include_router(payment_method_setup_policy.router)" in source
+    assert "payment_methods.router" not in source
 
 
 def test_admin_router_graph_has_no_retired_facade():
@@ -32,10 +31,10 @@ def test_admin_policies_are_registered_directly():
         assert f"dp.include_router({router_name}.router)" in source
 
 
-def test_admin_dashboard_always_uses_payment_methods_keyboard():
+def test_admin_dashboard_and_payment_methods_have_single_owners():
     entry_source = (ROOT / "handlers" / "admin_entry.py").read_text(encoding="utf-8")
-    payment_source = (ROOT / "handlers" / "payment_methods.py").read_text(encoding="utf-8")
-    assert "from handlers.payment_methods import enhanced_admin_menu_keyboard" in entry_source
-    assert "reply_markup=enhanced_admin_menu_keyboard()" in entry_source
-    assert '@router.callback_query(F.data == "admin_menu")' in payment_source
-    assert "enhanced_admin_menu_keyboard" in payment_source
+    payment_source = (ROOT / "handlers" / "payment_method_setup_policy.py").read_text(encoding="utf-8")
+    assert "enhanced_admin_menu_keyboard" in entry_source
+    assert '@router.callback_query(F.data == "admin_menu")' in entry_source
+    assert '@router.callback_query(F.data == "admin_payment_methods")' in payment_source
+    assert '@router.callback_query(F.data == "admin_menu")' not in payment_source
