@@ -1,27 +1,13 @@
 """Authoritative admin entry points and dashboard navigation."""
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
 
 from config import Config
-from keyboards.inline import admin_menu_keyboard
+from keyboards.admin import enhanced_admin_menu_keyboard
 
 router = Router()
-
-
-def enhanced_admin_menu_keyboard() -> InlineKeyboardMarkup:
-    rows = []
-    for row in admin_menu_keyboard().inline_keyboard:
-        new_row = []
-        for button in row:
-            if button.callback_data == "admin_analytics":
-                new_row.append(InlineKeyboardButton(text="📈 التحليل المالي", callback_data="admin_analytics"))
-            else:
-                new_row.append(button)
-        rows.append(new_row)
-    rows.insert(3, [InlineKeyboardButton(text="💳 وسائل الدفع", callback_data="admin_payment_methods")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _send_admin_menu(message: Message) -> None:
