@@ -37,7 +37,7 @@ def create_dispatcher() -> Dispatcher:
         admin_utility_policy,
         admin_maintenance_policy,
         admin_settings_policy,
-        payment_methods,
+        payment_method_setup_policy,
         language_policy,
         customer_navigation_policy,
         customer_settings_policy,
@@ -58,7 +58,7 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
-    dp.include_router(payment_methods.router)
+    dp.include_router(payment_method_setup_policy.router)
 
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
