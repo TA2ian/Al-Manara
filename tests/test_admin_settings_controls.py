@@ -2,7 +2,7 @@
 import inspect
 from pathlib import Path
 
-from handlers import admin_settings_policy, admin_utility_policy, admin_tools_policy, admin_rate_policy, payment_methods
+from handlers import admin_settings_policy, admin_utility_policy, admin_tools_policy, admin_rate_policy, payment_method_setup_policy
 from keyboards.inline import settings_keyboard
 
 
@@ -17,7 +17,7 @@ def test_every_settings_button_has_an_authoritative_handler():
     data = callbacks(settings_keyboard())
     settings_source = inspect.getsource(admin_settings_policy)
     rate_source = inspect.getsource(admin_rate_policy)
-    payment_source = inspect.getsource(payment_methods)
+    payment_source = inspect.getsource(payment_method_setup_policy)
 
     assert "setting_fees" in settings_source
     assert "setting_timeout" in settings_source
