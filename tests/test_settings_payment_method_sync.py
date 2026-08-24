@@ -1,15 +1,13 @@
-"""Regression coverage for persistent ShamCash settings synchronization."""
+"""Regression coverage for operational settings isolation."""
 import inspect
 
 from services import settings_service
 
 
-def test_legacy_shamcash_settings_sync_to_canonical_payment_methods():
+def test_settings_service_does_not_mutate_payment_methods():
     source = inspect.getsource(settings_service)
-    assert '"shamcash_usd": ("shamcash_usd", "USD")' in source
-    assert '"shamcash_syp": ("shamcash_new_syp", "NEW.SYP")' in source
-    assert "UPDATE payment_methods" in source
-    assert "account_identifier = $1" in source
+    assert "payment_methods" not in source
+    assert "account_identifier = $1" not in source
 
 
 def test_settings_are_persisted_before_cache_is_published():
