@@ -16,16 +16,14 @@ def test_receipt_document_policy_accepts_pdf_and_image_formats():
     assert "verify_shamcash_receipt" in verifier_source
 
 
-def test_receipt_media_enforces_size_and_pdf_page_limits():
+def test_receipt_media_enforces_2mb_size_and_one_page_pdf_limit():
     source = (ROOT / "services/receipt_media.py").read_text(encoding="utf-8")
-    security_source = (ROOT / "services/media_security.py").read_text(encoding="utf-8")
-    assert "MAX_RECEIPT_BYTES = 12 * 1024 * 1024" in source
-    assert "MAX_PDF_PAGES" in source
-    assert "MAX_PDF_PAGES = 3" in security_source
+    assert "MAX_RECEIPT_BYTES = 2 * 1024 * 1024" in source
+    assert "MAX_RECEIPT_PDF_PAGES = 1" in source
+    assert "document.page_count != MAX_RECEIPT_PDF_PAGES" in source
     assert "OCR_MAX_DIMENSION = 1400" in source
     assert "application/pdf" in source
     assert "validate_pdf_payload" in source
-    assert "document.page_count < 1 or document.page_count > MAX_PDF_PAGES" in security_source
 
 
 def test_unsupported_receipt_files_are_explicitly_rejected():
