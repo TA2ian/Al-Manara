@@ -57,6 +57,7 @@ class PaymentSnapshotConstraintTests(unittest.IsolatedAsyncioTestCase):
     async def test_payment_method_is_snapshotted_on_insert(self):
         row = await self._insert_order()
         self.assertEqual(row["payment_method_code"], "shamcash_new_syp")
+        self.assertEqual(row["payment_recipient_name_snapshot"], "ShamCash")
         self.assertEqual(row["payment_account_snapshot"], "ACCOUNT-A")
         self.assertEqual(row["payment_qr_photo_id"], "payment-qr-a")
 
@@ -65,12 +66,16 @@ class PaymentSnapshotConstraintTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             async with self.pool.acquire() as conn:
                 await conn.execute("UPDATE orders SET payment_account_snapshot='ACCOUNT-B' WHERE id=$1", row["id"])
+        with self.assertRaises(Exception):
+            async with self.pool.acquire() as conn:
+                await conn.execute("UPDATE orders SET payment_recipient_name_snapshot='Other' WHERE id=$1", row["id"])
 
     async def test_changed_payment_method_does_not_change_existing_order(self):
         row = await self._insert_order()
         async with self.pool.acquire() as conn:
-            await conn.execute("UPDATE payment_methods SET account_identifier='ACCOUNT-B', qr_photo_id='payment-qr-b' WHERE code='shamcash_new_syp'")
-            current = await conn.fetchrow("SELECT payment_account_snapshot,payment_qr_photo_id FROM orders WHERE id=$1", row["id"])
+            await conn.execute("UPDATE payment_methods SET account_identifier='ACCOUNT-B', qr_photo_id='payment-qr-b', recipient_name='Other' WHERE code='shamcash_new_syp'")
+            current = await conn.fetchrow("SELECT payment_recipient_name_snapshot,payment_account_snapshot,payment_qr_photo_id FROM orders WHERE id=$1", row["id"])
+        self.assertEqual(current["payment_recipient_name_snapshot"], "ShamCash")
         self.assertEqual(current["payment_account_snapshot"], "ACCOUNT-A")
         self.assertEqual(current["payment_qr_photo_id"], "payment-qr-a")
 
