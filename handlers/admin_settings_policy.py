@@ -1,17 +1,18 @@
 """Authoritative operational admin settings.
 
-Exchange rate is owned by ``admin_rate_policy`` and ShamCash payment accounts
-and QR codes are owned by ``payment_methods``. This module contains only
-operational settings that have one runtime authority.
+Exchange rate is owned by ``admin_rate_policy`` and ShamCash payment setup is
+owned by ``payment_method_setup_policy``. This module contains only operational
+settings that have one runtime authority.
 """
 from decimal import Decimal, InvalidOperation
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import Config
-from keyboards.inline import admin_menu_keyboard, settings_keyboard
+from keyboards.admin import enhanced_admin_menu_keyboard
+from keyboards.inline import settings_keyboard
 from services.settings_service import SettingsService
 from states import AdminStates
 
@@ -25,7 +26,7 @@ def is_admin(user_id: int) -> bool:
 async def _back_to_admin(message: Message) -> None:
     await message.answer(
         "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
-        reply_markup=admin_menu_keyboard(),
+        reply_markup=enhanced_admin_menu_keyboard(),
         parse_mode="HTML",
     )
 
@@ -84,9 +85,7 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
     fee_percent = await _get_decimal_setting("service_fee_percent", Config.SERVICE_FEE_PERCENT)
     await callback.message.edit_text(
         "💰 <b>رسوم الخدمة</b>\n\n"
-        f"النسبة الحالية: <b>{fee_percent:g}%</b>\n\n"
-        "أرسل نسبة الرسوم الجديدة من 0 إلى 100.\n"
-        "تُطبق على عروض الأسعار الجديدة فقط.",
+        f"النسبة الحالية: <b>{fee_percent:g}%</b>\n\nأرسل نسبة الرسوم الجديدة من 0 إلى 100.\nتُطبق على عروض الأسعار الجديدة فقط.",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_fee_percent)
@@ -121,9 +120,7 @@ async def setting_timeout(callback: CallbackQuery, state: FSMContext) -> None:
     timeout = await _get_timeout_setting()
     await callback.message.edit_text(
         "⏱ <b>مهلة الدفع</b>\n\n"
-        f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\n"
-        "أرسل المهلة الجديدة بالدقائق (من 1 إلى 1440).\n"
-        "سيتم تطبيقها على الطلبات الجديدة فقط.",
+        f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\nأرسل المهلة الجديدة بالدقائق (من 1 إلى 1440).\nسيتم تطبيقها على الطلبات الجديدة فقط.",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_timeout)
@@ -159,10 +156,7 @@ async def setting_limits(callback: CallbackQuery) -> None:
     maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
     daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="⬇️ الحد الأدنى", callback_data="setting_limit_min"),
-            InlineKeyboardButton(text="⬆️ الحد الأقصى", callback_data="setting_limit_max"),
-        ],
+        [InlineKeyboardButton(text="⬇️ الحد الأدنى", callback_data="setting_limit_min"), InlineKeyboardButton(text="⬆️ الحد الأقصى", callback_data="setting_limit_max")],
         [InlineKeyboardButton(text="📅 الحد اليومي", callback_data="setting_limit_daily")],
         [InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")],
     ])
@@ -170,10 +164,8 @@ async def setting_limits(callback: CallbackQuery) -> None:
         "📊 <b>حدود الطلبات</b>\n\n"
         f"🔹 الحد الأدنى: <b>{minimum:g} USDT</b>\n"
         f"🔹 الحد الأقصى: <b>{maximum:g} USDT</b>\n"
-        f"🔹 الحد اليومي للعميل: <b>{daily:g} USDT</b>\n\n"
-        "اختر الحد الذي تريد تعديله:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+        f"🔹 الحد اليومي للعميل: <b>{daily:g} USDT</b>\n\nاختر الحد الذي تريد تعديله:",
+        reply_markup=keyboard, parse_mode="HTML",
     )
     await callback.answer()
 
@@ -217,14 +209,7 @@ async def setting_limit_daily(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
 
 
-async def _save_limit(
-    message: Message,
-    state: FSMContext,
-    key: str,
-    label: str,
-    minimum: Decimal | None = None,
-    maximum: Decimal | None = None,
-) -> None:
+async def _save_limit(message: Message, state: FSMContext, key: str, label: str, minimum: Decimal | None = None, maximum: Decimal | None = None) -> None:
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
