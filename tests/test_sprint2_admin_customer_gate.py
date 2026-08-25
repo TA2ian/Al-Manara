@@ -41,3 +41,21 @@ def test_receipt_rejection_returns_only_to_waiting_payment():
     source = (ROOT / "handlers/admin_rejection_policy.py").read_text(encoding="utf-8")
     assert 'order["status"] != "receipt_received"' in source
     assert 'transition_order(conn, order_id, "waiting_payment"' in source
+
+
+def test_active_orders_block_customer_deletion_at_database_boundary():
+    source = (ROOT / "database_order_constraints.py").read_text(encoding="utf-8")
+    assert "prevent_active_order_deletion" in source
+    assert "trg_prevent_active_order_deletion" in source
+    assert "pending" in source
+    assert "waiting_payment" in source
+    assert "receipt_received" in source
+    assert "payment_confirmed" in source
+    assert "active order prevents customer deletion" in source
+
+
+def test_customer_deletion_path_remains_transactional():
+    source = (ROOT / "handlers/admin_user_management_policy.py").read_text(encoding="utf-8")
+    assert "async with conn.transaction()" in source
+    assert 'DELETE FROM orders WHERE user_id = $1' in source
+    assert 'DELETE FROM users WHERE id = $1' in source
