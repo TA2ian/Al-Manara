@@ -1,18 +1,49 @@
 """Authoritative customer settings/quick-actions entry point."""
+import unicodedata
+
 from aiogram import F, Router
 from aiogram.types import Message
 
 from config import Config
 from database import get_pool
-from keyboards.inline import quick_actions_keyboard, main_menu_inline
+from keyboards.inline import quick_actions_keyboard
 from services.locale_service import locale_service
 
 router = Router()
 
 
-@router.message(F.text.in_({"⚙️ القائمة", "⚙️ Menu", "⚙️ الإعدادات", "⚙️ Settings"}))
+_SUPPORTED_MENU_LABELS = frozenset(
+    {
+        "⚙️ القائمة",
+        "القائمة ⚙️",
+        "القائمة",
+        "⚙️ Menu",
+        "Menu ⚙️",
+        "Menu",
+        "⚙️ الإعدادات",
+        "الإعدادات ⚙️",
+        "الإعدادات",
+        "⚙️ Settings",
+        "Settings ⚙️",
+        "Settings",
+    }
+)
+
+
+def _normalize_menu_label(value: str | None) -> str:
+    """Normalize Telegram reply-button text without accepting arbitrary input."""
+    if not value:
+        return ""
+    normalized = "".join(
+        character for character in unicodedata.normalize("NFKC", value)
+        if unicodedata.category(character) != "Cf"
+    )
+    return " ".join(normalized.split()).strip()
+
+
+@router.message(F.text.func(lambda text: _normalize_menu_label(text) in _SUPPORTED_MENU_LABELS))
 async def customer_settings(message: Message):
-    """Open the customer quick-actions panel from the persistent reply keyboard."""
+    """Open the customer quick-actions panel from current and historical reply keyboards."""
     pool = await get_pool()
     user = None
     if pool:
