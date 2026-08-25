@@ -13,20 +13,22 @@ _SECTION_PATTERN = re.compile(r"(?=<b>[1-9]+\.\s)")
 
 _SECTION_TITLES = {
     "ar": [
-        "📜 طبيعة الخدمة",
-        "📦 مسؤولية بيانات الطلب",
-        "🔐 بيانات التوثيق والخصوصية",
+        "📜 طبيعة الخدمة والحماية",
+        "👛 المحفظة وعنوان الاستلام",
+        "🔐 التوثيق والخصوصية",
         "💳 الدفع والمعاملات",
+        "📦 الطلبات والمعالجة",
         "🛡️ الأمان ومكافحة الاحتيال",
-        "🔄 التحديثات",
+        "🔄 التحديثات والسجلات",
     ],
     "en": [
-        "📜 Service Nature",
-        "📦 Order Data Responsibility",
-        "🔐 Verification Data & Privacy",
+        "📜 Service & Protection",
+        "👛 Wallet & Receiving Address",
+        "🔐 Verification & Privacy",
         "💳 Payments & Transactions",
+        "📦 Orders & Processing",
         "🛡️ Security & Anti-Fraud",
-        "🔄 Updates",
+        "🔄 Updates & Records",
     ],
 }
 
@@ -41,10 +43,10 @@ def _menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     titles = _SECTION_TITLES.get(lang, _SECTION_TITLES["ar"])
     rows = []
     for index in range(0, len(titles), 2):
-        rows.append([
-            InlineKeyboardButton(text=titles[index], callback_data=f"legal_section_{index + 1}"),
-            *([InlineKeyboardButton(text=titles[index + 1], callback_data=f"legal_section_{index + 2}")] if index + 1 < len(titles) else []),
-        ])
+        row = [InlineKeyboardButton(text=titles[index], callback_data=f"legal_section_{index + 1}")]
+        if index + 1 < len(titles):
+            row.append(InlineKeyboardButton(text=titles[index + 1], callback_data=f"legal_section_{index + 2}"))
+        rows.append(row)
     rows.append([
         InlineKeyboardButton(
             text="🔙 القائمة الرئيسية" if lang == "ar" else "🔙 Main Menu",
@@ -58,19 +60,15 @@ def _section_keyboard(lang: str, index: int, total: int) -> InlineKeyboardMarkup
     rows = []
     navigation = []
     if index > 0:
-        navigation.append(
-            InlineKeyboardButton(
-                text="⬅️ السابق" if lang == "ar" else "⬅️ Previous",
-                callback_data=f"legal_section_{index}",
-            )
-        )
+        navigation.append(InlineKeyboardButton(
+            text="⬅️ السابق" if lang == "ar" else "⬅️ Previous",
+            callback_data=f"legal_section_{index}",
+        ))
     if index < total - 1:
-        navigation.append(
-            InlineKeyboardButton(
-                text="التالي ➡️" if lang == "ar" else "Next ➡️",
-                callback_data=f"legal_section_{index + 2}",
-            )
-        )
+        navigation.append(InlineKeyboardButton(
+            text="التالي ➡️" if lang == "ar" else "Next ➡️",
+            callback_data=f"legal_section_{index + 2}",
+        ))
     if navigation:
         rows.append(navigation)
     rows.append([
@@ -84,31 +82,31 @@ def _section_keyboard(lang: str, index: int, total: int) -> InlineKeyboardMarkup
 
 @router.callback_query(F.data == "menu_disclaimer")
 async def show_legal_sections(callback: CallbackQuery):
-    """Show the legal policy index instead of the legacy monolithic message."""
+    """Show the legal policy index instead of the monolithic message."""
     lang = "ar"
     try:
         user = await _get_user(callback.from_user.id)
         if user:
-            lang = user.get("language") or "ar"
+            lang = user["language"] or "ar"
     except Exception:
         lang = "ar"
     title = (
-        "📚 <b>الشروط والسياسات</b>\n\nاختر القسم الذي تريد قراءته:"
-        if lang == "ar"
-        else "📚 <b>Terms & Policies</b>\n\nChoose the section you want to read:"
+        "📚 <b>الشروط والسياسات</b>\n\nاختر القسم الذي تريد قراءته. يمكنك التنقل بين الأقسام أو العودة إلى القائمة الرئيسية."
+        if lang == "ar" else
+        "📚 <b>Terms & Policies</b>\n\nChoose a section. You can move between sections or return to the main menu."
     )
     await callback.message.edit_text(title, reply_markup=_menu_keyboard(lang), parse_mode="HTML")
     await callback.answer()
 
 
-@router.callback_query(F.data.regexp(r"^legal_section_[1-6]$"))
+@router.callback_query(F.data.regexp(r"^legal_section_[1-7]$"))
 async def show_legal_section(callback: CallbackQuery):
     """Render one legal section with previous/next navigation."""
     lang = "ar"
     try:
         user = await _get_user(callback.from_user.id)
         if user:
-            lang = user.get("language") or "ar"
+            lang = user["language"] or "ar"
     except Exception:
         lang = "ar"
 
@@ -133,7 +131,7 @@ async def legal_back_main(callback: CallbackQuery):
     try:
         user = await _get_user(callback.from_user.id)
         if user:
-            lang = user.get("language") or "ar"
+            lang = user["language"] or "ar"
     except Exception:
         lang = "ar"
 
