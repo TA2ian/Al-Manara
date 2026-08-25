@@ -8,16 +8,20 @@ def test_legacy_payment_method_callback_aliases_are_supported():
     source = (ROOT / "handlers/payment_method_legacy_compat.py").read_text(encoding="utf-8")
     assert '"USD": "shamcash_usd"' in source
     assert '"NEW.SYP": "shamcash_new_syp"' in source
-    assert "admin_pm_(?:enable|disable|toggle)_" in source
+    assert '"shamcash_syp": "shamcash_new_syp"' in source
+    assert "admin_pm_(?:view|setup|enable|disable|toggle)_" in source
     assert "_canonicalize_legacy_callback" in source
 
 
-def test_legacy_callbacks_delegate_to_canonical_state_transition():
+def test_legacy_callbacks_delegate_to_canonical_handlers_and_state_transition():
     source = (ROOT / "handlers/payment_method_legacy_compat.py").read_text(encoding="utf-8")
     assert "_set_payment_method_enabled" in source
     assert "payment_method_enable_legacy_callback" in source
     assert "payment_method_disable_legacy_callback" in source
     assert "payment_method_toggle_legacy_callback" in source
+    assert "payment_method_view" in source
+    assert "payment_method_setup_start" in source
+    assert "_delegate_with_canonical_data" in source
 
 
 def test_legacy_router_is_registered_before_canonical_payment_router():
