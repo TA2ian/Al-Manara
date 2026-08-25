@@ -13,10 +13,18 @@ def test_customer_menu_accepts_current_and_legacy_reply_button_variants():
     assert "_SUPPORTED_MENU_LABELS" in source
 
 
-def test_customer_menu_remains_authoritative_in_dispatcher():
+def test_customer_menu_clears_stale_fsm_state():
+    source = (ROOT / "handlers/customer_settings_policy.py").read_text(encoding="utf-8")
+    assert "FSMContext" in source
+    assert "await state.clear()" in source
+
+
+def test_customer_menu_has_priority_over_state_specific_handlers():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    assert "customer_settings_policy" in source
-    assert "customer_navigation_policy" in source
+    customer_settings = source.index("dp.include_router(customer_settings_policy.router)")
+    order_amount = source.index("dp.include_router(order_amount_policy.router)")
+    assert customer_settings < order_amount
+    assert source.count("dp.include_router(customer_settings_policy.router)") == 1
 
 
 def test_disclaimer_uses_canonical_legal_policy_instead_of_stale_locale_copy():
