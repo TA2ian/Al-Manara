@@ -25,6 +25,7 @@ def create_dispatcher() -> Dispatcher:
         verification_admin_policy,
         verification_pending_policy,
         verification_policy,
+        verification_keyboard_cleanup,
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
@@ -99,6 +100,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_settings_policy.router)
 
     dp.include_router(verification_pending_policy.router)
+    dp.include_router(verification_keyboard_cleanup.router)
     dp.include_router(verification_policy.router)
     dp.include_router(language_policy.router)
     dp.include_router(legal_navigation_policy.router)
