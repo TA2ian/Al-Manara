@@ -72,6 +72,27 @@ def test_payment_method_toggle_renders_directly_without_reusing_view_callback():
     assert 'await callback.answer("تم التفعيل" if enabled else "تم التعطيل")' in toggle_block
 
 
+def test_legacy_payment_method_callbacks_accept_known_historical_aliases_only():
+    source = (ROOT / "handlers/payment_method_legacy_compat.py").read_text(encoding="utf-8")
+    assert '"USD": "shamcash_usd"' in source
+    assert '"usd": "shamcash_usd"' in source
+    assert '"shamcash_usd": "shamcash_usd"' in source
+    assert '"shamcash_USD": "shamcash_usd"' in source
+    assert '"NEW.SYP": "shamcash_new_syp"' in source
+    assert '"shamcash_syp": "shamcash_new_syp"' in source
+    assert '"shamcash_new_syp": "shamcash_new_syp"' in source
+    assert "_CALLBACK_PATTERN" in source
+    assert "_CODE_ALIASES" in source
+
+
+def test_legacy_payment_method_callback_delegates_to_canonical_state_change():
+    source = (ROOT / "handlers/payment_method_legacy_compat.py").read_text(encoding="utf-8")
+    assert "_set_payment_method_enabled" in source
+    assert "payment_method_enable_legacy_callback" in source
+    assert "payment_method_disable_legacy_callback" in source
+    assert "payment_method_toggle_legacy_callback" in source
+
+
 def test_old_payment_method_router_is_not_in_dispatcher():
     bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
     assert "payment_method_setup_policy" in bot_source
