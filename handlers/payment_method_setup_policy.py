@@ -366,7 +366,20 @@ async def _set_payment_method_enabled(callback: CallbackQuery, code: str, enable
                 str(enabled),
             )
 
-    await payment_method_view(callback)
+    recipient = method["recipient_name"] or "غير مضبوط"
+    address = method["account_identifier"] or "غير مضبوط"
+    qr = "محفوظ" if method["qr_photo_id"] else "غير محفوظ"
+    status = "🟢 فعال" if enabled else "🔴 معطل"
+    text = (
+        f"💳 <b>ShamCash {method['currency']}</b>\n\n"
+        f"الحالة: {status}\n"
+        f"اسم المستلم: <code>{html.escape(recipient)}</code>\n"
+        f"عنوان الاستلام: <code>{html.escape(address)}</code>\n"
+        f"QR: {qr}\n\n"
+        "إعداد هذه الوسيلة يتم في معالج واحد متتابع: الاسم ← العنوان ← QR."
+    )
+    await callback.message.edit_text(text, reply_markup=_view_keyboard(code, enabled), parse_mode="HTML")
+    await callback.answer("تم التفعيل" if enabled else "تم التعطيل")
 
 
 @router.callback_query(F.data.regexp(rf"^admin_pm_enable_{CANONICAL_CODE_PATTERN}$"))
