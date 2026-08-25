@@ -66,11 +66,23 @@ async def _download_submission(bot: Bot, message: Message) -> tuple[str, str, by
 
 async def _verify_receipt(order: Any, image_bytes: bytes) -> dict:
     payment_currency = order["payment_currency"] or "USD"
-    admin_account = (
-        Config.get_shamcash_syp()
-        if payment_currency in ("SYP", "NEW.SYP")
-        else Config.get_shamcash_usd()
-    )
+    if payment_currency == "SYP":
+        payment_currency = "NEW.SYP"
+
+    snapshot_account = (order.get("payment_account_snapshot") or "").strip()
+    if snapshot_account:
+        admin_account = snapshot_account
+    else:
+        admin_account = (
+            Config.get_shamcash_syp()
+            if payment_currency == "NEW.SYP"
+            else Config.get_shamcash_usd()
+        )
+        logger.warning(
+            "Receipt verification for order %s used live ShamCash config because payment snapshot was empty",
+            order.get("order_number", order.get("id", "N/A")),
+        )
+
     return await ReceiptVerifier.verify_shamcash_receipt(
         image_bytes=image_bytes,
         order_date=order["created_at"],
@@ -255,16 +267,23 @@ async def notify_admins_receipt(
         + ("\n".join(details) + "\n" if details else "⚠️ لا توجد نتيجة تحقق آلي متاحة.\n")
     )
     request_block = "📨 <b>طلب العميل مراجعة يدوية لهذا الإيصال.</b>\n\n" if manual_review_requested else ""
-    currency = html.escape(order.get("payment_currency") or "USD")
+    raw_currency = order.get("payment_currency") or "USD"
+    currency = "NEW.SYP" if raw_currency == "SYP" else raw_currency
+    currency_display = html.escape(currency)
+    exchange_line = (
+        f"💱 سعر الصرف: <b>1 USD = {rate(order.get('exchange_rate'))} NEW.SYP</b>\n"
+        if currency == "NEW.SYP"
+        else ""
+    )
     admin_text = (
         "📎 <b>إيصال دفع — مراجعة</b>\n\n"
         f"{request_block}"
         f"📦 الطلب: <b>#{html.escape(order['order_number'])}</b>\n"
         f"💰 الكمية: <b>{usdt(order['amount_usdt'])} USDT</b>\n"
-        f"💱 سعر الصرف: <b>{rate(order.get('exchange_rate'))}</b> {currency}\n"
-        f"💵 الأساسي: <b>{money(order.get('base_amount'))}</b> {currency}\n"
-        f"📈 الرسوم: <b>{money(order.get('fee_amount'))}</b> {currency}\n"
-        f"💵 الإجمالي: <b>{money(order['total_amount'])}</b> {currency}\n"
+        f"{exchange_line}"
+        f"💵 الأساسي: <b>{money(order.get('base_amount'))}</b> {currency_display}\n"
+        f"📈 الرسوم: <b>{money(order.get('fee_amount'))}</b> {currency_display}\n"
+        f"💵 الإجمالي: <b>{money(order['total_amount'])}</b> {currency_display}\n"
         f"🌐 الشبكة: {html.escape(order.get('network') or '')}\n"
         f"📍 المحفظة: <code>{html.escape(order.get('wallet_address') or '')}</code>\n"
         f"👤 العميل: <b>{html.escape(order.get('full_name') or 'N/A')}</b>\n"
@@ -304,7 +323,7 @@ async def notify_admins_receipt(
                     await bot.send_photo(
                         admin_id,
                         file_id,
-                        caption=f"📸 إيصال الدفع للطلب #{order['order_number']}",
+                        caption=f"📸 إيصال الدفع — #{order['order_number']}",
                     )
         except Exception:
             logger.exception("Failed to notify admin %s about receipt %s", admin_id, order["id"])
