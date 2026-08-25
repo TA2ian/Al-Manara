@@ -9,6 +9,7 @@ all state changes to the canonical payment-method implementation.
 import re
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from config import Config
@@ -31,11 +32,11 @@ _CODE_ALIASES = {
 }
 
 _CALLBACK_PATTERN = re.compile(
-    r"^admin_pm_(?P<action>enable|disable|toggle)_(?P<code>[^\s]+)$"
+    r"^admin_pm_(?P<action>view|setup|enable|disable|toggle)_(?P<code>[^\s]+)$"
 )
 
 
-def _canonicalize_callback(data: str | None) -> tuple[str, str] | None:
+def _canonicalize_legacy_callback(data: str | None) -> tuple[str, str] | None:
     if not data:
         return None
     match = _CALLBACK_PATTERN.fullmatch(data)
@@ -47,18 +48,45 @@ def _canonicalize_callback(data: str | None) -> tuple[str, str] | None:
     return match.group("action"), code
 
 
-@router.callback_query(F.data.regexp(r"^admin_pm_(?:enable|disable|toggle)_[^\s]+$"))
-async def legacy_payment_method_callback(callback: CallbackQuery):
+async def _delegate_with_canonical_data(callback: CallbackQuery, canonical_data: str, handler, *args):
+    original_data = callback.data
+    try:
+        callback.data = canonical_data
+        await handler(callback, *args)
+    finally:
+        callback.data = original_data
+
+
+@router.callback_query(F.data.regexp(r"^admin_pm_(?:view|setup|enable|disable|toggle)_[^\s]+$"))
+async def legacy_payment_method_callback(callback: CallbackQuery, state: FSMContext):
     if callback.from_user is None or callback.from_user.id not in Config.ADMIN_IDS:
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    parsed = _canonicalize_callback(callback.data)
+    parsed = _canonicalize_legacy_callback(callback.data)
     if parsed is None:
         await callback.answer("وسيلة الدفع غير صالحة", show_alert=True)
         return
 
     action, code = parsed
+
+    if action == "view":
+        await _delegate_with_canonical_data(
+            callback,
+            f"admin_pm_view_{code}",
+            payment_method_setup_policy.payment_method_view,
+        )
+        return
+
+    if action == "setup":
+        await _delegate_with_canonical_data(
+            callback,
+            f"admin_pm_setup_{code}",
+            payment_method_setup_policy.payment_method_setup_start,
+            state,
+        )
+        return
+
     if action == "enable":
         await payment_method_setup_policy._set_payment_method_enabled(
             callback,
