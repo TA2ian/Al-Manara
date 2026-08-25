@@ -26,8 +26,9 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     if user and user["terms_accepted"]:
         lang = user["language"] or "ar"
+        is_admin = message.from_user.id in Config.ADMIN_IDS
         await message.answer(locale_service.get("welcome", lang, name=message.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode="HTML")
-        await message.answer("👇", reply_markup=compact_reply_keyboard(lang))
+        await message.answer("👇", reply_markup=compact_reply_keyboard(lang, is_admin=is_admin))
         return
     await message.answer("🌐", reply_markup=language_select_keyboard())
     await state.set_state(TermsStates.waiting_acceptance)
@@ -79,8 +80,9 @@ async def accept_terms(callback: CallbackQuery, state: FSMContext):
             lang,
         )
     await callback.message.delete()
+    is_admin = callback.from_user.id in Config.ADMIN_IDS
     await callback.message.answer(locale_service.get("welcome", lang, name=callback.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode="HTML")
-    await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang))
+    await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang, is_admin=is_admin))
     await state.clear()
     await callback.answer()
 
