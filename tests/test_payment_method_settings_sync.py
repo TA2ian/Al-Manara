@@ -79,10 +79,18 @@ def test_legacy_payment_method_callbacks_accept_known_historical_aliases_only():
     assert '"shamcash_usd": "shamcash_usd"' in source
     assert '"shamcash_USD": "shamcash_usd"' in source
     assert '"NEW.SYP": "shamcash_new_syp"' in source
+    assert '"new.syp": "shamcash_new_syp"' in source
     assert '"shamcash_syp": "shamcash_new_syp"' in source
     assert '"shamcash_new_syp": "shamcash_new_syp"' in source
+    assert '"shamcash_new.syp": "shamcash_new_syp"' in source
     assert "_CALLBACK_PATTERN" in source
     assert "_CODE_ALIASES" in source
+
+
+def test_legacy_payment_method_router_does_not_capture_setup_confirmation():
+    source = (ROOT / "handlers/payment_method_legacy_compat.py").read_text(encoding="utf-8")
+    assert "(?!confirm$)" in source
+    assert 'admin_pm_setup_confirm' not in source.split("@router.callback_query", 1)[1].split("async def", 1)[0]
 
 
 def test_legacy_payment_method_callback_delegates_to_canonical_state_change():
