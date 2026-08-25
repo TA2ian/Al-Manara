@@ -20,8 +20,4 @@ async def receive_phone_and_remove_keyboard(message: Message, state: FSMContext)
 
     await receive_phone(message, state)
     if await state.get_state() == VerificationStates.waiting_full_name:
-        await message.answer(
-            "يمكنك الآن إدخال اسمك الكامل." if message.from_user.language_code == "ar" else
-            "You can now enter your full name.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer("", reply_markup=ReplyKeyboardRemove())
