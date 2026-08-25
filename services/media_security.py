@@ -12,11 +12,11 @@ from dataclasses import dataclass
 import fitz
 from PIL import Image, UnidentifiedImageError
 
-MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_WIDTH = 8000
 MAX_IMAGE_HEIGHT = 8000
 MAX_IMAGE_PIXELS = 40_000_000
-MAX_PDF_PAGES = 3
+MAX_PDF_PAGES = 1
 MAX_PDF_PAGE_WIDTH = 5000.0
 MAX_PDF_PAGE_HEIGHT = 5000.0
 
@@ -49,7 +49,7 @@ def validate_upload_size(payload: bytes) -> None:
     if not payload:
         raise ValueError("uploaded file is empty")
     if len(payload) > MAX_UPLOAD_BYTES:
-        raise ValueError("uploaded file exceeds the 12 MB limit")
+        raise ValueError("uploaded file exceeds the 2 MB limit")
 
 
 def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file_name: str | None = None) -> MediaDescriptor:
@@ -106,7 +106,7 @@ def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file
 
 
 def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_name: str | None = None) -> MediaDescriptor:
-    """Validate a PDF before any page rendering or text extraction."""
+    """Validate a single-page PDF before rendering or text extraction."""
     validate_upload_size(payload)
     mime = _normalized_mime(mime_type)
     suffix = _suffix(file_name)
@@ -127,15 +127,14 @@ def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_n
         raise ValueError("uploaded PDF is invalid or unreadable") from exc
 
     try:
-        if document.page_count < 1 or document.page_count > MAX_PDF_PAGES:
-            raise ValueError("PDF must contain between 1 and 3 pages")
-        for index in range(document.page_count):
-            page = document.load_page(index)
-            rect = page.rect
-            if rect.width <= 0 or rect.height <= 0:
-                raise ValueError("PDF contains an invalid page")
-            if rect.width > MAX_PDF_PAGE_WIDTH or rect.height > MAX_PDF_PAGE_HEIGHT:
-                raise ValueError("PDF page dimensions exceed the safety limit")
+        if document.page_count != MAX_PDF_PAGES:
+            raise ValueError("PDF must contain exactly one page")
+        page = document.load_page(0)
+        rect = page.rect
+        if rect.width <= 0 or rect.height <= 0:
+            raise ValueError("PDF contains an invalid page")
+        if rect.width > MAX_PDF_PAGE_WIDTH or rect.height > MAX_PDF_PAGE_HEIGHT:
+            raise ValueError("PDF page dimensions exceed the safety limit")
     finally:
         document.close()
 
