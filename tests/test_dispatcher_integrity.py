@@ -60,7 +60,9 @@ class DispatcherIntegrityTests(unittest.TestCase):
         self.assertIn('F.data == "menu_profile"', profile)
         self.assertIn('F.data == "menu_wallets"', wallets)
         self.assertIn('F.text.in_(["📋 طلباتي", "📋 Orders"])', orders)
-        self.assertIn('F.text.in_({"⚙️ القائمة", "⚙️ Menu", "⚙️ الإعدادات", "⚙️ Settings"})', settings)
+        for label in ("⚙️ القائمة", "⚙️ Menu", "⚙️ الإعدادات", "⚙️ Settings"):
+            self.assertIn(label, settings)
+        self.assertIn("_normalize_menu_label", settings)
         self.assertIn('F.data == "quick_reorder"', navigation)
 
     def test_customer_navigation_has_single_authority(self):
