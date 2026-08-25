@@ -89,7 +89,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_approval_policy.router)
     dp.include_router(admin_rejection_policy.router)
     dp.include_router(admin_payment_confirmation_policy.router)
-    dp.include_router(admin_transfer.router)
+    dp.include_router(admin_transfer_policy.router)
     dp.include_router(admin_order_list_policy.router)
     dp.include_router(admin_user_management_policy.router)
     dp.include_router(admin_utility_policy.router)
