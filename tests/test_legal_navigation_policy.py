@@ -14,8 +14,10 @@ def test_legal_navigation_router_is_registered_before_legacy_disclaimer_handler(
 
 def test_legal_navigation_exposes_all_canonical_sections():
     source = (ROOT / "handlers/legal_navigation_policy.py").read_text(encoding="utf-8")
-    for index in range(1, 7):
-        assert f"legal_section_{index}" in source
+    assert 'callback_data=f"legal_section_{index + 1}"' in source
+    assert 'callback_data=f"legal_section_{index}"' in source
+    assert 'callback_data=f"legal_section_{index + 2}"' in source
+    assert 'r"^legal_section_[1-6]$"' in source
     assert "الشروط والسياسات" in source
     assert "Terms & Policies" in source
 
