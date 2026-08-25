@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from states import TermsStates
 from keyboards.inline import terms_keyboard, main_menu_inline, language_select_keyboard
-from keyboards.reply import compact_reply_keyboard
+from keyboards.reply import compact_reply_keyboard, remove_dashboard_keyboard
 from services.locale_service import locale_service
 from services.legal_policy import get_start_terms_text
 from database import get_pool
@@ -16,13 +16,14 @@ router = Router()
 
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    """Handle /start and keep the Telegram username current."""
+    """Handle /start and make it an explicit dashboard reset boundary."""
     pool = await get_pool()
     username = message.from_user.username or ""
     async with pool.acquire() as conn:
         user = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", message.from_user.id)
         if user:
             await conn.execute("UPDATE users SET username=$1 WHERE telegram_id=$2", username, message.from_user.id)
+    await state.clear()
     if user and user["terms_accepted"]:
         lang = user["language"] or "ar"
         await message.answer(locale_service.get("welcome", lang, name=message.from_user.first_name), reply_markup=main_menu_inline(lang), parse_mode="HTML")
@@ -94,5 +95,6 @@ async def decline_terms(callback: CallbackQuery, state: FSMContext):
         async with pool.acquire() as conn:
             lang = await conn.fetchval("SELECT language FROM users WHERE telegram_id=$1", callback.from_user.id) or "ar"
     await callback.message.edit_text(locale_service.get("declined_message", lang), parse_mode="HTML")
+    await callback.message.answer("", reply_markup=remove_dashboard_keyboard())
     await state.clear()
     await callback.answer("❌ تم الرفض" if lang == "ar" else "❌ Declined")
