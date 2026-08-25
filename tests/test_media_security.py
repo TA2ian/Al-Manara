@@ -1,5 +1,6 @@
 import io
 
+import fitz
 import pytest
 from PIL import Image
 
@@ -17,6 +18,15 @@ def _image_bytes(format_name: str = "PNG", size: tuple[int, int] = (32, 32)) -> 
     return output.getvalue()
 
 
+def _pdf_bytes(page_count: int = 1) -> bytes:
+    document = fitz.open()
+    for _ in range(page_count):
+        document.new_page(width=300, height=300)
+    output = document.tobytes()
+    document.close()
+    return output
+
+
 def test_valid_png_is_accepted():
     payload = _image_bytes("PNG")
     descriptor = validate_image_payload(payload, mime_type="image/png", file_name="qr.png")
@@ -30,13 +40,26 @@ def test_mime_extension_mismatch_is_rejected():
         validate_image_payload(payload, mime_type="image/jpeg", file_name="qr.jpg")
 
 
+def test_valid_single_page_pdf_is_accepted():
+    payload = _pdf_bytes(1)
+    descriptor = validate_pdf_payload(payload, mime_type="application/pdf", file_name="proof.pdf")
+    assert descriptor.kind == "pdf"
+    assert descriptor.mime_type == "application/pdf"
+
+
+def test_multi_page_pdf_is_rejected():
+    payload = _pdf_bytes(2)
+    with pytest.raises(ValueError, match="exactly one page"):
+        validate_pdf_payload(payload, mime_type="application/pdf", file_name="proof.pdf")
+
+
 def test_fake_pdf_is_rejected_before_pdf_parsing():
     with pytest.raises(ValueError, match="valid PDF"):
         validate_pdf_payload(b"not-a-pdf", mime_type="application/pdf", file_name="proof.pdf")
 
 
 def test_oversized_upload_is_rejected():
-    with pytest.raises(ValueError, match="12 MB"):
+    with pytest.raises(ValueError, match="2 MB"):
         validate_image_payload(b"x" * (MAX_UPLOAD_BYTES + 1), mime_type="image/png", file_name="large.png")
 
 
