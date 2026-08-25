@@ -26,6 +26,7 @@ class PaymentMethodStates(StatesGroup):
 
 CURRENCY_META = {"USD": "الدولار الأمريكي", "NEW.SYP": "الليرة السورية الجديدة"}
 CANONICAL_CODES = {"shamcash_usd", "shamcash_new_syp"}
+CANONICAL_CODE_PATTERN = r"(?:shamcash_usd|shamcash_new_syp)"
 
 
 def is_admin(user_id: int) -> bool:
@@ -46,10 +47,15 @@ def _methods_keyboard(methods) -> InlineKeyboardMarkup:
 
 
 def _view_keyboard(code: str, enabled: bool) -> InlineKeyboardMarkup:
-    toggle = "⏸ تعطيل" if enabled else "▶️ تفعيل"
+    if enabled:
+        action_text = "⏸ تعطيل"
+        action_callback = f"admin_pm_disable_{code}"
+    else:
+        action_text = "▶️ تفعيل"
+        action_callback = f"admin_pm_enable_{code}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚙️ إعداد/تعديل بيانات الدفع", callback_data=f"admin_pm_setup_{code}")],
-        [InlineKeyboardButton(text=toggle, callback_data=f"admin_pm_toggle_{code}")],
+        [InlineKeyboardButton(text=action_text, callback_data=action_callback)],
         [InlineKeyboardButton(text="🔙 وسائل الدفع", callback_data="admin_payment_methods")],
         [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
     ])
@@ -128,7 +134,7 @@ async def payment_methods_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_pm_view_"))
+@router.callback_query(F.data.regexp(rf"^admin_pm_view_{CANONICAL_CODE_PATTERN}$"))
 async def payment_method_view(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
@@ -162,7 +168,7 @@ async def payment_method_view(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_pm_setup_"))
+@router.callback_query(F.data.regexp(rf"^admin_pm_setup_{CANONICAL_CODE_PATTERN}$"))
 async def payment_method_setup_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
@@ -306,29 +312,95 @@ async def payment_method_setup_confirm(callback: CallbackQuery, state: FSMContex
     await state.clear()
     await callback.message.edit_text(
         f"✅ <b>وسيلة الدفع {row['currency']} جاهزة.</b>\n\nتم حفظ اسم المستلم وعنوان الاستلام وQR بعد التحقق من تطابقهما.",
-        parse_mode="HTML", reply_markup=_view_keyboard(code, True),
+        parse_mode="HTML", reply_markup=_view_keyboard(code, False),
     )
     await callback.answer("تم الحفظ")
 
 
-@router.callback_query(F.data.startswith("admin_pm_toggle_"))
-async def payment_method_toggle(callback: CallbackQuery):
+async def _set_payment_method_enabled(callback: CallbackQuery, code: str, enabled: bool):
+    if code not in CANONICAL_CODES:
+        await callback.answer("وسيلة الدفع غير صالحة", show_alert=True)
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        method = await conn.fetchrow(
+            """SELECT currency, recipient_name, account_identifier, qr_photo_id, enabled
+                 FROM payment_methods
+                WHERE code=$1 AND provider='ShamCash'
+                FOR UPDATE""",
+            code,
+        )
+        if not method:
+            await callback.answer("وسيلة الدفع غير موجودة", show_alert=True)
+            return
+
+        if enabled:
+            missing = []
+            if not method["recipient_name"]:
+                missing.append("اسم المستلم")
+            if not method["account_identifier"]:
+                missing.append("عنوان الاستلام")
+            if not method["qr_photo_id"]:
+                missing.append("QR")
+            if missing:
+                await callback.answer(
+                    "لا يمكن تفعيل وسيلة الدفع قبل إكمال إعدادها: " + "، ".join(missing),
+                    show_alert=True,
+                )
+                return
+
+        if method["enabled"] != enabled:
+            await conn.execute(
+                "UPDATE payment_methods SET enabled=$1, updated_at=NOW() WHERE code=$2 AND provider='ShamCash'",
+                enabled,
+                code,
+            )
+            action = "payment_method_enable" if enabled else "payment_method_disable"
+            await conn.execute(
+                """INSERT INTO audit_logs (admin_id, action, details, new_value, severity)
+                   VALUES ($1, $2, $3, $4, 'info')""",
+                callback.from_user.id,
+                action,
+                f"payment_method={code}",
+                str(enabled),
+            )
+
+    await payment_method_view(callback)
+
+
+@router.callback_query(F.data.regexp(rf"^admin_pm_enable_{CANONICAL_CODE_PATTERN}$"))
+async def payment_method_enable(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    code = callback.data.removeprefix("admin_pm_enable_")
+    await _set_payment_method_enabled(callback, code, True)
+
+
+@router.callback_query(F.data.regexp(rf"^admin_pm_disable_{CANONICAL_CODE_PATTERN}$"))
+async def payment_method_disable(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    code = callback.data.removeprefix("admin_pm_disable_")
+    await _set_payment_method_enabled(callback, code, False)
+
+
+@router.callback_query(F.data.regexp(rf"^admin_pm_toggle_{CANONICAL_CODE_PATTERN}$"))
+async def payment_method_legacy_toggle(callback: CallbackQuery):
+    """Compatibility handler for old Telegram messages containing toggle callbacks."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     code = callback.data.removeprefix("admin_pm_toggle_")
-    if code not in CANONICAL_CODES:
-        await callback.answer("وسيلة الدفع غير صالحة", show_alert=True)
-        return
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("UPDATE payment_methods SET enabled=NOT enabled, updated_at=NOW() WHERE code=$1 AND provider='ShamCash' RETURNING currency, enabled", code)
-        if not row:
-            await callback.answer("وسيلة الدفع غير موجودة", show_alert=True)
-            return
-        await conn.execute(
-            """INSERT INTO audit_logs (admin_id, action, details, new_value, severity)
-               VALUES ($1, 'payment_method_toggle', $2, $3, 'info')""",
-            callback.from_user.id, f"payment_method={code}", str(row["enabled"]),
+        method = await conn.fetchrow(
+            "SELECT enabled FROM payment_methods WHERE code=$1 AND provider='ShamCash' FOR UPDATE",
+            code,
         )
-    await payment_method_view(callback)
+    if not method:
+        await callback.answer("وسيلة الدفع غير موجودة", show_alert=True)
+        return
+    await _set_payment_method_enabled(callback, code, not method["enabled"])
