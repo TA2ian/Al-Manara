@@ -297,7 +297,7 @@ async def payment_method_setup_confirm(callback: CallbackQuery, state: FSMContex
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """UPDATE payment_methods SET recipient_name=$1, account_identifier=$2, qr_photo_id=$3, updated_at=NOW()
-               WHERE code=$4 AND provider='ShamCash' RETURNING currency""",
+               WHERE code=$4 AND provider='ShamCash' RETURNING currency, enabled""",
             data["recipient_name"], data["receiving_address"], data["qr_photo_id"], code,
         )
         if not row:
@@ -312,7 +312,7 @@ async def payment_method_setup_confirm(callback: CallbackQuery, state: FSMContex
     await state.clear()
     await callback.message.edit_text(
         f"✅ <b>وسيلة الدفع {row['currency']} جاهزة.</b>\n\nتم حفظ اسم المستلم وعنوان الاستلام وQR بعد التحقق من تطابقهما.",
-        parse_mode="HTML", reply_markup=_view_keyboard(code, False),
+        parse_mode="HTML", reply_markup=_view_keyboard(code, row["enabled"]),
     )
     await callback.answer("تم الحفظ")
 
@@ -397,7 +397,7 @@ async def payment_method_legacy_toggle(callback: CallbackQuery):
     pool = await get_pool()
     async with pool.acquire() as conn:
         method = await conn.fetchrow(
-            "SELECT enabled FROM payment_methods WHERE code=$1 AND provider='ShamCash' FOR UPDATE",
+            "SELECT enabled FROM payment_methods WHERE code=$1 AND provider='ShamCash'",
             code,
         )
     if not method:
