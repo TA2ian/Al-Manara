@@ -101,3 +101,19 @@ async def install_order_constraints(conn):
     await conn.execute("""CREATE TRIGGER trg_protect_order_payment_snapshot
         BEFORE UPDATE OF payment_method_code, payment_recipient_name_snapshot, payment_account_snapshot, payment_qr_photo_id
         ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_snapshot()""")
+
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION prevent_active_order_deletion()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF OLD.status IN ('pending', 'waiting_payment', 'receipt_received', 'payment_confirmed') THEN
+                RAISE EXCEPTION 'active order prevents customer deletion: %', OLD.order_number USING ERRCODE='23514';
+            END IF;
+            RETURN OLD;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    await conn.execute("DROP TRIGGER IF EXISTS trg_prevent_active_order_deletion ON orders")
+    await conn.execute("""CREATE TRIGGER trg_prevent_active_order_deletion
+        BEFORE DELETE ON orders
+        FOR EACH ROW EXECUTE FUNCTION prevent_active_order_deletion()""")
