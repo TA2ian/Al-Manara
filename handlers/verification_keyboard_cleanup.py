@@ -20,4 +20,4 @@ async def receive_phone_and_remove_keyboard(message: Message, state: FSMContext)
 
     await receive_phone(message, state)
     if await state.get_state() == VerificationStates.waiting_full_name:
-        await message.answer("", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✓", reply_markup=ReplyKeyboardRemove())
