@@ -40,4 +40,6 @@ def test_phone_verification_has_a_dedicated_keyboard_cleanup_router():
     bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
     assert "ReplyKeyboardRemove" in source
     assert "verification_keyboard_cleanup.router" in bot_source
-    assert "verification_keyboard_cleanup.router") < bot_source.index("verification_policy.router")
+    cleanup = bot_source.index("verification_keyboard_cleanup.router")
+    canonical = bot_source.index("verification_policy.router")
+    assert cleanup < canonical
