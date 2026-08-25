@@ -61,7 +61,12 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot as one authoritative customer message."""
+        """Deliver the immutable payment snapshot as one authoritative customer message.
+
+        The approval handler owns the receipt-upload prompt. Keeping that prompt out
+        of this method prevents duplicate instructions when manual approval and
+        trusted-customer auto-approval use different follow-up flows.
+        """
         from config import Config
         from services.exchange_service import ExchangeService
 
@@ -121,13 +126,4 @@ class NotificationService:
         )
 
         await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
-        try:
-            await self.notify_user(
-                user_id,
-                "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
-                if lang == "ar" else
-                "📎 After payment, use the receipt-upload button to submit your proof.",
-            )
-        except Exception:
-            logger.exception("Failed to send secondary receipt instruction for %s", order_number)
         return True
