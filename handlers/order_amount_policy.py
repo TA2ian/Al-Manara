@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config import Config
 from database import get_pool
 from keyboards.inline import cancel_keyboard, preset_amounts_keyboard, start_verification_keyboard
+from keyboards.reply import remove_dashboard_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.formatters import usdt
 from services.locale_service import locale_service
@@ -122,6 +123,7 @@ async def start_order_authoritative(message: Message, state: FSMContext):
     minimum, maximum, _ = await _runtime_order_limits()
     await state.clear()
     await state.set_state(OrderStates.waiting_amount)
+    await message.answer("🔄", reply_markup=remove_dashboard_keyboard())
     await message.answer(locale_service.get("enter_amount", lang, min=minimum, max=maximum), reply_markup=preset_amounts_keyboard(lang))
 
 
