@@ -317,7 +317,7 @@ async def payment_method_setup_confirm(callback: CallbackQuery, state: FSMContex
     await callback.answer("تم الحفظ")
 
 
-async def _set_payment_method_enabled(callback: CallbackQuery, code: str, enabled: bool):
+async def _set_payment_method_enabled(callback: CallbackQuery, code: str, enabled: bool, audit_action: str | None = None):
     if code not in CANONICAL_CODES:
         await callback.answer("وسيلة الدفع غير صالحة", show_alert=True)
         return
@@ -356,7 +356,7 @@ async def _set_payment_method_enabled(callback: CallbackQuery, code: str, enable
                 enabled,
                 code,
             )
-            action = "payment_method_enable" if enabled else "payment_method_disable"
+            action = audit_action or ("payment_method_enable" if enabled else "payment_method_disable")
             await conn.execute(
                 """INSERT INTO audit_logs (admin_id, action, details, new_value, severity)
                    VALUES ($1, $2, $3, $4, 'info')""",
@@ -403,4 +403,4 @@ async def payment_method_legacy_toggle(callback: CallbackQuery):
     if not method:
         await callback.answer("وسيلة الدفع غير موجودة", show_alert=True)
         return
-    await _set_payment_method_enabled(callback, code, not method["enabled"])
+    await _set_payment_method_enabled(callback, code, not method["enabled"], audit_action="payment_method_toggle")
