@@ -9,6 +9,14 @@ HANDLERS_DIR = ROOT / "handlers"
 CALLBACK_RE = re.compile(r"@router\.callback_query\((.*?)\)", re.DOTALL)
 
 
+_INTENTIONAL_DUPLICATE_CALLBACKS = {
+    'F.data == "menu_disclaimer"': {
+        "customer_navigation_policy.py",
+        "legal_navigation_policy.py",
+    },
+}
+
+
 def _callback_signatures():
     signatures = {}
     for path in HANDLERS_DIR.glob("*.py"):
@@ -21,13 +29,25 @@ def _callback_signatures():
 
 def test_no_exact_duplicate_callback_decorators_across_handlers():
     duplicates = {
-        expression: files
+        expression: set(files)
         for expression, files in _callback_signatures().items()
         if len(set(files)) > 1
         and "startswith" not in expression
         and "in_" not in expression
     }
-    assert not duplicates, "Duplicate exact callback decorators: " + repr(duplicates)
+    unexpected = {
+        expression: files
+        for expression, files in duplicates.items()
+        if _INTENTIONAL_DUPLICATE_CALLBACKS.get(expression) != files
+    }
+    assert not unexpected, "Unexpected duplicate exact callback decorators: " + repr(unexpected)
+
+
+def test_intentional_legal_disclaimer_overlap_has_canonical_router_precedence():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    legal_router = source.index("dp.include_router(legal_navigation_policy.router)")
+    customer_navigation = source.index("dp.include_router(customer_navigation_policy.router)")
+    assert legal_router < customer_navigation
 
 
 def test_retired_compatibility_modules_are_absent():
