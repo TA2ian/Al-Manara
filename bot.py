@@ -59,8 +59,8 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
-    dp.include_router(payment_method_legacy_compat.router)
     dp.include_router(payment_method_setup_policy.router)
+    dp.include_router(payment_method_legacy_compat.router)
 
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
