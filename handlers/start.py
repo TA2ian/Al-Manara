@@ -7,7 +7,7 @@ from states import TermsStates
 from keyboards.inline import terms_keyboard, main_menu_inline, language_select_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
-from services.legal_policy import get_terms_text
+from services.legal_policy import get_start_terms_text
 from database import get_pool
 from config import Config
 
@@ -36,7 +36,7 @@ async def cmd_start(message: Message, state: FSMContext):
 async def select_start_language(callback: CallbackQuery, state: FSMContext):
     lang = callback.data.replace("lang_", "")
     await callback.message.edit_text(
-        get_terms_text(lang, Config.PAYMENT_TIMEOUT),
+        get_start_terms_text(lang, Config.PAYMENT_TIMEOUT),
         reply_markup=terms_keyboard(lang),
         parse_mode="HTML",
     )
