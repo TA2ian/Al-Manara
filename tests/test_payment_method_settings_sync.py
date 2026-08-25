@@ -61,6 +61,17 @@ def test_payment_method_setup_preserves_existing_enabled_state():
     assert 'reply_markup=_view_keyboard(code, row["enabled"])' in source
 
 
+def test_payment_method_toggle_renders_directly_without_reusing_view_callback():
+    source = (ROOT / "handlers/payment_method_setup_policy.py").read_text(encoding="utf-8")
+    marker = "async def _set_payment_method_enabled"
+    start = source.index(marker)
+    end = source.index("@router.callback_query", start)
+    toggle_block = source[start:end]
+    assert "await payment_method_view(callback)" not in toggle_block
+    assert "await callback.message.edit_text" in toggle_block
+    assert 'await callback.answer("تم التفعيل" if enabled else "تم التعطيل")' in toggle_block
+
+
 def test_old_payment_method_router_is_not_in_dispatcher():
     bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
     assert "payment_method_setup_policy" in bot_source
