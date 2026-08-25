@@ -24,15 +24,17 @@ _CODE_ALIASES = {
     "shamcash_USD": "shamcash_usd",
     "NEW.SYP": "shamcash_new_syp",
     "new_syp": "shamcash_new_syp",
+    "new.syp": "shamcash_new_syp",
     "syp": "shamcash_new_syp",
     "SYP": "shamcash_new_syp",
     "shamcash_syp": "shamcash_new_syp",
     "shamcash_new_syp": "shamcash_new_syp",
+    "shamcash_new.syp": "shamcash_new_syp",
     "shamcash_NEW.SYP": "shamcash_new_syp",
 }
 
 _CALLBACK_PATTERN = re.compile(
-    r"^admin_pm_(?P<action>view|setup|enable|disable|toggle)_(?P<code>[^\s]+)$"
+    r"^admin_pm_(?P<action>view|setup|enable|disable|toggle)_(?P<code>(?!confirm$)[^\s]+)$"
 )
 
 
@@ -57,7 +59,7 @@ async def _delegate_with_canonical_data(callback: CallbackQuery, canonical_data:
         callback.data = original_data
 
 
-@router.callback_query(F.data.regexp(r"^admin_pm_(?:view|setup|enable|disable|toggle)_[^\s]+$"))
+@router.callback_query(F.data.regexp(r"^admin_pm_(?:view|setup|enable|disable|toggle)_(?!confirm$)[^\s]+$"))
 async def legacy_payment_method_callback(callback: CallbackQuery, state: FSMContext):
     if callback.from_user is None or callback.from_user.id not in Config.ADMIN_IDS:
         await callback.answer("⛔ Access denied", show_alert=True)
