@@ -13,7 +13,7 @@ POLICY_MODULES = [
     "handlers.customer_settings_policy", "handlers.language_policy",
     "handlers.order_amount_policy", "handlers.order_confirmation_policy",
     "handlers.order_wallet_policy", "handlers.order_wallet_qr_policy",
-    "handlers.payment_currency_policy", "handlers.payment_methods",
+    "handlers.payment_currency_policy", "handlers.payment_method_setup_policy",
     "handlers.receipt_document_policy", "handlers.receipt_processing_policy",
     "handlers.saved_wallets", "handlers.verification_policy",
     "handlers.verification_admin_policy", "handlers.verification_pending_policy",
@@ -24,6 +24,7 @@ REMOVED_MODULES = (
     "handlers.admin", "handlers.admin_settings_alias_policy", "handlers.legacy_wallet_guard",
     "handlers.verification", "handlers.verification_pending_guard", "services.order_wallet_guard",
     "database_wallet_guards", "handlers.my_orders", "handlers.receipt_transition_policy",
+    "handlers.payment_methods",
 )
 
 

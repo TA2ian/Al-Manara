@@ -1,4 +1,4 @@
-"""Persistent settings service backed by the database."""
+"""Persistent operational settings service backed by the database."""
 import logging
 
 from database import get_pool
@@ -6,28 +6,20 @@ from database import get_pool
 logger = logging.getLogger(__name__)
 
 
-_SHAMCASH_PAYMENT_METHODS = {
-    "shamcash_usd": ("shamcash_usd", "USD"),
-    "shamcash_syp": ("shamcash_new_syp", "NEW.SYP"),
-}
-
-
 class SettingsService:
-    """Settings stored in DB and cached in memory for fast access."""
+    """Operational settings stored in DB and cached in memory."""
 
     _cache: dict[str, str] = {}
     _initialized: bool = False
 
     @classmethod
     async def init(cls):
-        """Load all settings from DB into cache once."""
         if cls._initialized:
             return
         await cls.reload()
 
     @classmethod
     async def reload(cls):
-        """Reload settings from DB and replace the in-memory cache."""
         pool = await get_pool()
         if pool:
             async with pool.acquire() as conn:
@@ -46,7 +38,7 @@ class SettingsService:
 
     @classmethod
     async def set(cls, key: str, value: str):
-        """Persist a setting and keep legacy ShamCash settings synchronized with payment methods."""
+        """Persist one operational setting; payment methods have their own owner."""
         pool = await get_pool()
         if pool:
             async with pool.acquire() as conn:
@@ -58,20 +50,6 @@ class SettingsService:
                         key,
                         value,
                     )
-                    payment_method = _SHAMCASH_PAYMENT_METHODS.get(key)
-                    if payment_method:
-                        method_code, currency = payment_method
-                        await conn.execute(
-                            """UPDATE payment_methods
-                               SET account_identifier = $1,
-                                   updated_at = NOW()
-                             WHERE provider = 'ShamCash'
-                               AND code = $2
-                               AND currency = $3""",
-                            value,
-                            method_code,
-                            currency,
-                        )
         cls._cache[key] = value
         cls._initialized = True
         logger.info("Setting saved: %s", key)

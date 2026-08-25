@@ -29,13 +29,7 @@ class NotificationService:
             logger.error("Failed to notify user %s: %s", user_id, exc)
             raise
 
-    async def notify_feedback(
-        self,
-        user: dict,
-        text: str,
-        attachment_type: str | None = None,
-        attachment_file_id: str | None = None,
-    ):
+    async def notify_feedback(self, user: dict, text: str, attachment_type: str | None = None, attachment_file_id: str | None = None):
         """Forward a validated support submission to every administrator."""
         user_id = user.get("telegram_id", "N/A")
         username = user.get("username") or "بدون"
@@ -67,22 +61,30 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot as one mandatory QR message."""
+        """Deliver the immutable payment snapshot as one authoritative customer message."""
         from config import Config
         from services.exchange_service import ExchangeService
 
         currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
-        account = (order.get("payment_account_snapshot") or "").strip()
+        recipient = (order.get("payment_recipient_name_snapshot") or "").strip()
+        address = (order.get("payment_account_snapshot") or "").strip()
         qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
         amount = money(order.get("total_amount"))
         order_number = order.get("order_number", "N/A")
         timeout = Config.PAYMENT_TIMEOUT
-        name = Config.get_shamcash_name().strip() or "ShamCash"
 
-        if not account or not qr_photo_id:
-            logger.error("Incomplete payment snapshot for approved order %s: account=%r qr=%r", order_number, bool(account), bool(qr_photo_id))
+        if not recipient or not address or not qr_photo_id:
+            logger.error(
+                "Incomplete payment snapshot for approved order %s: recipient=%r address=%r qr=%r",
+                order_number, bool(recipient), bool(address), bool(qr_photo_id),
+            )
             try:
-                await self.notify_user(user_id, (f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة." if lang == "ar" else f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration."))
+                await self.notify_user(
+                    user_id,
+                    f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة."
+                    if lang == "ar" else
+                    f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration.",
+                )
             except Exception:
                 logger.exception("Failed to send incomplete-payment warning for %s", order_number)
             return False
@@ -92,31 +94,40 @@ class NotificationService:
             old_syp_amount = order.get("old_syp_total")
             if old_syp_amount is None:
                 old_syp_amount = ExchangeService.old_syp_equivalent(order.get("total_amount"))
-            old_syp_line = f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة" if lang == "ar" else f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
+            old_syp_line = (
+                f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة"
+                if lang == "ar" else
+                f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
+            )
 
         caption = (
             f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
             "💳 <b>بيانات الدفع الرسمية</b>\n"
-            f"🏦 الجهة: <b>{name}</b>\n"
+            f"👤 اسم المستلم: <b>{recipient}</b>\n"
+            f"📍 عنوان الاستلام: <code>{address}</code>\n"
             f"💱 عملة الدفع: <b>{currency}</b>\n"
             f"💰 المبلغ المطلوب: <b>{amount} {currency}</b>\n"
-            f"📱 حساب شام كاش: <code>{account}</code>\n"
             f"⏱ مهلة الدفع: <b>{timeout} دقيقة</b>{old_syp_line}\n\n"
-            "⚠️ <b>لا ترسل أي مبلغ قبل التأكد من مطابقة هذه البيانات.</b>"
+            "⚠️ <b>تحقق من اسم المستلم والعنوان قبل إرسال المبلغ.</b>"
             if lang == "ar" else
             f"🔔 <b>Your order #{order_number} has been approved</b>\n\n"
             "💳 <b>Official Payment Details</b>\n"
-            f"🏦 Provider: <b>{name}</b>\n"
+            f"👤 Recipient name: <b>{recipient}</b>\n"
+            f"📍 Receiving address: <code>{address}</code>\n"
             f"💱 Payment currency: <b>{currency}</b>\n"
             f"💰 Amount due: <b>{amount} {currency}</b>\n"
-            f"📱 ShamCash account: <code>{account}</code>\n"
             f"⏱ Payment deadline: <b>{timeout} minutes</b>{old_syp_line}\n\n"
-            "⚠️ <b>Do not send funds until these details match.</b>"
+            "⚠️ <b>Verify the recipient name and address before sending funds.</b>"
         )
 
         await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
         try:
-            await self.notify_user(user_id, "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك." if lang == "ar" else "📎 After payment, use the receipt-upload button to submit your proof.")
+            await self.notify_user(
+                user_id,
+                "📎 بعد الدفع، أرسل إثبات العملية من زر رفع الإيصال الذي سيظهر لك."
+                if lang == "ar" else
+                "📎 After payment, use the receipt-upload button to submit your proof.",
+            )
         except Exception:
             logger.exception("Failed to send secondary receipt instruction for %s", order_number)
         return True
