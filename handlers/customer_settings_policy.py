@@ -2,9 +2,9 @@
 import unicodedata
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from config import Config
 from database import get_pool
 from keyboards.inline import quick_actions_keyboard
 from services.locale_service import locale_service
@@ -42,8 +42,8 @@ def _normalize_menu_label(value: str | None) -> str:
 
 
 @router.message(F.text.func(lambda text: _normalize_menu_label(text) in _SUPPORTED_MENU_LABELS))
-async def customer_settings(message: Message):
-    """Open the customer quick-actions panel from current and historical reply keyboards."""
+async def customer_settings(message: Message, state: FSMContext):
+    """Open the customer quick-actions panel and clear any stale customer FSM step."""
     pool = await get_pool()
     user = None
     if pool:
@@ -62,6 +62,7 @@ async def customer_settings(message: Message):
         await message.answer(locale_service.get("user_blocked", lang), parse_mode="HTML")
         return
 
+    await state.clear()
     title = "⚙️ <b>الإعدادات والإجراءات السريعة</b>" if lang == "ar" else "⚙️ <b>Settings & Quick Actions</b>"
     await message.answer(
         title,
