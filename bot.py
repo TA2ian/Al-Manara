@@ -21,6 +21,7 @@ def create_dispatcher() -> Dispatcher:
         customer_orders_policy,
         feedback,
         admin_entry,
+        admin_reply_shortcut,
         admin_broadcast_policy,
         verification_admin_policy,
         verification_pending_policy,
@@ -65,6 +66,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(payment_method_legacy_compat.router)
     dp.include_router(payment_method_setup_policy.router)
 
+    dp.include_router(admin_reply_shortcut.router)
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
