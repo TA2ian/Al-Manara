@@ -1,0 +1,35 @@
+"""Regression coverage for customer quick-menu and legal disclaimer routing."""
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_customer_menu_accepts_current_and_legacy_reply_button_variants():
+    source = (ROOT / "handlers/customer_settings_policy.py").read_text(encoding="utf-8")
+    assert "القائمة ⚙️" in source
+    assert "الإعدادات ⚙️" in source
+    assert "_normalize_menu_label" in source
+    assert "_SUPPORTED_MENU_LABELS" in source
+
+
+def test_customer_menu_remains_authoritative_in_dispatcher():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "customer_settings_policy" in source
+    assert "customer_navigation_policy" in source
+
+
+def test_disclaimer_uses_canonical_legal_policy_instead_of_stale_locale_copy():
+    source = (ROOT / "services/locale_service.py").read_text(encoding="utf-8")
+    assert "from services.legal_policy import get_terms_text" in source
+    assert 'if key == "terms_text":' in source
+    assert "return get_terms_text" in source
+
+
+def test_start_and_disclaimer_share_the_same_legal_policy_owner():
+    start_source = (ROOT / "handlers/start.py").read_text(encoding="utf-8")
+    legal_source = (ROOT / "services/legal_policy.py").read_text(encoding="utf-8")
+    locale_source = (ROOT / "services/locale_service.py").read_text(encoding="utf-8")
+    assert "from services.legal_policy import get_terms_text" in start_source
+    assert "def get_terms_text" in legal_source
+    assert "from services.legal_policy import get_terms_text" in locale_source
