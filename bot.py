@@ -44,6 +44,7 @@ def create_dispatcher() -> Dispatcher:
         customer_settings_policy,
         admin_tools_policy,
         admin_search_policy,
+        legal_navigation_policy,
     )
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.maintenance import MaintenanceMiddleware
@@ -100,6 +101,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(verification_pending_policy.router)
     dp.include_router(verification_policy.router)
     dp.include_router(language_policy.router)
+    dp.include_router(legal_navigation_policy.router)
     dp.include_router(customer_navigation_policy.router)
 
     return dp
