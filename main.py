@@ -13,7 +13,7 @@ from config import Config
 from database import init_db, close_db, get_pool
 from bot import create_dispatcher
 from keep_alive import keep_alive
-from services.settings_service import SettingsService
+from services.maintenance_service import MaintenanceMode, MaintenanceService
 from services.order_state_service import transition_order, InvalidOrderTransition
 from services.fulfillment_claim_service import init_fulfillment_claims
 from services.formatters import usdt
@@ -125,11 +125,12 @@ async def on_startup(bot: Bot):
     logger.info("Starting bot...")
     await init_db()
     await init_fulfillment_claims()
-    await SettingsService.init()
-    maintenance_active = await SettingsService.get_bool('maintenance_mode', False)
-    Config.set_maintenance_mode_sync(maintenance_active)
-    if maintenance_active:
-        logger.info("Maintenance mode is ACTIVE (from DB)")
+    maintenance_mode = await MaintenanceService.get_mode()
+    Config.set_maintenance_mode_sync(
+        maintenance_mode in {MaintenanceMode.MAINTENANCE, MaintenanceMode.EMERGENCY}
+    )
+    if maintenance_mode != MaintenanceMode.OFF:
+        logger.info("Maintenance mode is ACTIVE: %s", maintenance_mode.value)
 
     if Config.WEBHOOK_URL:
         await bot.set_webhook(url=Config.WEBHOOK_URL, secret_token=Config.SECRET_TOKEN, drop_pending_updates=True)
