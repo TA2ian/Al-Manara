@@ -40,7 +40,6 @@ def create_dispatcher() -> Dispatcher:
         admin_maintenance_policy,
         admin_settings_policy,
         payment_method_setup_policy,
-        payment_method_callback_policy,
         language_policy,
         customer_navigation_policy,
         customer_settings_policy,
@@ -67,7 +66,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(start.router)
     dp.include_router(customer_settings_policy.router)
     dp.include_router(payment_method_setup_policy.router)
-    dp.include_router(payment_method_callback_policy.router)
 
     dp.include_router(admin_reply_shortcut.router)
     dp.include_router(admin_note_policy.router)
