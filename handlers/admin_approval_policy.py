@@ -15,7 +15,6 @@ from services.formatters import money, usdt
 from services.notification_service import NotificationService
 from services.operational_policy_service import OperationalPolicyService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
-from services.settings_service import SettingsService
 
 router = Router()
 logger = logging.getLogger(__name__)
