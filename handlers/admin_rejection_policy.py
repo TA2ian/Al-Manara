@@ -3,13 +3,12 @@ import html
 import logging
 from datetime import datetime
 
-from aiogram import Router, F, Bot
+from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
 from keyboards.inline import (
-    admin_menu_keyboard,
     misconduct_final_review_keyboard,
     manipulation_confirmation_keyboard,
     receipt_upload_keyboard,
@@ -35,7 +34,7 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-async def _sync_customer_status(bot: Bot, order, text: str):
+async def _sync_customer_status(bot: Bot, order, text: str) -> None:
     message_id = order.get("customer_status_message_id")
     if not message_id:
         return
@@ -101,13 +100,7 @@ async def reject_receipt(callback: CallbackQuery):
             )
             updates = {"payment_deadline": extension_deadline} if extension_deadline else None
             try:
-                updated_order = await transition_order(
-                    conn,
-                    order_id,
-                    "waiting_payment",
-                    admin_id=callback.from_user.id,
-                    updates=updates,
-                )
+                updated_order = await transition_order(conn, order_id, "waiting_payment", admin_id=callback.from_user.id, updates=updates)
             except InvalidOrderTransition as exc:
                 logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
                 await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
@@ -447,7 +440,6 @@ async def misconduct_continue(callback: CallbackQuery):
     await callback.message.edit_text(
         f"✅ <b>تم السماح باستمرار الحساب</b>\n🆔 <code>{telegram_id}</code>",
         parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
     )
     await callback.answer("تم السماح بالاستمرار")
 
@@ -489,7 +481,6 @@ async def misconduct_ban(callback: CallbackQuery):
     await callback.message.edit_text(
         f"🚫 <b>تم حظر الحساب نهائياً</b>\n🆔 <code>{telegram_id}</code>",
         parse_mode="HTML",
-        reply_markup=admin_menu_keyboard(),
     )
     await callback.answer("تم الحظر النهائي")
 
