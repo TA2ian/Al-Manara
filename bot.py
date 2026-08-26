@@ -8,9 +8,7 @@ def create_dispatcher() -> Dispatcher:
         start,
         saved_wallets,
         order_wallet_policy,
-        order_wallet_qr_policy,
         payment_currency_policy,
-        wallet_qr_first_policy,
         wallets,
         order_amount_policy,
         order_confirmation_policy,
@@ -26,7 +24,6 @@ def create_dispatcher() -> Dispatcher:
         verification_admin_policy,
         verification_pending_policy,
         verification_policy,
-        verification_keyboard_cleanup,
         admin_rate_policy,
         admin_navigation_policy,
         admin_approval_policy,
@@ -75,9 +72,7 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
-    dp.include_router(order_wallet_qr_policy.router)
     dp.include_router(payment_currency_policy.router)
-    dp.include_router(wallet_qr_first_policy.router)
     dp.include_router(wallets.router)
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
@@ -103,7 +98,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_settings_policy.router)
 
     dp.include_router(verification_pending_policy.router)
-    dp.include_router(verification_keyboard_cleanup.router)
     dp.include_router(verification_policy.router)
     dp.include_router(language_policy.router)
     dp.include_router(legal_navigation_policy.router)
