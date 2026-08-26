@@ -12,7 +12,16 @@ def test_customer_list_exposes_confirmed_delete_per_row():
     source = inspect.getsource(admin_user_management_policy._render_user_page)
     assert "admin_del_user_" in source
     assert "callback_data=f\"admin_del_user_{user['telegram_id']}\"" in source
-    assert "يمكن حذف أي عميل من القائمة" in source
+    assert "يمكن حظر أو فك حظر أو حذف أي عميل" in source
+
+
+def test_customer_list_keeps_blocked_users_reachable_for_unban():
+    source = inspect.getsource(admin_user_management_policy._fetch_users)
+    render_source = inspect.getsource(admin_user_management_policy._render_user_page)
+    assert "WHERE terms_accepted = TRUE" in source
+    assert "is_blocked = FALSE" not in source
+    assert "admin_unban_" in render_source
+    assert "admin_ban_" in render_source
 
 
 def test_customer_search_has_single_match_actions_and_multi_match_guard():
@@ -34,8 +43,17 @@ def test_customer_delete_handler_requires_confirmation_and_is_transactional():
     assert 'F.data.startswith("admin_del_user_")' in source
     assert 'F.data.startswith("admin_del_confirm_")' in source
     assert "async with conn.transaction():" in source
+    assert "DELETE FROM misconduct_incidents WHERE user_id = $1" in source
+    assert "DELETE FROM orders WHERE user_id = $1" in source
+    assert "DELETE FROM saved_addresses WHERE user_id = $1" in source
     assert "DELETE FROM users WHERE id = $1" in source
     assert "user_deleted" in source
+
+
+def test_customer_delete_blocks_active_orders_before_mutation():
+    source = (ROOT / "handlers/admin_user_management_policy.py").read_text(encoding="utf-8")
+    assert "status IN ('pending','waiting_payment','receipt_received','payment_confirmed')" in source
+    assert "لم يتم تطبيق أي جزء من عملية الحذف" in source
 
 
 def test_customer_mutation_results_do_not_push_a_second_dashboard_message():
