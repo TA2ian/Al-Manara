@@ -20,9 +20,7 @@ def is_admin(user_id: int) -> bool:
 async def _active_orders_count() -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')"
-        )
+        return await conn.fetchval("SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')")
 
 
 _MODE_LABELS = {
@@ -102,20 +100,22 @@ async def confirm_maintenance_mode(callback: CallbackQuery):
     if target == current:
         await callback.answer("لم يتغير الوضع.", show_alert=True)
         return
+
     applied = await MaintenanceService.set_mode(target, admin_id=callback.from_user.id)
     if applied != target:
         await callback.answer("تعذر تطبيق التغيير؛ أعد فتح لوحة الصيانة.", show_alert=True)
         return
 
-    notification = await MaintenanceService.notify_customers(callback.message.bot, target)
+    stats = await MaintenanceService.notification_stats(target)
     icon = "🚨" if target == MaintenanceMode.EMERGENCY else "🛠️" if target == MaintenanceMode.MAINTENANCE else "🟡" if target == MaintenanceMode.LIMITED else "✅"
     await callback.message.edit_text(
         f"{icon} <b>تم تغيير وضع التشغيل إلى {_MODE_LABELS[target]}</b>\n\n"
         f"{_MODE_DESCRIPTIONS[target]}\n\n"
-        f"📨 <b>إشعار المستخدمين:</b> {notification['sent']}\n"
-        f"❌ <b>فشل الإرسال:</b> {notification['failed']}\n"
-        f"👥 <b>المستهدفون:</b> {notification['total']}",
+        "📨 <b>تم وضع إشعارات المستخدمين في طابور الإرسال.</b>\n"
+        f"⏳ بانتظار الإرسال: <b>{stats['queued']}</b>\n"
+        f"✅ أُرسلت سابقاً: <b>{stats['sent']}</b>\n"
+        f"❌ فشل نهائي: <b>{stats['failed']}</b>",
         parse_mode="HTML",
     )
     await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-    await callback.answer("تم تطبيق التغيير وإرسال الإشعارات")
+    await callback.answer("تم تطبيق التغيير ووضع الإشعارات في الطابور")
