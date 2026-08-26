@@ -62,7 +62,12 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver immutable payment details and the configured payment deadline duration."""
+        """Deliver immutable payment details and the configured payment deadline duration.
+
+        Customer-facing deadline UX intentionally exposes only the configured processing
+        duration; server-side timestamps remain authoritative and are never taken from
+        client-supplied time or location data.
+        """
         recipient = (order.get("payment_recipient_name_snapshot") or "").strip()
         address = (order.get("payment_account_snapshot") or "").strip()
         qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
