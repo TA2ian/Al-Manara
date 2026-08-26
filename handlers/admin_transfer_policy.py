@@ -20,7 +20,7 @@ def is_admin(user_id: int) -> bool:
 
 
 def _valid_txid(txid: str, network: str | None = None) -> bool:
-    """Validate the transaction hash shape without claiming on-chain confirmation."""
+    """Validate transaction hash shape without requiring on-chain verification."""
     value = (txid or "").strip()
     if not value:
         return False
@@ -28,7 +28,7 @@ def _valid_txid(txid: str, network: str | None = None) -> bool:
     if normalized == "TRC20":
         return bool(re.fullmatch(r"[0-9a-fA-F]{64}", value))
     if normalized in {"BEP20", "ERC20"}:
-        return bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", value))
+        return bool(re.fullmatch(r"(?:0x)?[0-9a-fA-F]{64}", value))
     return bool(re.fullmatch(r"[0-9A-Za-z_-]{32,128}", value))
 
 
