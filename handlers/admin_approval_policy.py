@@ -15,7 +15,7 @@ from services.formatters import money, usdt
 from services.notification_service import NotificationService
 from services.operational_policy_service import OperationalPolicyService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
-from services.time_service import format_order_datetime, utc_now_naive
+from services.time_service import utc_now_naive
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         f"💰 {usdt(order['amount_usdt'])} USDT\n"
         f"🌐 {html.escape(order['network'] or '')}\n"
         f"💵 الإجمالي: {money(order['total_amount'])} {html.escape(order['payment_currency'])}\n"
-        f"⏱ الموعد النهائي: <b>{format_order_datetime(order['payment_deadline'])}</b>\n\n"
+        f"⏱ المهلة المحددة: <b>{timeout_minutes} دقيقة</b> من لحظة اعتماد الطلب\n\n"
         "📎 بانتظار إثبات دفع العميل..."
     )
     await asyncio.gather(*[bot.send_message(admin_id, admin_update_text, parse_mode="HTML") for admin_id in Config.ADMIN_IDS], return_exceptions=True)
