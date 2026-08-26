@@ -6,10 +6,16 @@ async def install_order_constraints(conn):
     """Install canonical database invariants used by wallet, payment, identity, and order flows."""
     await conn.execute("ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS recipient_name TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_recipient_name_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_full_name_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_telegram_id_snapshot BIGINT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_username_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_shamcash_account_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_deadline TIMESTAMP")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number TEXT")
 
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS misconduct_incidents (
@@ -66,20 +72,24 @@ async def install_order_constraints(conn):
             IF NEW.user_id IS NULL THEN
                 RAISE EXCEPTION 'order customer is required' USING ERRCODE='23514';
             END IF;
-            SELECT u INTO customer_row FROM users u WHERE u.id = NEW.user_id;
+
+            SELECT u.is_verified, u.phone_verified, u.phone_number, u.terms_accepted,
+                   to_jsonb(u)->>'telegram_id', to_jsonb(u)->>'full_name',
+                   to_jsonb(u)->>'username', to_jsonb(u)->>'shamcash_account'
+              INTO customer_is_verified, customer_phone_verified, customer_phone_number,
+                   customer_terms_accepted, customer_telegram_id, customer_full_name,
+                   customer_username, customer_shamcash_account
+              FROM users u
+             WHERE u.id = NEW.user_id;
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
             END IF;
 
-            customer_json := to_jsonb(customer_row);
-            customer_telegram_id := NULLIF(customer_json->>'telegram_id', '')::BIGINT;
-            customer_full_name := NULLIF(BTRIM(customer_json->>'full_name'), '');
-            customer_username := NULLIF(BTRIM(customer_json->>'username'), '');
-            customer_shamcash_account := NULLIF(BTRIM(customer_json->>'shamcash_account'), '');
-            customer_is_verified := NULLIF(customer_json->>'is_verified', '')::BOOLEAN;
-            customer_phone_verified := NULLIF(customer_json->>'phone_verified', '')::BOOLEAN;
-            customer_phone_number := NULLIF(BTRIM(customer_json->>'phone_number'), '');
-            customer_terms_accepted := NULLIF(customer_json->>'terms_accepted', '')::BOOLEAN;
+            customer_telegram_id := NULLIF(customer_telegram_id::TEXT, '')::BIGINT;
+            customer_full_name := NULLIF(BTRIM(customer_full_name), '');
+            customer_username := NULLIF(BTRIM(customer_username), '');
+            customer_shamcash_account := NULLIF(BTRIM(customer_shamcash_account), '');
+            customer_phone_number := NULLIF(BTRIM(customer_phone_number), '');
 
             IF customer_terms_accepted IS NOT TRUE THEN
                 RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514';
@@ -90,10 +100,16 @@ async def install_order_constraints(conn):
             IF customer_phone_verified IS NOT TRUE OR customer_phone_number IS NULL THEN
                 RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
             END IF;
-            IF customer_json ? 'full_name' AND customer_full_name IS NULL THEN
+            IF to_jsonb(ROW(customer_full_name)) IS NOT NULL AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'full_name'
+            ) AND customer_full_name IS NULL THEN
                 RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514';
             END IF;
-            IF customer_json ? 'shamcash_account' AND customer_shamcash_account IS NULL THEN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'shamcash_account'
+            ) AND customer_shamcash_account IS NULL THEN
                 RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514';
             END IF;
 
