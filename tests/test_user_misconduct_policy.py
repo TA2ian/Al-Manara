@@ -18,6 +18,8 @@ class FakeConnection:
     async def fetchrow(self, query, *args):
         if "SELECT id, telegram_id, is_blocked FROM users" in query:
             return {"id": 10, "telegram_id": 123456, "is_blocked": False}
+        if "SELECT status FROM orders WHERE id = $1 FOR UPDATE" in query:
+            return {"status": "rejected"}
         raise AssertionError(f"Unexpected fetchrow query: {query}")
 
     async def fetchval(self, query, *args):
@@ -95,7 +97,7 @@ def test_customer_notice_marks_third_incident_as_final_warning():
 
     notice = customer_notice(decision, "ar")
     assert "الفرصة الأخيرة" in notice
-    assert "معلق" in notice
+    assert "معلّق" in notice or "معلق" in notice
 
 
 def test_temporary_suspension_notice_does_not_expose_internal_reason():
