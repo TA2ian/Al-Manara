@@ -5,7 +5,6 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import Config
 from database import get_pool
 from keyboards.inline import currency_selection_keyboard, main_menu_inline, saved_addresses_keyboard
 from keyboards.reply import compact_reply_keyboard
@@ -252,22 +251,6 @@ async def show_support(callback: CallbackQuery):
     )
     await callback.message.answer(template, parse_mode="HTML")
     await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang))
-    await callback.message.answer(locale_service.get("main_menu", lang), reply_markup=main_menu_inline(lang))
-    await callback.answer()
-
-
-@router.callback_query(F.data == "menu_disclaimer")
-async def show_disclaimer(callback: CallbackQuery):
-    """Show the current disclaimer from the canonical customer navigation router."""
-    lang = await _get_lang(callback.from_user.id)
-    text = locale_service.get(
-        "terms_text",
-        lang,
-        min_order=Config.MIN_ORDER,
-        max_order=Config.MAX_ORDER,
-        timeout=Config.PAYMENT_TIMEOUT,
-    )
-    await callback.message.edit_text(text, parse_mode="HTML")
     await callback.message.answer(locale_service.get("main_menu", lang), reply_markup=main_menu_inline(lang))
     await callback.answer()
 
