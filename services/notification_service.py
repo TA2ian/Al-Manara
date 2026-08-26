@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Bot
 
-from services.formatters import money, usdt
+from services.formatters import money, percent, usdt
 
 logger = logging.getLogger(__name__)
 
@@ -61,22 +61,17 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot as one authoritative customer message.
-
-        The approval handler owns the receipt-upload prompt. Keeping that prompt out
-        of this method prevents duplicate instructions when manual approval and
-        trusted-customer auto-approval use different follow-up flows.
-        """
-        from config import Config
-        from services.exchange_service import ExchangeService
-
-        currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
+        """Deliver the immutable payment snapshot and exact order deadline."""
         recipient = (order.get("payment_recipient_name_snapshot") or "").strip()
         address = (order.get("payment_account_snapshot") or "").strip()
         qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
-        amount = money(order.get("total_amount"))
         order_number = order.get("order_number", "N/A")
-        timeout = Config.PAYMENT_TIMEOUT
+        currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
+        amount = money(order.get("total_amount"))
+        deadline = order.get("payment_deadline")
+        deadline_text = deadline.strftime("%Y-%m-%d %H:%M") if deadline else "غير محددة"
+        fee_percent = percent(order.get("fee_percent"))
+        fee_amount = money(order.get("fee_amount"))
 
         if not recipient or not address or not qr_photo_id:
             logger.error(
@@ -86,9 +81,9 @@ class NotificationService:
             try:
                 await self.notify_user(
                     user_id,
-                    f"⚠️ <b>تعذر إرسال بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. لا ترسل أي مبلغ، ويرجى مراجعة الإدارة."
+                    f"⚠️ <b>تعذر تجهيز بيانات الدفع للطلب #{order_number}</b>\n\nبيانات الدفع المثبتة لهذا الطلب غير مكتملة. <b>لا ترسل أي مبلغ.</b> يرجى مراجعة الإدارة."
                     if lang == "ar" else
-                    f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. Do not send funds; please contact administration.",
+                    f"⚠️ <b>Payment details unavailable for order #{order_number}</b>\n\nThe immutable payment details for this order are incomplete. <b>Do not send funds.</b> Please contact administration.",
                 )
             except Exception:
                 logger.exception("Failed to send incomplete-payment warning for %s", order_number)
@@ -97,33 +92,40 @@ class NotificationService:
         old_syp_line = ""
         if currency == "NEW.SYP":
             old_syp_amount = order.get("old_syp_total")
-            if old_syp_amount is None:
-                old_syp_amount = ExchangeService.old_syp_equivalent(order.get("total_amount"))
-            old_syp_line = (
-                f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة"
-                if lang == "ar" else
-                f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
-            )
+            if old_syp_amount is not None:
+                old_syp_line = f"\nℹ️ يعادل <b>{money(old_syp_amount)}</b> ليرة سورية قديمة" if lang == "ar" else f"\nℹ️ Equivalent to <b>{money(old_syp_amount)}</b> legacy Syrian pounds"
 
-        caption = (
-            f"🔔 <b>تمت الموافقة على طلبك #{order_number}</b>\n\n"
-            "💳 <b>بيانات الدفع الرسمية</b>\n"
-            f"👤 اسم المستلم: <b>{recipient}</b>\n"
-            f"📍 عنوان الاستلام: <code>{address}</code>\n"
-            f"💱 عملة الدفع: <b>{currency}</b>\n"
-            f"💰 المبلغ المطلوب: <b>{amount} {currency}</b>\n"
-            f"⏱ مهلة الدفع: <b>{timeout} دقيقة</b>{old_syp_line}\n\n"
-            "⚠️ <b>تحقق من اسم المستلم والعنوان قبل إرسال المبلغ.</b>"
-            if lang == "ar" else
-            f"🔔 <b>Your order #{order_number} has been approved</b>\n\n"
-            "💳 <b>Official Payment Details</b>\n"
-            f"👤 Recipient name: <b>{recipient}</b>\n"
-            f"📍 Receiving address: <code>{address}</code>\n"
-            f"💱 Payment currency: <b>{currency}</b>\n"
-            f"💰 Amount due: <b>{amount} {currency}</b>\n"
-            f"⏱ Payment deadline: <b>{timeout} minutes</b>{old_syp_line}\n\n"
-            "⚠️ <b>Verify the recipient name and address before sending funds.</b>"
-        )
+        if lang == "ar":
+            caption = (
+                f"🔔 <b>بيانات الدفع الرسمية · الطلب #{order_number}</b>\n\n"
+                "تم اعتماد الطلب. هذه هي بيانات الدفع المثبتة لهذا الطلب، ولا تستخدم أي بيانات من رسالة أخرى.\n\n"
+                "💳 <b>الدفع إلى</b>\n"
+                f"👤 المستلم: <b>{recipient}</b>\n"
+                f"📍 العنوان/الحساب: <code>{address}</code>\n"
+                f"💱 العملة: <b>{currency}</b>\n"
+                f"💰 المبلغ المستحق: <b>{amount} {currency}</b>\n"
+                f"🏷️ رسوم الخدمة: <b>{fee_amount} {currency}</b> ({fee_percent}%)"
+                f"{old_syp_line}\n\n"
+                "⏱️ <b>الموعد النهائي للدفع</b>\n"
+                f"{deadline_text}\n\n"
+                "🔎 <b>قبل التحويل</b>\n"
+                "تحقق من اسم المستلم والعنوان مرة أخيرة. بعد إتمام الدفع ارفع الإثبات من داخل هذا الطلب."
+            )
+        else:
+            caption = (
+                f"🔔 <b>Official payment details · Order #{order_number}</b>\n\n"
+                "Your order is approved. These are the payment details locked to this order; do not use details from another message.\n\n"
+                "💳 <b>Pay to</b>\n"
+                f"👤 Recipient: <b>{recipient}</b>\n"
+                f"📍 Address/account: <code>{address}</code>\n"
+                f"💱 Currency: <b>{currency}</b>\n"
+                f"💰 Amount due: <b>{amount} {currency}</b>\n"
+                f"🏷️ Service fee: <b>{fee_amount} {currency}</b> ({fee_percent}%)\n\n"
+                "⏱️ <b>Payment deadline</b>\n"
+                f"{deadline_text}\n\n"
+                "🔎 <b>Before sending</b>\n"
+                "Verify the recipient name and address one last time, then upload your proof from this order."
+            )
 
         await self._bot.send_photo(user_id, qr_photo_id, caption=caption, parse_mode="HTML")
         return True
