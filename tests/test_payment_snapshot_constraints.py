@@ -27,11 +27,14 @@ class PaymentSnapshotConstraintTests(unittest.IsolatedAsyncioTestCase):
                 network TEXT NOT NULL, qr_photo_id TEXT, verification_status TEXT DEFAULT 'pending', deleted_at TIMESTAMP)""")
             await conn.execute("""CREATE TABLE payment_methods (
                 id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, provider TEXT NOT NULL, currency TEXT NOT NULL,
-                account_identifier TEXT NOT NULL DEFAULT '', qr_photo_id TEXT, enabled BOOLEAN DEFAULT TRUE)""")
+                account_identifier TEXT NOT NULL DEFAULT '', recipient_name TEXT, qr_photo_id TEXT, enabled BOOLEAN DEFAULT TRUE)""")
             await conn.execute("""CREATE TABLE orders (
                 id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), wallet_address TEXT NOT NULL,
                 network TEXT NOT NULL, wallet_qr_photo_id TEXT, payment_currency TEXT NOT NULL,
-                payment_method_code TEXT, payment_account_snapshot TEXT, payment_qr_photo_id TEXT, status TEXT DEFAULT 'pending')""")
+                payment_method_code TEXT, payment_account_snapshot TEXT, payment_qr_photo_id TEXT,
+                payment_recipient_name_snapshot TEXT, status TEXT DEFAULT 'pending',
+                order_number TEXT, created_at TIMESTAMP DEFAULT NOW(), approved_at TIMESTAMP,
+                payment_deadline TIMESTAMP)""")
             await conn.execute("""INSERT INTO users
                 (telegram_id,is_verified,phone_verified,phone_number,terms_accepted)
                 VALUES (2001,TRUE,TRUE,'+10000000000',TRUE)""")
@@ -39,8 +42,8 @@ class PaymentSnapshotConstraintTests(unittest.IsolatedAsyncioTestCase):
                 (user_id,address,network,qr_photo_id,verification_status)
                 VALUES (1,'0xPAY','BEP20','wallet-qr','verified')""")
             await conn.execute("""INSERT INTO payment_methods
-                (code,provider,currency,account_identifier,qr_photo_id,enabled)
-                VALUES ('shamcash_new_syp','ShamCash','NEW.SYP','ACCOUNT-A','payment-qr-a',TRUE)""")
+                (code,provider,currency,account_identifier,recipient_name,qr_photo_id,enabled)
+                VALUES ('shamcash_new_syp','ShamCash','NEW.SYP','ACCOUNT-A','ShamCash','payment-qr-a',TRUE)""")
             await install_order_constraints(conn)
 
     async def asyncTearDown(self):
