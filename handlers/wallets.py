@@ -1,14 +1,17 @@
 """Authoritative customer wallet registry flow."""
 import io
+import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from PIL import Image
 
-from states import WalletStates
+from services.media_security import validate_image_payload
 from services.wallet_validator import WalletValidator
+from states import WalletStates
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -18,6 +21,26 @@ def _normalize_qr_value(value: str) -> str:
         if normalized.lower().startswith(prefix):
             return normalized[len(prefix):].strip()
     return normalized
+
+
+def _decode_qr(payload: bytes) -> str:
+    try:
+        from pyzbar.pyzbar import decode as qr_decode
+        decoded = qr_decode(Image.open(io.BytesIO(payload)))
+        if not decoded:
+            return ""
+        return decoded[0].data.decode("utf-8", errors="strict").strip()
+    except Exception:
+        logger.exception("Failed to decode wallet QR")
+        return ""
+
+
+def _caption_address(caption: str) -> str:
+    candidate = _normalize_qr_value(caption)
+    if not candidate:
+        return ""
+    network = WalletValidator.detect_network(candidate)
+    return candidate if network and WalletValidator.validate(candidate, network).get("valid") else ""
 
 
 async def _user(telegram_id: int):
@@ -73,6 +96,31 @@ def _qr_skip_confirmation_keyboard(lang: str) -> InlineKeyboardMarkup:
             callback_data="wallet_qr_continue",
         )],
     ])
+
+
+async def _begin_registration(message: Message, state: FSMContext, lang: str, return_to_order: bool = False) -> None:
+    await state.update_data(return_to_order=return_to_order)
+    await state.set_state(WalletStates.waiting_address)
+    text = (
+        "👛 <b>إضافة محفظة استلام</b>\n\n"
+        "أرسل <b>عنوان المحفظة</b>، أو صورة <b>QR</b>، أو شارك المحفظة مباشرة من تطبيق محفظتك "
+        "بحيث يصل <b>العنوان مع QR</b>.\n\n"
+        "🔐 سيتحقق البوت من العنوان، يتعرف على الشبكة، ثم يطابق العنوان مع QR قبل اعتماده.\n"
+        "يمكنك إرسال العنوان أولاً ثم QR، أو QR أولاً، أو مشاركة المحفظة مباشرة."
+        if lang == "ar" else
+        "👛 <b>Add receiving wallet</b>\n\n"
+        "Send the <b>wallet address</b>, a <b>QR image</b>, or share the wallet directly from your wallet app "
+        "so the <b>address and QR</b> arrive together.\n\n"
+        "🔐 The bot validates the address, detects the network, and matches the address with the QR before accepting it.\n"
+        "You may send the address first, QR first, or share the wallet directly."
+    )
+    if return_to_order:
+        text += (
+            "\n\n🔒 عند إنشاء الطلب يجب أن تكون المحفظة موثقة بـQR مطابق، ولا يمكن تخطي التحقق."
+            if lang == "ar" else
+            "\n\n🔒 During order creation, the wallet must be verified with a matching QR and verification cannot be skipped."
+        )
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu_wallets")
@@ -138,23 +186,88 @@ async def show_wallets(callback: CallbackQuery, state: FSMContext):
 async def wallet_add(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
-    await state.set_state(WalletStates.waiting_address)
-
-    text = (
-        "➕ <b>إضافة محفظة استلام</b>\n\n"
-        "أرسل <b>عنوان المحفظة</b>، أو صورة <b>QR</b>، أو شارك المحفظة مباشرة من تطبيق محفظتك "
-        "بحيث يصل <b>العنوان مع QR</b>.\n\n"
-        "🔐 سيتحقق البوت من العنوان، يتعرف على الشبكة، ثم يطابق العنوان مع QR قبل اعتماده.\n"
-        "يمكنك استخدام <b>BEP20</b> أو <b>TRC20</b>."
+    await callback.message.edit_text(
+        "👛 <b>إضافة محفظة استلام</b>\n\n"
+        "أرسل عنوان المحفظة، أو صورة QR، أو شارك المحفظة مباشرة من تطبيق محفظتك ليصل العنوان مع QR.\n\n"
+        "🔐 سيتحقق البوت من صحة العنوان والشبكة ويطابق العنوان مع QR قبل اعتماده."
         if lang == "ar" else
-        "➕ <b>Add receiving wallet</b>\n\n"
-        "Send the <b>wallet address</b>, a <b>QR image</b>, or share the wallet directly from your wallet app "
-        "so the <b>address and QR</b> arrive together.\n\n"
-        "🔐 The bot validates the address, detects the network, and matches the address with the QR before accepting it.\n"
-        "You can use <b>BEP20</b> or <b>TRC20</b>."
+        "👛 <b>Add receiving wallet</b>\n\n"
+        "Send the wallet address, a QR image, or share the wallet directly from your wallet app so the address and QR arrive together.\n\n"
+        "🔐 The bot validates the address and network and matches it with the QR before accepting it.",
+        parse_mode="HTML",
     )
-    await callback.message.edit_text(text, parse_mode="HTML")
+    await state.set_state(WalletStates.waiting_address)
     await callback.answer()
+
+
+@router.message(WalletStates.waiting_address, F.photo)
+async def wallet_qr_first(message: Message, state: FSMContext):
+    """Register a wallet when the customer sends QR before the text address."""
+    user = await _user(message.from_user.id)
+    lang = (user["language"] or "ar") if user else "ar"
+    raw = io.BytesIO()
+    try:
+        await message.bot.download(file=message.photo[-1].file_id, destination=raw)
+        payload = raw.getvalue()
+        validate_image_payload(payload, file_name="telegram-photo")
+    except ValueError:
+        await message.answer(
+            "❌ صورة QR غير صالحة أو غير آمنة. أرسل صورة QR واضحة بصيغة مدعومة."
+            if lang == "ar" else
+            "❌ The QR image is invalid or unsafe. Send a clear QR image in a supported format."
+        )
+        return
+    except Exception:
+        logger.exception("Failed to download or validate wallet QR")
+        await message.answer("❌ تعذر معالجة صورة QR. أعد إرسالها من فضلك." if lang == "ar" else "❌ The QR image could not be processed. Please send it again.")
+        return
+
+    qr_address = _normalize_qr_value(_decode_qr(payload))
+    network = WalletValidator.detect_network(qr_address)
+    validation = WalletValidator.validate(qr_address, network) if network else {"valid": False}
+    if not validation.get("valid"):
+        await message.answer(
+            "❌ لم أتمكن من التحقق من عنوان محفظة صالح داخل QR. أرسل QR أوضح، أو أرسل العنوان كنص أولاً."
+            if lang == "ar" else
+            "❌ I could not verify a valid wallet address in this QR. Send a clearer QR, or send the address as text first."
+        )
+        return
+
+    caption_address = _caption_address(message.caption or "")
+    if message.caption and not caption_address:
+        await message.answer(
+            "❌ النص المرفق لا يبدو عنوان BEP20 أو TRC20 صالحاً. أرسل QR فقط أو أرفق العنوان الصحيح."
+            if lang == "ar" else
+            "❌ The attached text is not a valid BEP20/TRC20 address. Send QR only or attach the correct address."
+        )
+        return
+    if caption_address and caption_address.casefold() != qr_address.casefold():
+        await message.answer(
+            "❌ العنوان المرفق مع QR لا يطابق العنوان الموجود داخل QR. أرسل البيانات المطابقة."
+            if lang == "ar" else
+            "❌ The address attached to the QR does not match the address encoded in it. Send matching data."
+        )
+        return
+
+    await state.update_data(
+        wallet_address=qr_address,
+        network=network,
+        wallet_qr_photo_id=message.photo[-1].file_id,
+        wallet_qr_first=True,
+    )
+    await state.set_state(WalletStates.waiting_label)
+    await message.answer(
+        "✅ <b>تم التحقق من المحفظة عبر QR</b>\n\n"
+        f"🌐 الشبكة: <b>{network}</b>\n"
+        f"📍 العنوان: <code>{qr_address}</code>\n\n"
+        "أرسل الآن اسماً لهذه المحفظة لحفظها."
+        if lang == "ar" else
+        "✅ <b>Wallet verified from QR</b>\n\n"
+        f"🌐 Network: <b>{network}</b>\n"
+        f"📍 Address: <code>{qr_address}</code>\n\n"
+        "Send a label to save this wallet.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(WalletStates.waiting_address)
@@ -166,9 +279,9 @@ async def wallet_address(message: Message, state: FSMContext):
     validation = WalletValidator.validate(address, network) if network else {"valid": False}
     if not validation.get("valid"):
         await message.answer(
-            "❌ العنوان غير صالح لـBEP20/TRC20. تأكد من نسخه بالكامل."
+            "❌ العنوان غير صالح لـBEP20/TRC20. تأكد من نسخه بالكامل، أو أرسل صورة QR صالحة."
             if lang == "ar" else
-            "❌ Invalid BEP20/TRC20 address. Copy the full address."
+            "❌ Invalid BEP20/TRC20 address. Copy the full address, or send a valid QR image."
         )
         return
 
@@ -177,19 +290,19 @@ async def wallet_address(message: Message, state: FSMContext):
     await state.set_state(WalletStates.waiting_qr)
     await message.answer(
         "📸 <b>أرسل الآن QR لنفس العنوان</b>.\n\n"
-        "سيستخرج البوت العنوان من QR ويقارنه حرفياً بالعنوان الذي أرسلته. لا يُقبل QR لعنوان مختلف.\n\n"
+        "سيستخرج البوت العنوان من QR ويقارنه بالعنوان الذي أرسلته. لا يُقبل QR لعنوان مختلف.\n\n"
         + (
             "🔒 أثناء إنشاء الطلب يجب إرسال QR المطابق ولا يمكن تخطي التحقق."
             if data.get("return_to_order") else
-            "يمكنك تأكيد التخطي لاحقاً إذا لم ترد حفظ المحفظة كعنوان موثق."
+            "يمكنك تخطي حفظ QR فقط إذا كنت لا تريد حفظ العنوان كمحفظة موثقة."
         )
         if lang == "ar" else
         "📸 <b>Send the QR for the same address</b>.\n\n"
-        "The bot extracts the address from the QR and compares it exactly with the address you sent. A different QR is rejected.\n\n"
+        "The bot extracts the address from the QR and compares it with the address you sent. A different QR is rejected.\n\n"
         + (
             "🔒 During order creation, the matching QR is required and verification cannot be skipped."
             if data.get("return_to_order") else
-            "You can confirm the skip later if you do not want to save the wallet as verified."
+            "You may skip saving the QR only if you do not want to save the address as a verified wallet."
         ),
         reply_markup=_qr_prompt_keyboard(lang, allow_skip=not data.get("return_to_order")),
         parse_mode="HTML",
@@ -215,25 +328,14 @@ async def wallet_qr_skip_prompt(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
     if data.get("return_to_order"):
-        await callback.answer(
-            "❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب."
-            if lang == "ar" else
-            "❌ Verification cannot be skipped during order creation.",
-            show_alert=True,
-        )
+        await callback.answer("❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.", show_alert=True)
         return
-
-    text = (
+    await callback.message.edit_text(
         "⚠️ <b>تنبيه مهم قبل تخطي QR</b>\n\n"
-        "أنت مسؤول عن صحة عنوان المحفظة والشبكة. إرسال QR لنفس العنوان يضيف خطوة تحقق ويقلل احتمال الخطأ.\n\n"
-        "إذا اخترت التخطي، فلن تُحفظ المحفظة كعنوان موثق."
+        "إذا تخطيت QR فلن تُحفظ المحفظة كعنوان موثق. إرسال QR لنفس العنوان يضيف خطوة تحقق ويقلل احتمال الخطأ."
         if lang == "ar" else
         "⚠️ <b>Important warning before skipping QR</b>\n\n"
-        "You are responsible for the wallet address and network. Sending a QR for the same address adds a verification step and reduces the risk of error.\n\n"
-        "If you skip, the wallet will not be saved as verified."
-    )
-    await callback.message.edit_text(
-        text,
+        "If you skip QR, the wallet will not be saved as verified. Sending QR for the same address adds a verification step and reduces errors.",
         reply_markup=_qr_skip_confirmation_keyboard(lang),
         parse_mode="HTML",
     )
@@ -246,18 +348,12 @@ async def wallet_qr_skip_confirm(callback: CallbackQuery, state: FSMContext):
     lang = (user["language"] or "ar") if user else "ar"
     data = await state.get_data()
     if data.get("return_to_order"):
-        await callback.answer(
-            "❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب."
-            if lang == "ar" else
-            "❌ Verification cannot be skipped during order creation.",
-            show_alert=True,
-        )
+        await callback.answer("❌ لا يمكن تخطي التحقق أثناء إنشاء الطلب." if lang == "ar" else "❌ Verification cannot be skipped during order creation.", show_alert=True)
         return
-
     await callback.message.edit_text(
-        "⚠️ تم تأكيد التخطي، لكن لم يتم حفظ المحفظة في محافظي لأنها غير موثقة بـQR. إذا أردت حفظها وإعادة استخدامها، أعد الإضافة وأرسل QR المطابق."
+        "⚠️ تم تأكيد التخطي، لكن لم يتم حفظ المحفظة لأنها غير موثقة بـQR. إذا أردت حفظها وإعادة استخدامها، أعد الإضافة وأرسل QR المطابق."
         if lang == "ar" else
-        "⚠️ Skip confirmed, but the wallet was not saved to My Wallets because it is not verified with a QR. To save and reuse it, add it again and provide the matching QR.",
+        "⚠️ Skip confirmed. The wallet was not saved because it is not verified with QR. To save and reuse it, add it again and provide the matching QR.",
         reply_markup=_menu(lang),
         parse_mode="HTML",
     )
@@ -270,9 +366,7 @@ async def wallet_qr_cancel(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] or "ar") if user else "ar"
     await state.clear()
-    await callback.message.edit_text(
-        "❌ تم إلغاء إضافة المحفظة." if lang == "ar" else "❌ Wallet registration cancelled."
-    )
+    await callback.message.edit_text("❌ تم إلغاء إضافة المحفظة." if lang == "ar" else "❌ Wallet registration cancelled.")
     await callback.answer()
 
 
@@ -284,47 +378,31 @@ async def wallet_qr(message: Message, state: FSMContext):
     address = data.get("wallet_address")
     if not address:
         await state.clear()
-        await message.answer(
-            "❌ انتهت جلسة إضافة المحفظة. ابدأ الإضافة من جديد."
-            if lang == "ar" else
-            "❌ The wallet registration session expired. Start again."
-        )
+        await message.answer("❌ انتهت جلسة إضافة المحفظة. ابدأ الإضافة من جديد." if lang == "ar" else "❌ The wallet registration session expired. Start again.")
         return
 
     raw = io.BytesIO()
     try:
         await message.bot.download(file=message.photo[-1].file_id, destination=raw)
-        raw.seek(0)
-        from pyzbar.pyzbar import decode as qr_decode
-        decoded = qr_decode(Image.open(raw))
-        qr_text = decoded[0].data.decode("utf-8").strip() if decoded else ""
+        payload = raw.getvalue()
+        validate_image_payload(payload, file_name="telegram-photo")
+        qr_text = _decode_qr(payload)
+    except ValueError:
+        await message.answer("❌ صورة QR غير صالحة أو غير آمنة. أرسل صورة QR واضحة." if lang == "ar" else "❌ The QR image is invalid or unsafe. Send a clear QR image.")
+        return
     except Exception:
-        qr_text = ""
-
-    normalized = _normalize_qr_value(qr_text)
-    if not normalized:
-        await message.answer(
-            "❌ لم أتمكن من قراءة QR. أرسل صورة أوضح."
-            if lang == "ar" else
-            "❌ QR could not be read. Send a clearer image."
-        )
+        logger.exception("Failed to process wallet QR")
+        await message.answer("❌ تعذر معالجة QR. أعد إرسال الصورة بوضوح." if lang == "ar" else "❌ Could not process the QR. Send the image again clearly.")
         return
 
-    if normalized.lower() != address.lower():
-        await message.answer(
-            "❌ QR لا يطابق العنوان المدخل. أرسل QR المطابق لنفس العنوان."
-            if lang == "ar" else
-            "❌ QR does not match the entered address. Send the matching QR."
-        )
+    normalized = _normalize_qr_value(qr_text)
+    if not normalized or normalized.casefold() != address.casefold():
+        await message.answer("❌ QR لا يطابق العنوان المدخل. أرسل QR المطابق لنفس العنوان." if lang == "ar" else "❌ QR does not match the entered address. Send the matching QR.")
         return
 
     await state.update_data(wallet_qr_photo_id=message.photo[-1].file_id)
     await state.set_state(WalletStates.waiting_label)
-    await message.answer(
-        "🏷️ أرسل اسماً لهذا العنوان، مثل: Binance أو محفظتي الرئيسية."
-        if lang == "ar" else
-        "🏷️ Send a label for this address, e.g. Binance or Main Wallet."
-    )
+    await message.answer("🏷️ أرسل اسماً لهذا العنوان، مثل: Binance أو محفظتي الرئيسية." if lang == "ar" else "🏷️ Send a label for this address, e.g. Binance or Main Wallet.")
 
 
 @router.message(WalletStates.waiting_qr)
@@ -356,11 +434,7 @@ async def wallet_label(message: Message, state: FSMContext):
 
     data = await state.get_data()
     if not data.get("wallet_address") or not data.get("network") or not data.get("wallet_qr_photo_id"):
-        await message.answer(
-            "❌ بيانات المحفظة غير مكتملة. أعد إضافة المحفظة من البداية."
-            if lang == "ar" else
-            "❌ Wallet registration data is incomplete. Please start wallet registration again."
-        )
+        await message.answer("❌ بيانات المحفظة غير مكتملة. أعد إضافة المحفظة من البداية." if lang == "ar" else "❌ Wallet registration data is incomplete. Please start wallet registration again.")
         await state.clear()
         return
 
@@ -376,11 +450,7 @@ async def wallet_label(message: Message, state: FSMContext):
             user["id"], data["wallet_address"], data["network"],
         )
         if existing:
-            await message.answer(
-                "❌ هذا العنوان موجود بالفعل. لا يمكن تعديله؛ احذف العنوان الحالي ثم أضفه من جديد."
-                if lang == "ar" else
-                "❌ This address already exists. It cannot be edited; delete it first and add it again."
-            )
+            await message.answer("❌ هذا العنوان موجود بالفعل. لا يمكن تعديله؛ احذف العنوان الحالي ثم أضفه من جديد." if lang == "ar" else "❌ This address already exists. It cannot be edited; delete it first and add it again.")
             return
 
         row = await conn.fetchrow(
@@ -410,20 +480,12 @@ async def wallet_label(message: Message, state: FSMContext):
             address_from_saved=False,
             wallet_qr_skipped=False,
         )
-        await message.answer(
-            "✅ تم حفظ المحفظة وQR وتوثيقهما. سيتم استخدامهما تلقائياً في هذا الطلب والطلبات القادمة."
-            if lang == "ar" else
-            "✅ The wallet and QR were saved and verified. They will be used automatically for this and future orders."
-        )
+        await message.answer("✅ تم حفظ المحفظة وQR وتوثيقهما. سيتم استخدامهما تلقائياً في هذا الطلب والطلبات القادمة." if lang == "ar" else "✅ The wallet and QR were saved and verified. They will be used automatically for this and future orders.")
         from handlers.order_wallet_policy import _continue_to_currency
         await _continue_to_currency(message, state, lang)
         return
 
-    await message.answer(
-        "✅ تم حفظ العنوان وتوثيقه. 🔒 لا يمكن تعديله؛ يمكن حذفه وإضافة عنوان جديد فقط."
-        if lang == "ar" else
-        "✅ Address saved and verified. 🔒 It cannot be edited; delete it and add a new address to change it."
-    )
+    await message.answer("✅ تم حفظ العنوان وتوثيقه. 🔒 لا يمكن تعديله؛ يمكن حذفه وإضافة عنوان جديد فقط." if lang == "ar" else "✅ Address saved and verified. 🔒 It cannot be edited; delete it and add a new address to change it.")
 
 
 @router.callback_query(F.data.startswith("wallet_delete_"))
@@ -432,52 +494,35 @@ async def wallet_delete(callback: CallbackQuery):
     if not user:
         await callback.answer("❌ المستخدم غير موجود", show_alert=True)
         return
-
     lang = user["language"] or "ar"
     try:
         wallet_id = int(callback.data.rsplit("_", 1)[1])
     except (AttributeError, ValueError):
         await callback.answer("❌ عنوان غير صالح" if lang == "ar" else "❌ Invalid wallet", show_alert=True)
         return
-
     from database import get_pool
     pool = await get_pool()
     if pool is None:
         await callback.answer("❌ قاعدة البيانات غير متاحة حالياً", show_alert=True)
         return
-
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT id,address,network,label
-               FROM saved_addresses
+            """SELECT id,address,network,label FROM saved_addresses
               WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND verification_status='verified'""",
             wallet_id, user["id"],
         )
         if not row:
             await callback.answer("❌ العنوان غير موجود", show_alert=True)
             return
-
         active = await conn.fetchval(
-            """SELECT 1 FROM orders
-               WHERE user_id=$1 AND wallet_address=$2 AND network=$3
-                 AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
-               LIMIT 1""",
+            """SELECT 1 FROM orders WHERE user_id=$1 AND wallet_address=$2 AND network=$3
+                 AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed') LIMIT 1""",
             user["id"], row["address"], row["network"],
         )
         if active:
-            await callback.answer(
-                "❌ لا يمكن حذف عنوان مرتبط بطلب نشط."
-                if lang == "ar" else
-                "❌ This address is linked to an active order.",
-                show_alert=True,
-            )
+            await callback.answer("❌ لا يمكن حذف عنوان مرتبط بطلب نشط." if lang == "ar" else "❌ This address is linked to an active order.", show_alert=True)
             return
-
-        await conn.execute(
-            "DELETE FROM saved_addresses WHERE id=$1 AND user_id=$2",
-            wallet_id, user["id"],
-        )
-
+        await conn.execute("DELETE FROM saved_addresses WHERE id=$1 AND user_id=$2", wallet_id, user["id"])
     await callback.answer("تم حذف العنوان" if lang == "ar" else "Address deleted")
     await callback.message.edit_text(
         "👛 <b>محافظي</b>\n\nتم حذف العنوان. استخدم إضافة عنوان جديد لإضافة بديل."
@@ -494,9 +539,5 @@ async def wallet_back(callback: CallbackQuery, state: FSMContext):
     lang = (user["language"] or "ar") if user else "ar"
     await state.clear()
     from keyboards.inline import main_menu_inline
-    await callback.message.edit_text(
-        "🏠 <b>القائمة الرئيسية</b>" if lang == "ar" else "🏠 <b>Main menu</b>",
-        reply_markup=main_menu_inline(lang),
-        parse_mode="HTML",
-    )
+    await callback.message.edit_text("🏠 <b>القائمة الرئيسية</b>" if lang == "ar" else "🏠 <b>Main menu</b>", reply_markup=main_menu_inline(lang), parse_mode="HTML")
     await callback.answer()
