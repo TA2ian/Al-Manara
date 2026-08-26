@@ -15,6 +15,7 @@ from services.formatters import money, usdt
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
 from services.operational_policy_service import OperationalPolicyService
+from services.order_invoice_service import render_order_invoice
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
 from services.settings_service import SettingsService
 from states import OrderStates
@@ -58,9 +59,6 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await callback.answer("❌ لا يمكن إرسال الطلب قبل اكتمال متطلبات الحساب." if lang == "ar" else "❌ Your account requirements are not complete.", show_alert=True)
                 return
 
-            # Serialize confirmations for the same customer. The UI rate limiter is
-            # process-local, while this transaction-scoped PostgreSQL advisory lock
-            # protects the active-order invariant across concurrent workers/instances.
             await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user["id"]))
             active = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM orders WHERE user_id = $1 AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed'))", user["id"])
             if active:
@@ -142,18 +140,31 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"👤 المستخدم: @{username}\n💰 الكمية: {usdt(data['amount_usdt'])} USDT\n🌐 الشبكة: {wallet['network']}\n"
             f"💱 عملة الدفع: {currency}\n💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{wallet['address']}</code>\n\n"
-            + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع بعد الموافقة."))
+            + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
         for admin_id in Config.ADMIN_IDS:
             try:
                 await bot.send_message(admin_id, admin_text, reply_markup=order_admin_keyboard(order_id, admin_status), parse_mode="HTML")
             except Exception:
                 logger.exception("Failed to notify admin for order %s", order_id)
 
-        await callback.message.edit_text(locale_service.get("order_created", lang, order_number=order_number), parse_mode="HTML")
+        invoice = render_order_invoice(
+            order_number=order_number,
+            amount_usdt_value=data["amount_usdt"],
+            network=wallet["network"],
+            wallet=wallet["address"],
+            currency=currency,
+            exchange_rate_value=calculation["exchange_rate"],
+            base_amount_value=calculation["base_amount"],
+            fee_percent_value=calculation["fee_percent"],
+            fee_amount_value=calculation["fee_amount"],
+            total_value=calculation["total_amount"],
+            lang=lang,
+        )
+        await callback.message.edit_text(invoice, parse_mode="HTML")
         if auto_approved:
             status_message = await callback.message.answer("✅ تمت الموافقة تلقائياً لأن حسابك يحقق متطلبات العميل الموثوق. تم إرسال بيانات ShamCash الرسمية لك. أتمم الدفع ثم ارفع الإثبات." if lang == "ar" else "✅ Your order was automatically approved because your account meets the trusted-customer requirements. Official ShamCash payment details have been sent. Complete payment and upload the proof.", reply_markup=receipt_upload_keyboard(order_id, lang))
         else:
-            status_message = await callback.message.answer("⏳ تم إرسال طلبك إلى الإدارة للمراجعة. لا ترسل أي مبلغ الآن؛ ستصلك تعليمات الدفع الرسمية بعد الموافقة." if lang == "ar" else "⏳ Your order has been sent to the administration for review. Do not send any payment yet; official payment instructions will appear after approval.")
+            status_message = await callback.message.answer("⏳ تم إنشاء الطلب وإرساله إلى الإدارة للمراجعة. لا ترسل أي مبلغ الآن؛ ستصلك بيانات الدفع الرسمية بعد الموافقة." if lang == "ar" else "⏳ Your order has been created and sent to administration for review. Do not send any payment yet; official payment details will appear after approval.")
         try:
             async with pool.acquire() as conn:
                 await conn.execute("UPDATE orders SET customer_status_message_id = $1 WHERE id = $2", status_message.message_id, order_id)
