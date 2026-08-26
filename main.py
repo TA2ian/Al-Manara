@@ -16,7 +16,6 @@ from bot import create_dispatcher
 from keep_alive import keep_alive
 from services.maintenance_service import MaintenanceMode, MaintenanceService
 from services.order_state_service import transition_order, InvalidOrderTransition
-from services.fulfillment_claim_service import init_fulfillment_claims
 from services.formatters import usdt
 
 os.makedirs("logs", exist_ok=True)
@@ -106,7 +105,6 @@ async def on_startup(bot: Bot):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await install_receipt_retry_constraints(conn)
-    await init_fulfillment_claims()
     maintenance_mode = await MaintenanceService.get_mode()
     Config.set_maintenance_mode_sync(maintenance_mode in {MaintenanceMode.MAINTENANCE, MaintenanceMode.EMERGENCY})
     if maintenance_mode != MaintenanceMode.OFF:
