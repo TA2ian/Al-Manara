@@ -58,6 +58,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await callback.answer("❌ لا يمكن إرسال الطلب قبل اكتمال متطلبات الحساب." if lang == "ar" else "❌ Your account requirements are not complete.", show_alert=True)
                 return
 
+            # Serialize confirmations for the same customer. The UI rate limiter is
+            # process-local, while this transaction-scoped PostgreSQL advisory lock
+            # protects the active-order invariant across concurrent workers/instances.
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user["id"]))
             active = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM orders WHERE user_id = $1 AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed'))", user["id"])
             if active:
                 await callback.answer("⚠️ لديك طلب نشط بالفعل. افتح «طلباتي»." if lang == "ar" else "⚠️ You already have an active order. Open Orders.", show_alert=True)
