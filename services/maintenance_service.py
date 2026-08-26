@@ -1,16 +1,12 @@
 """Canonical maintenance state, operational policy, and customer notifications."""
 from __future__ import annotations
 
-import asyncio
-import logging
+from enum import StrEnum
 
 from aiogram import Bot
-from enum import StrEnum
 
 from database import get_pool
 from services.settings_service import SettingsService
-
-logger = logging.getLogger(__name__)
 
 
 class MaintenanceMode(StrEnum):
@@ -21,12 +17,11 @@ class MaintenanceMode(StrEnum):
 
 
 class MaintenanceService:
-    """Own database-backed maintenance state and customer notification policy."""
+    """Own database-backed maintenance state and durable customer notification jobs."""
 
     SETTING_KEY = "maintenance_mode"
     VALID_MODES = {mode.value for mode in MaintenanceMode}
     LOCK_KEY = "al-manara:maintenance-mode"
-    NOTIFICATION_DELAY_SECONDS = 0.05
 
     @classmethod
     def _parse_mode(cls, raw: str | None) -> MaintenanceMode:
@@ -48,7 +43,7 @@ class MaintenanceService:
 
     @classmethod
     async def set_mode(cls, mode: MaintenanceMode, admin_id: int | None = None) -> MaintenanceMode:
-        """Atomically change the mode and audit an administrative transition."""
+        """Atomically change mode, audit it, and enqueue one notification per eligible customer."""
         target = MaintenanceMode(mode)
         pool = await get_pool()
         if not pool:
@@ -62,11 +57,13 @@ class MaintenanceService:
                 current = cls._parse_mode(str(current_raw) if current_raw is not None else None)
                 if current == target:
                     return current
+
                 await conn.execute(
                     """INSERT INTO bot_settings (key, value) VALUES ($1, $2)
                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
                     cls.SETTING_KEY, target.value,
                 )
+
                 if admin_id is not None:
                     severity = "critical" if target == MaintenanceMode.EMERGENCY else "warning" if target != MaintenanceMode.OFF else "info"
                     await conn.execute(
@@ -76,6 +73,21 @@ class MaintenanceService:
                         f"Maintenance mode changed from {current.value} to {target.value}",
                         target.value, severity,
                     )
+
+                users = await conn.fetch(
+                    """SELECT u.telegram_id, EXISTS (
+                           SELECT 1 FROM orders o WHERE o.user_id = u.id
+                           AND o.status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
+                       ) AS has_active_order
+                       FROM users u
+                       WHERE u.terms_accepted = TRUE AND u.is_blocked = FALSE AND u.telegram_id IS NOT NULL"""
+                )
+                await conn.executemany(
+                    """INSERT INTO maintenance_notification_jobs
+                       (telegram_id, mode, has_active_order)
+                       VALUES ($1, $2, $3)""",
+                    [(int(user["telegram_id"]), target.value, bool(user["has_active_order"])) for user in users],
+                )
         return target
 
     @classmethod
@@ -106,33 +118,61 @@ class MaintenanceService:
         return ""
 
     @classmethod
-    async def notify_customers(cls, bot: Bot, mode: MaintenanceMode) -> dict[str, int]:
-        """Notify eligible customers after a committed maintenance transition."""
-        target = MaintenanceMode(mode)
+    async def notification_stats(cls, mode: MaintenanceMode) -> dict[str, int]:
         pool = await get_pool()
         if not pool:
-            return {"sent": 0, "failed": 0, "total": 0}
+            return {"queued": 0, "sent": 0, "failed": 0}
         async with pool.acquire() as conn:
-            users = await conn.fetch(
-                """SELECT u.telegram_id, u.language, EXISTS (
-                       SELECT 1 FROM orders o WHERE o.user_id = u.id
-                       AND o.status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
-                   ) AS has_active_order
-                   FROM users u
-                   WHERE u.terms_accepted = TRUE AND u.is_blocked = FALSE AND u.telegram_id IS NOT NULL
-                   ORDER BY u.id"""
+            rows = await conn.fetchrow(
+                """SELECT
+                     COUNT(*) FILTER (WHERE status = 'pending') AS queued,
+                     COUNT(*) FILTER (WHERE status = 'sent') AS sent,
+                     COUNT(*) FILTER (WHERE status = 'failed') AS failed
+                   FROM maintenance_notification_jobs WHERE mode = $1""",
+                MaintenanceMode(mode).value,
             )
-        sent = failed = 0
-        for user in users:
-            lang = user["language"] if user["language"] in ("ar", "en") else "ar"
-            text = cls.user_notice(target, lang, has_active_order=bool(user["has_active_order"]))
-            if not text:
-                continue
+        return {key: int(rows[key] or 0) for key in ("queued", "sent", "failed")}
+
+    @classmethod
+    async def process_notification_jobs(cls, bot: Bot, batch_size: int = 50) -> int:
+        """Claim and deliver a bounded notification batch; safe across multiple workers."""
+        pool = await get_pool()
+        if not pool:
+            return 0
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                jobs = await conn.fetch(
+                    """WITH claimed AS (
+                           SELECT id FROM maintenance_notification_jobs
+                           WHERE status = 'pending' AND available_at <= NOW()
+                           ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1
+                       )
+                       UPDATE maintenance_notification_jobs j
+                       SET status = 'processing', locked_at = NOW(), attempts = attempts + 1
+                       FROM claimed c WHERE j.id = c.id
+                       RETURNING j.id, j.telegram_id, j.mode, j.has_active_order""",
+                    batch_size,
+                )
+        processed = 0
+        for job in jobs:
             try:
-                await bot.send_message(user["telegram_id"], text, parse_mode="HTML")
-                sent += 1
-            except Exception:
-                failed += 1
-                logger.warning("Maintenance notification failed for telegram_id=%s", user["telegram_id"], exc_info=True)
-            await asyncio.sleep(cls.NOTIFICATION_DELAY_SECONDS)
-        return {"sent": sent, "failed": failed, "total": len(users)}
+                user_lang = "ar"
+                async with pool.acquire() as conn:
+                    stored = await conn.fetchval("SELECT language FROM users WHERE telegram_id = $1", job["telegram_id"])
+                if stored in ("ar", "en"):
+                    user_lang = stored
+                await bot.send_message(job["telegram_id"], cls.user_notice(MaintenanceMode(job["mode"]), user_lang, has_active_order=job["has_active_order"]), parse_mode="HTML")
+            except Exception as exc:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """UPDATE maintenance_notification_jobs
+                           SET status = CASE WHEN attempts >= 5 THEN 'failed' ELSE 'pending' END,
+                               available_at = NOW() + CASE WHEN attempts >= 5 THEN INTERVAL '0 seconds' ELSE INTERVAL '2 minutes' END,
+                               last_error = $2 WHERE id = $1""",
+                        job["id"], str(exc)[:1000],
+                    )
+            else:
+                async with pool.acquire() as conn:
+                    await conn.execute("UPDATE maintenance_notification_jobs SET status = 'sent', sent_at = NOW(), last_error = NULL WHERE id = $1", job["id"])
+            processed += 1
+        return processed
