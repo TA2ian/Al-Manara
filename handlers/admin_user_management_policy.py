@@ -34,28 +34,9 @@ async def _fetch_users():
     async with pool.acquire() as conn:
         return await conn.fetch(
             "SELECT telegram_id, full_name, username, language, is_verified, is_blocked, created_at "
-            "FROM users WHERE terms_accepted = TRUE AND is_blocked = FALSE "
-            "ORDER BY full_name ASC NULLS LAST"
+            "FROM users WHERE terms_accepted = TRUE "
+            "ORDER BY is_blocked ASC, full_name ASC NULLS LAST"
         )
-
-
-@router.callback_query(F.data == "admin_list_users")
-async def admin_list_users(callback: CallbackQuery):
-    """List active users with explicit per-row deletion access."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-
-    users = await _fetch_users()
-    if not users:
-        await callback.message.edit_text("📭 لا يوجد عملاء مسجلون.", parse_mode="HTML")
-        await callback.answer()
-        return
-
-    page_size = 15
-    total_pages = (len(users) + page_size - 1) // page_size
-    await _render_user_page(callback, users, 0, total_pages, page_size)
-    await callback.answer()
 
 
 async def _render_user_page(callback: CallbackQuery, users, page: int, total_pages: int, page_size: int):
@@ -69,16 +50,23 @@ async def _render_user_page(callback: CallbackQuery, users, page: int, total_pag
         name = html.escape(user["full_name"] or "—")
         username = html.escape(user["username"] or "—")
         verified = "✅" if user["is_verified"] else "⏳"
+        blocked = "🚫" if user["is_blocked"] else "🟢"
         lang_flag = "🇸🇦" if user["language"] == "ar" else "🇬🇧"
         lines.append(
-            f"{i}. {verified} <b>{name}</b>\n"
+            f"{i}. {verified} {blocked} <b>{name}</b>\n"
             f"   🆔 <code>{user['telegram_id']}</code> | @{username} | {lang_flag}"
         )
+        action = "admin_unban_" if user["is_blocked"] else "admin_ban_"
+        action_text = "فك الحظر" if user["is_blocked"] else "حظر"
         buttons.append([
             InlineKeyboardButton(
-                text=f"🗑️ حذف {name[:24]}",
+                text=f"{action_text} {name[:20]}",
+                callback_data=f"{action}{user['telegram_id']}",
+            ),
+            InlineKeyboardButton(
+                text=f"🗑️ حذف {name[:18]}",
                 callback_data=f"admin_del_user_{user['telegram_id']}",
-            )
+            ),
         ])
 
     if total_pages > 1:
@@ -96,13 +84,32 @@ async def _render_user_page(callback: CallbackQuery, users, page: int, total_pag
     text = (
         f"📍 <b>قائمة العملاء</b> ({len(users)})\n"
         "━━━━━━━━━━━━━━━━━━\n" + "\n".join(lines) + "\n\n"
-        "يمكن حذف أي عميل من القائمة بعد تأكيد مستقل."
+        "يمكن حظر أو فك حظر أو حذف أي عميل من القائمة بعد التأكيد."
     )
     await callback.message.edit_text(
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         parse_mode="HTML",
     )
+
+
+@router.callback_query(F.data == "admin_list_users")
+async def admin_list_users(callback: CallbackQuery):
+    """List all registered customers with explicit per-row actions."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+
+    users = await _fetch_users()
+    if not users:
+        await callback.message.edit_text("📭 لا يوجد عملاء مسجلون.", parse_mode="HTML")
+        await callback.answer()
+        return
+
+    page_size = 15
+    total_pages = (len(users) + page_size - 1) // page_size
+    await _render_user_page(callback, users, 0, total_pages, page_size)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("users_page_"))
@@ -170,9 +177,17 @@ async def admin_ban_user_execute(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    telegram_id = int(callback.data.replace("admin_ban_confirm_", ""))
+    try:
+        telegram_id = int(callback.data.replace("admin_ban_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ معرف غير صالح", show_alert=True)
+        return
     pool = await get_pool()
     async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id FROM users WHERE telegram_id = $1", telegram_id)
+        if not user:
+            await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+            return
         await conn.execute("UPDATE users SET is_blocked = TRUE WHERE telegram_id = $1", telegram_id)
         await conn.execute(
             "INSERT INTO blocked_users (telegram_id, blocked_by) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -193,7 +208,11 @@ async def admin_unban_user(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    telegram_id = int(callback.data.replace("admin_unban_", ""))
+    try:
+        telegram_id = int(callback.data.replace("admin_unban_", ""))
+    except ValueError:
+        await callback.answer("❌ معرف غير صالح", show_alert=True)
+        return
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -227,10 +246,19 @@ async def admin_unban_user_execute(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    telegram_id = int(callback.data.replace("admin_unban_confirm_", ""))
+    try:
+        telegram_id = int(callback.data.replace("admin_unban_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ معرف غير صالح", show_alert=True)
+        return
     pool = await get_pool()
     async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id FROM users WHERE telegram_id = $1", telegram_id)
+        if not user:
+            await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+            return
         await conn.execute("UPDATE users SET is_blocked = FALSE WHERE telegram_id = $1", telegram_id)
+        await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
     await callback.message.edit_text(
         f"✅ <b>تم فك الحظر عن المستخدم</b>\n🆔 <code>{telegram_id}</code>",
         parse_mode="HTML",
@@ -264,8 +292,9 @@ async def admin_del_user(callback: CallbackQuery):
         f"👤 {html.escape(user['full_name'] or 'N/A')}\n"
         f"🆔 <code>{telegram_id}</code>\n\n"
         "⚠️ <b>تحذير:</b> سيتم حذف جميع بيانات هذا المستخدم نهائياً:\n"
-        "• بيانات الحساب\n• جميع الطلبات\n• العناوين المحفوظة\n• سجل الحظر والملاحظات\n\n"
-        "🚫 <b>هذا الإجراء لا يمكن التراجع عنه.</b>",
+        "• بيانات الحساب\n• جميع الطلبات\n• العناوين المحفوظة\n• سجل المخالفات المرتبط بالحساب\n• سجل الحظر\n\n"
+        "🚫 <b>هذا الإجراء لا يمكن التراجع عنه.</b>\n"
+        "إذا كان للعميل طلب نشط، يجب إنهاء الطلب أولاً.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🗑️ تأكيد الحذف", callback_data=f"admin_del_confirm_{telegram_id}"),
@@ -287,33 +316,57 @@ async def admin_del_user_execute(callback: CallbackQuery):
         await callback.answer("❌ معرف غير صالح", show_alert=True)
         return
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            user = await conn.fetchrow(
-                "SELECT id, telegram_id, full_name, language FROM users WHERE telegram_id = $1 FOR UPDATE",
-                telegram_id,
-            )
-            if not user:
-                await callback.answer("❌ المستخدم غير موجود", show_alert=True)
-                return
+    order_count = 0
+    addr_count = 0
+    lang = "ar"
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                user = await conn.fetchrow(
+                    "SELECT id, telegram_id, full_name, language FROM users WHERE telegram_id = $1 FOR UPDATE",
+                    telegram_id,
+                )
+                if not user:
+                    await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+                    return
 
-            user_id = user["id"]
-            lang = user["language"] or "ar"
-            order_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", user_id)
-            addr_count = await conn.fetchval("SELECT COUNT(*) FROM saved_addresses WHERE user_id = $1", user_id)
+                user_id = user["id"]
+                lang = user["language"] or "ar"
+                order_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", user_id)
+                addr_count = await conn.fetchval("SELECT COUNT(*) FROM saved_addresses WHERE user_id = $1", user_id)
+                active_order = await conn.fetchrow(
+                    "SELECT order_number FROM orders WHERE user_id = $1 "
+                    "AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed') "
+                    "ORDER BY id DESC LIMIT 1",
+                    user_id,
+                )
+                if active_order:
+                    await callback.answer(
+                        f"❌ لا يمكن حذف العميل الآن: الطلب النشط #{active_order['order_number']} يجب إنهاؤه أولاً.",
+                        show_alert=True,
+                    )
+                    return
 
-            await conn.execute("DELETE FROM orders WHERE user_id = $1", user_id)
-            await conn.execute("DELETE FROM saved_addresses WHERE user_id = $1", user_id)
-            await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
-            await conn.execute("DELETE FROM feedback_messages WHERE user_id = $1", user_id)
-            await conn.execute("DELETE FROM audit_logs WHERE user_id = $1", user_id)
-            await conn.execute("DELETE FROM users WHERE id = $1", user_id)
-            await conn.execute(
-                "INSERT INTO audit_logs (user_id, admin_id, action, details, severity) "
-                "VALUES (NULL, $1, 'user_deleted', $2, 'warning')",
-                callback.from_user.id,
-                f"Deleted user {user['full_name'] or 'N/A'} (tg:{telegram_id}). Orders: {order_count}, Addresses: {addr_count}",
-            )
+                await conn.execute("DELETE FROM misconduct_incidents WHERE user_id = $1", user_id)
+                await conn.execute("DELETE FROM orders WHERE user_id = $1", user_id)
+                await conn.execute("DELETE FROM saved_addresses WHERE user_id = $1", user_id)
+                await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
+                await conn.execute("DELETE FROM feedback_messages WHERE user_id = $1", user_id)
+                await conn.execute("DELETE FROM audit_logs WHERE user_id = $1", user_id)
+                await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+                await conn.execute(
+                    "INSERT INTO audit_logs (user_id, admin_id, action, details, severity) "
+                    "VALUES (NULL, $1, 'user_deleted', $2, 'warning')",
+                    callback.from_user.id,
+                    f"Deleted user {user['full_name'] or 'N/A'} (tg:{telegram_id}). Orders: {order_count}, Addresses: {addr_count}",
+                )
+    except Exception as exc:
+        logger.exception("Failed to delete user %s", telegram_id)
+        await callback.answer(
+            "❌ تعذر حذف العميل. لم يتم تطبيق أي جزء من عملية الحذف. تحقق من وجود بيانات مرتبطة أو طلب نشط.",
+            show_alert=True,
+        )
+        return
 
     try:
         from aiogram import Bot
