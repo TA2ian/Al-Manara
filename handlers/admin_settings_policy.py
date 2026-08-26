@@ -1,10 +1,5 @@
-"""Authoritative operational admin settings.
-
-Exchange rate is owned by ``admin_rate_policy`` and ShamCash payment setup is
-owned by ``payment_method_setup_policy``. This module contains only operational
-settings that have one runtime authority.
-"""
-from decimal import Decimal, InvalidOperation
+"""Authoritative operational admin settings."""
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -13,7 +8,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from keyboards.admin import enhanced_admin_menu_keyboard
 from keyboards.inline import settings_keyboard
-from services.settings_service import SettingsService
+from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService
 from states import AdminStates
 
 router = Router()
@@ -36,27 +31,10 @@ async def _show_settings(callback: CallbackQuery, state: FSMContext | None = Non
         await state.clear()
     await callback.message.edit_text(
         "⚙️ <b>الإعدادات التشغيلية</b>\n\n"
-        "سعر الصرف ووسائل الدفع لهما لوحات مستقلة لتجنب تكرار مسارات الإعداد.",
+        "هذه الإعدادات تؤثر على الطلبات الجديدة فقط. الرسوم والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
         reply_markup=settings_keyboard(),
         parse_mode="HTML",
     )
-
-
-async def _get_decimal_setting(key: str, fallback: float | int) -> Decimal:
-    raw = await SettingsService.get(key, str(fallback))
-    try:
-        return Decimal(str(raw))
-    except (InvalidOperation, TypeError, ValueError):
-        return Decimal(str(fallback))
-
-
-async def _get_timeout_setting() -> int:
-    raw = await SettingsService.get("payment_timeout_minutes", str(Config.PAYMENT_TIMEOUT))
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = Config.PAYMENT_TIMEOUT
-    return max(1, min(value, 1440))
 
 
 @router.callback_query(F.data == "admin_settings")
@@ -82,10 +60,12 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    fee_percent = await _get_decimal_setting("service_fee_percent", Config.SERVICE_FEE_PERCENT)
+    fee_percent = await OperationalPolicyService.get_fee_percent()
     await callback.message.edit_text(
         "💰 <b>رسوم الخدمة</b>\n\n"
-        f"النسبة الحالية: <b>{fee_percent:g}%</b>\n\nأرسل نسبة الرسوم الجديدة من 0 إلى 100.\nتُطبق على عروض الأسعار الجديدة فقط.",
+        f"النسبة الحالية: <b>{fee_percent:g}%</b>\n\n"
+        "أرسل نسبة الرسوم الجديدة من 0 إلى 100.\n"
+        "سيتم استخدامها في عروض الأسعار والطلبات الجديدة، بينما تبقى الرسوم المثبتة في الطلبات السابقة دون تغيير.",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_fee_percent)
@@ -100,15 +80,12 @@ async def admin_set_fee_percent(message: Message, state: FSMContext) -> None:
         return
     try:
         value = Decimal((message.text or "").strip().replace(",", ""))
-    except (InvalidOperation, ValueError):
+        saved = await OperationalPolicyService.set_fee_percent(value, message.from_user.id)
+    except (OperationalPolicyError, ValueError):
         await message.answer("❌ قيمة غير صالحة. أرسل نسبة بين 0 و100.")
         return
-    if value < 0 or value > 100:
-        await message.answer("❌ قيمة غير صالحة. أرسل نسبة بين 0 و100.")
-        return
-    await SettingsService.set("service_fee_percent", str(value))
     await state.clear()
-    await message.answer(f"✅ تم تحديث رسوم الخدمة إلى <b>{value:g}%</b>.", parse_mode="HTML")
+    await message.answer(f"✅ تم تحديث رسوم الخدمة إلى <b>{saved:g}%</b>.", parse_mode="HTML")
     await _back_to_admin(message)
 
 
@@ -117,10 +94,12 @@ async def setting_timeout(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    timeout = await _get_timeout_setting()
+    timeout = await OperationalPolicyService.get_payment_timeout_minutes()
     await callback.message.edit_text(
         "⏱ <b>مهلة الدفع</b>\n\n"
-        f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\nأرسل المهلة الجديدة بالدقائق (من 1 إلى 1440).\nسيتم تطبيقها على الطلبات الجديدة فقط.",
+        f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\n"
+        "أرسل المهلة الجديدة بالدقائق من 1 إلى 1440.\n"
+        "تُطبق عند اعتماد الطلبات الجديدة ولا تغيّر المهل المثبتة للطلبات القائمة.",
         parse_mode="HTML",
     )
     await state.set_state(AdminStates.waiting_timeout)
@@ -134,16 +113,12 @@ async def admin_set_timeout(message: Message, state: FSMContext) -> None:
         await message.answer("⛔ Access denied")
         return
     try:
-        value = int((message.text or "").strip())
-    except ValueError:
+        saved = await OperationalPolicyService.set_payment_timeout(message.text or "", message.from_user.id)
+    except OperationalPolicyError:
         await message.answer("❌ قيمة غير صالحة. أرسل عدداً صحيحاً من 1 إلى 1440.")
         return
-    if value < 1 or value > 1440:
-        await message.answer("❌ قيمة غير صالحة. أرسل عدداً صحيحاً من 1 إلى 1440.")
-        return
-    await SettingsService.set("payment_timeout_minutes", str(value))
     await state.clear()
-    await message.answer(f"✅ تم تحديث مهلة الدفع إلى <b>{value} دقيقة</b>.", parse_mode="HTML")
+    await message.answer(f"✅ تم تحديث مهلة الدفع إلى <b>{saved} دقيقة</b>.", parse_mode="HTML")
     await _back_to_admin(message)
 
 
@@ -152,9 +127,7 @@ async def setting_limits(callback: CallbackQuery) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
-    maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
-    daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
+    limits = await OperationalPolicyService.get_limits()
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬇️ الحد الأدنى", callback_data="setting_limit_min"), InlineKeyboardButton(text="⬆️ الحد الأقصى", callback_data="setting_limit_max")],
         [InlineKeyboardButton(text="📅 الحد اليومي", callback_data="setting_limit_daily")],
@@ -162,19 +135,18 @@ async def setting_limits(callback: CallbackQuery) -> None:
     ])
     await callback.message.edit_text(
         "📊 <b>حدود الطلبات</b>\n\n"
-        f"🔹 الحد الأدنى: <b>{minimum:g} USDT</b>\n"
-        f"🔹 الحد الأقصى: <b>{maximum:g} USDT</b>\n"
-        f"🔹 الحد اليومي للعميل: <b>{daily:g} USDT</b>\n\nاختر الحد الذي تريد تعديله:",
+        f"🔹 الحد الأدنى: <b>{limits['min_order']:g} USDT</b>\n"
+        f"🔹 الحد الأقصى: <b>{limits['max_order']:g} USDT</b>\n"
+        f"🔹 الحد اليومي للعميل: <b>{limits['daily_limit']:g} USDT</b>\n\n"
+        "يجب دائماً أن يكون: الحد الأدنى ≤ الحد الأقصى ≤ الحد اليومي.",
         reply_markup=keyboard, parse_mode="HTML",
     )
     await callback.answer()
 
 
 async def _prompt_limit(callback: CallbackQuery, state: FSMContext, kind: str, title: str, state_name) -> None:
-    minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
-    maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
-    daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
-    current = {"min": minimum, "max": maximum, "daily": daily}[kind]
+    limits = await OperationalPolicyService.get_limits()
+    current = limits[kind if kind != "min" else "min_order"] if kind in {"min_order", "max_order", "daily_limit"} else {"min": limits["min_order"], "max": limits["max_order"], "daily": limits["daily_limit"]}[kind]
     await callback.message.edit_text(
         f"📊 <b>{title}</b>\n\nالقيمة الحالية: <b>{current:g} USDT</b>\n\nأرسل القيمة الجديدة.",
         parse_mode="HTML",
@@ -209,45 +181,35 @@ async def setting_limit_daily(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
 
 
-async def _save_limit(message: Message, state: FSMContext, key: str, label: str, minimum: Decimal | None = None, maximum: Decimal | None = None) -> None:
+async def _save_limit(message: Message, state: FSMContext, key: str, label: str) -> None:
     if not is_admin(message.from_user.id):
         await state.clear()
         await message.answer("⛔ Access denied")
         return
     try:
-        value = Decimal((message.text or "").strip().replace(",", ""))
-    except (InvalidOperation, ValueError):
-        await message.answer("❌ قيمة غير صالحة. أرسل رقماً أكبر من صفر.")
+        saved = await OperationalPolicyService.set_limit(key, message.text or "", message.from_user.id)
+    except OperationalPolicyError as exc:
+        messages = {
+            "Minimum order cannot be below maximum order": "❌ الحد الأدنى لا يمكن أن يتجاوز الحد الأقصى الحالي.",
+            "Daily limit cannot be below maximum order": "❌ الحد اليومي يجب أن يكون أكبر من أو يساوي الحد الأقصى للطلب.",
+        }
+        await message.answer(messages.get(str(exc), "❌ القيمة غير صالحة. راجع الحدود الحالية ثم أرسل قيمة متوافقة."))
         return
-    if value <= 0:
-        await message.answer("❌ القيمة يجب أن تكون أكبر من صفر.")
-        return
-    if minimum is not None and value < minimum:
-        await message.answer(f"❌ {label} يجب ألا يقل عن {minimum:g} USDT.")
-        return
-    if maximum is not None and value > maximum:
-        await message.answer(f"❌ {label} يجب ألا يتجاوز {maximum:g} USDT.")
-        return
-    await SettingsService.set(key, str(value))
     await state.clear()
-    await message.answer(f"✅ تم تحديث {label} إلى <b>{value:g} USDT</b>.", parse_mode="HTML")
+    await message.answer(f"✅ تم تحديث {label} إلى <b>{saved:g} USDT</b>.", parse_mode="HTML")
     await _back_to_admin(message)
 
 
 @router.message(AdminStates.waiting_min_order)
 async def admin_set_min_order(message: Message, state: FSMContext) -> None:
-    maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
-    await _save_limit(message, state, "min_order", "الحد الأدنى للطلب", maximum=maximum)
+    await _save_limit(message, state, "min_order", "الحد الأدنى للطلب")
 
 
 @router.message(AdminStates.waiting_max_order)
 async def admin_set_max_order(message: Message, state: FSMContext) -> None:
-    minimum = await _get_decimal_setting("min_order", Config.MIN_ORDER)
-    daily = await _get_decimal_setting("daily_limit", Config.DAILY_LIMIT)
-    await _save_limit(message, state, "max_order", "الحد الأقصى للطلب", minimum=minimum, maximum=daily)
+    await _save_limit(message, state, "max_order", "الحد الأقصى للطلب")
 
 
 @router.message(AdminStates.waiting_daily_limit)
 async def admin_set_daily_limit(message: Message, state: FSMContext) -> None:
-    maximum = await _get_decimal_setting("max_order", Config.MAX_ORDER)
-    await _save_limit(message, state, "daily_limit", "الحد اليومي للعميل", minimum=maximum)
+    await _save_limit(message, state, "daily_limit", "الحد اليومي للعميل")
