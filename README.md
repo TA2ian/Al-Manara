@@ -1,81 +1,62 @@
-# Crypto Top-Up Telegram Bot
+# Al-Manara Telegram Bot
 
-Enterprise-grade Telegram bot for USDT top-up services.
+Telegram bot for Al-Manara USDT purchase and top-up services.
 
-## Features
+## Core capabilities
 
-- ✅ BEP20 & TRC20 support
-- ✅ Multi-language (Arabic/English)
-- ✅ User verification system
-- ✅ Dual currency (USD/SYP)
-- ✅ Order tracking with visual timeline
-- ✅ Admin panel with dashboard
-- ✅ Rate limiting & anti-abuse
-- ✅ Audit logging
-- ✅ Encrypted backups
-- ✅ Webhook support
-- ✅ PostgreSQL database
+- USDT purchase flows with supported networks and currencies
+- Arabic/English user experience
+- Account and wallet verification
+- Saved-wallet and QR validation
+- Sequential order creation and lifecycle controls
+- ShamCash payment methods with admin setup and validation
+- Customer and admin dashboards
+- Rate limiting and anti-abuse controls
+- Audit logging
+- PostgreSQL persistence
 
-## Quick Start
-
-### 1. Clone and Setup
-
-```bash
-git clone <your-repo>
-cd crypto-topup-bot
-cp .env.example .env
-# Edit .env with your values
-```
-
-### 2. Local Development
+## Local development
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-### 3. Deploy on Render
+Copy `.env.example` to `.env` and provide the required runtime configuration.
 
-1. Fork this repository to GitHub
-2. Create new Web Service on Render
-3. Connect your GitHub repository
-4. Add environment variables
-5. Deploy!
+## Runtime architecture
 
-### Environment Variables
-
-```env
-BOT_TOKEN=your_bot_token_from_BotFather
-ADMIN_IDS=your_telegram_id,another_admin_id
-DATABASE_URL=postgresql://...
-WEBHOOK_HOST=https://your-bot.onrender.com
-SECRET_TOKEN=random_secret_string
-ENCRYPTION_KEY=32_character_encryption_key
+```text
+main.py              Application entry point
+bot.py               Dispatcher and router registration
+config.py            Runtime configuration
+database.py          PostgreSQL access
+database_order_constraints.py
+                     Database-level order invariants
+handlers/            Customer, verification, order and admin flows
+services/            Business and policy services
+keyboards/           Inline and reply keyboard definitions
+middleware/          Cross-cutting middleware
+security/            Security helpers
+locales/             User-facing translations
+scripts/              Operational utilities
+tests/               Regression and architecture gates
 ```
 
-## Commands
+## Data and infrastructure
 
-- `/start` - Start bot and accept terms
-- `/admin` - Admin panel (admins only)
+Al-Manara uses PostgreSQL as its runtime database through `DATABASE_URL`.
+Supabase is not a runtime dependency and is not required for application operation.
 
-## Architecture
+## Important operational rules
 
-```
-crypto-topup-bot/
-├── main.py              # Entry point
-├── config.py            # Configuration
-├── bot.py               # Bot & dispatcher setup
-├── database.py          # PostgreSQL connection
-├── states.py            # FSM states
-├── handlers/            # Message handlers
-├── services/            # Business logic
-├── keyboards/           # UI keyboards
-├── middleware/          # Rate limit, maintenance
-├── security/            # Encryption
-├── locales/             # Translations
-└── scripts/             # Utilities
-```
+- Customer and admin navigation are isolated.
+- Dashboard reply keyboards are shown only at dashboard boundaries and removed during multi-step flows.
+- New users must accept the required onboarding terms before order creation.
+- Full legal terms remain available after registration through the Legal Center.
+- Wallet, QR, payment and order data are validated before an order is created and protected by database-level invariants where applicable.
+- Administrative actions require explicit admin authorization.
 
-## License
+## Release verification
 
-MIT
+The project is not considered release-ready until the full CI/release verification suite passes, including router integrity, wallet and order lifecycle guards, payment/receipt transitions, currency/rate flows, and functional regression tests.
