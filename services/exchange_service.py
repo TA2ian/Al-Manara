@@ -11,7 +11,6 @@ OLD_SYP_PER_NEW_SYP = Decimal("100")
 
 
 def to_decimal(value, default: str = "0") -> Decimal:
-    """Convert numeric input through its string representation to avoid float artifacts."""
     if isinstance(value, Decimal):
         return value
     try:
@@ -31,10 +30,8 @@ class ExchangeService:
         self._cache_time = None
 
     async def get_current_rate(self) -> Optional[Decimal]:
-        """Return the canonical USD/NEW.SYP rate; convert only explicitly legacy rows."""
         if self._cache_time and (datetime.now() - self._cache_time).total_seconds() < 3600:
             return self._cache.get("rate")
-
         async with self._db.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT rate, COALESCE(rate_currency, 'NEW.SYP') AS rate_currency "
@@ -42,7 +39,6 @@ class ExchangeService:
             )
             if not row:
                 return None
-
             rate = to_decimal(row["rate"])
             currency = (row["rate_currency"] or "NEW.SYP").upper()
             if currency == "SYP":
@@ -50,7 +46,6 @@ class ExchangeService:
             elif currency != "NEW.SYP":
                 logger.error("Unsupported exchange-rate currency in DB: %s", currency)
                 return None
-
             if rate <= 0:
                 return None
             self._cache["rate"] = rate
@@ -58,7 +53,6 @@ class ExchangeService:
             return rate
 
     async def update_rate(self, rate, admin_id: int) -> bool:
-        """Persist a canonical USD/NEW.SYP rate for future quotes."""
         try:
             value = to_decimal(rate)
             if value <= 0:
@@ -67,8 +61,7 @@ class ExchangeService:
             async with self._db.acquire() as conn:
                 await conn.execute(
                     "INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)",
-                    value,
-                    admin_id,
+                    value, admin_id,
                 )
             self._cache = {}
             self._cache_time = None
@@ -79,11 +72,9 @@ class ExchangeService:
 
     @staticmethod
     def old_syp_equivalent(new_syp_amount) -> Decimal:
-        """Return the legacy SYP display equivalent; never use it for payment calculations."""
         return (to_decimal(new_syp_amount) * OLD_SYP_PER_NEW_SYP).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
     async def calculate_order(self, amount_usdt, currency: str) -> dict:
-        """Create a quote using the current rate exactly once."""
         if currency == "SYP":
             currency = "NEW.SYP"
         amount = to_decimal(amount_usdt)
@@ -101,17 +92,8 @@ class ExchangeService:
         else:
             base_amount = (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
-        from config import Config
-        try:
-            from services.settings_service import SettingsService
-            stored_fee = await SettingsService.get("service_fee_percent", str(Config.SERVICE_FEE_PERCENT))
-            fee_percent = to_decimal(stored_fee, str(Config.SERVICE_FEE_PERCENT))
-        except Exception:
-            fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
-
-        if fee_percent < 0 or fee_percent > 100:
-            fee_percent = to_decimal(Config.SERVICE_FEE_PERCENT)
-
+        from services.operational_policy_service import OperationalPolicyService
+        fee_percent = await OperationalPolicyService.get_fee_percent()
         fee_amount = (base_amount * fee_percent / Decimal("100")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         total = (base_amount + fee_amount).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
