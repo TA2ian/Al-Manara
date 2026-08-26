@@ -17,7 +17,8 @@ def test_legal_navigation_exposes_all_canonical_sections():
     assert 'callback_data=f"legal_section_{index + 1}"' in source
     assert 'callback_data=f"legal_section_{index}"' in source
     assert 'callback_data=f"legal_section_{index + 2}"' in source
-    assert 'r"^legal_section_[1-6]$"' in source
+    assert 'r"^legal_section_[1-7]$"' in source
+    assert len(source.split('"legal_section_')) >= 2
     assert "الشروط والسياسات" in source
     assert "Terms & Policies" in source
 
