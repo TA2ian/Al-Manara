@@ -8,12 +8,11 @@ from handlers import admin_search_policy, admin_user_management_policy
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_customer_list_has_no_per_row_destructive_actions():
+def test_customer_list_exposes_confirmed_delete_per_row():
     source = inspect.getsource(admin_user_management_policy._render_user_page)
-    assert "admin_del_user_" not in source
-    assert "admin_ban_" not in source
-    assert "admin_unban_" not in source
-    assert 'callback_data="admin_search_user"' in source
+    assert "admin_del_user_" in source
+    assert "callback_data=f\"admin_del_user_{user['telegram_id']}\"" in source
+    assert "يمكن حذف أي عميل من القائمة" in source
 
 
 def test_customer_search_has_single_match_actions_and_multi_match_guard():
@@ -28,6 +27,15 @@ def test_customer_action_keyboard_contains_delete_only_after_search():
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert "admin_del_user_123456" in callbacks
     assert "admin_ban_123456" in callbacks
+
+
+def test_customer_delete_handler_requires_confirmation_and_is_transactional():
+    source = (ROOT / "handlers/admin_user_management_policy.py").read_text(encoding="utf-8")
+    assert 'F.data.startswith("admin_del_user_")' in source
+    assert 'F.data.startswith("admin_del_confirm_")' in source
+    assert "async with conn.transaction():" in source
+    assert "DELETE FROM users WHERE id = $1" in source
+    assert "user_deleted" in source
 
 
 def test_customer_mutation_results_do_not_push_a_second_dashboard_message():
