@@ -1,7 +1,11 @@
+from pathlib import Path
+
 from keyboards.admin_messaging import message_template_keyboard, personal_message_preview_keyboard
 from keyboards.maintenance import maintenance_confirm_keyboard, maintenance_mode_keyboard
 from services.admin_message_service import TEMPLATES, render_template
 from services.maintenance_service import MaintenanceMode, MaintenanceService
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _callbacks(markup):
@@ -57,3 +61,19 @@ def test_maintenance_notice_is_localized():
     en = MaintenanceService.user_notice(MaintenanceMode.MAINTENANCE, "en")
     assert "وضع الصيانة" in ar
     assert "under maintenance" in en
+
+
+def test_maintenance_state_is_database_authoritative_and_transition_is_atomic():
+    source = (ROOT / "services" / "maintenance_service.py").read_text(encoding="utf-8")
+    assert "SELECT value FROM bot_settings WHERE key = $1" in source
+    assert "pg_advisory_xact_lock" in source
+    assert "FOR UPDATE" in source
+    assert "maintenance_mode_changed" in source
+    assert "audit_logs" in source
+
+
+def test_maintenance_admin_handler_delegates_transition_and_does_not_write_audit_directly():
+    source = (ROOT / "handlers" / "admin_maintenance_policy.py").read_text(encoding="utf-8")
+    assert "MaintenanceService.set_mode(target, admin_id=callback.from_user.id)" in source
+    assert "INSERT INTO audit_logs" not in source
+    assert "admin_maintenance_confirm_" in source
