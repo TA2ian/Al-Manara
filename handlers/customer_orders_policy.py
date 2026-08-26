@@ -68,7 +68,7 @@ async def _get_user(message_or_callback):
     telegram_id = message_or_callback.from_user.id
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
+        return await pool.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
 
 
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
@@ -120,7 +120,11 @@ async def show_precise_orders(message: Message):
 
 @router.callback_query(F.data.startswith("orders_page_"))
 async def show_precise_orders_page(callback: CallbackQuery):
-    page = int(callback.data.replace("orders_page_", ""))
+    try:
+        page = int(callback.data.replace("orders_page_", ""))
+    except (TypeError, ValueError):
+        await callback.answer("❌ صفحة غير صالحة", show_alert=True)
+        return
     user = await _get_user(callback)
     if not user:
         await callback.answer("❌ المستخدم غير موجود", show_alert=True)
@@ -132,3 +136,19 @@ async def show_precise_orders_page(callback: CallbackQuery):
         return
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=orders_pagination_keyboard(page, total_pages, lang))
     await callback.answer()
+
+
+@router.callback_query(F.data == "close_orders_list")
+async def close_orders_list(callback: CallbackQuery):
+    """Close the customer order-history message without changing order state."""
+    user = await _get_user(callback)
+    if not user:
+        await callback.answer("❌ المستخدم غير موجود", show_alert=True)
+        return
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    await callback.answer("تم إغلاق قائمة الطلبات." if (user["language"] or "ar") == "ar" else "Order list closed.")
