@@ -77,6 +77,24 @@ async def confirm_manipulation(
         reason,
         suspension_expires_at,
     )
+
+    from services.order_state_service import InvalidOrderTransition, transition_order
+
+    order = await conn.fetchrow("SELECT status FROM orders WHERE id = $1 FOR UPDATE", order_id)
+    if not order:
+        raise ValueError("order does not exist")
+    if order["status"] != "rejected":
+        try:
+            await transition_order(
+                conn,
+                order_id,
+                "rejected",
+                admin_id=admin_id,
+                updates={"receipt_photo_id": None},
+            )
+        except InvalidOrderTransition as exc:
+            raise ValueError(f"cannot close manipulated order: {exc}") from exc
+
     await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
     await conn.execute(
         "INSERT INTO blocked_users (telegram_id, reason, blocked_by, expires_at) VALUES ($1, $2, $3, $4)",
@@ -218,31 +236,5 @@ def customer_notice(decision: MisconductDecision, lang: str) -> str:
     return (
         "🛑 <b>تم تعليق الحساب بانتظار القرار النهائي</b>\n\n"
         "أكدت الإدارة وجود محاولة تلاعب ثالثة في إثبات الدفع.\n\n"
-        "هذه <b>الفرصة الأخيرة</b>. سيبقى حسابك معلقاً إلى أن يقرر الأدمن استمرار الخدمة أو حظر الحساب نهائياً."
-    )
-
-
-def suspension_notice(reason: str | None, expires_at: datetime | None, lang: str) -> str:
-    """Render the current suspension status for a blocked customer."""
-    if expires_at is None:
-        return (
-            "🛑 <b>حسابك معلق حالياً</b>\n\n"
-            "الخدمات متوقفة إلى أن يصدر قرار إداري نهائي بشأن الحساب.\n\n"
-            "إذا كان لديك اعتراض، استخدم قناة الدعم."
-            if lang == "ar" else
-            "🛑 <b>Your account is currently suspended</b>\n\n"
-            "Services are disabled until a final administrative decision is made.\n\n"
-            "If you believe this is an error, contact support."
-        )
-
-    remaining_seconds = max(0, int((expires_at - datetime.utcnow()).total_seconds()))
-    hours, remainder = divmod(remaining_seconds, 3600)
-    minutes = (remainder + 59) // 60
-    duration = f"{hours} ساعة و{minutes} دقيقة" if lang == "ar" else f"{hours}h {minutes}m"
-    return (
-        "🚫 <b>الخدمة معلقة مؤقتاً</b>\n\n"
-        f"يمكنك استخدام الخدمة مجدداً بعد انتهاء التعليق المتبقي: <b>{duration}</b>."
-        if lang == "ar" else
-        "🚫 <b>Service temporarily suspended</b>\n\n"
-        f"You can use the service again after the remaining suspension: <b>{duration}</b>."
+        "هذه هي <b>الفرصة الأخيرة</b>. الحساب معلّق حتى يقرر الأدمن استمرار الخدمة أو الحظر النهائي."
     )
