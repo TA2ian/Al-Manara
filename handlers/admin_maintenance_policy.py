@@ -55,8 +55,7 @@ async def admin_maintenance(callback: CallbackQuery):
         "<b>الخدمة المحدودة:</b> تسمح بالتشغيل مع تقييد الوظائف غير الأساسية عند الحاجة.\n"
         "<b>الصيانة الكاملة:</b> تمنع العمليات الجديدة ولا تقطع الطلبات القائمة.\n"
         "<b>الطوارئ:</b> توقف تفاعل المستخدمين مؤقتاً لمعالجة حالة عاجلة.",
-        parse_mode="HTML",
-        reply_markup=maintenance_mode_keyboard(mode.value),
+        parse_mode="HTML", reply_markup=maintenance_mode_keyboard(mode.value),
     )
     await callback.answer()
 
@@ -70,35 +69,21 @@ async def choose_maintenance_mode(callback: CallbackQuery):
     if raw not in {mode.value for mode in MaintenanceMode}:
         await callback.answer("❌ وضع غير صالح", show_alert=True)
         return
-
     target = MaintenanceMode(raw)
     current = await MaintenanceService.get_mode()
     if target == current:
         await callback.answer("هذا الوضع مفعّل بالفعل.", show_alert=True)
         return
-
     active_count = await _active_orders_count()
     warning = ""
     if target == MaintenanceMode.MAINTENANCE and active_count:
-        warning = (
-            f"\n\nℹ️ يوجد حالياً <b>{active_count}</b> طلب نشط. "
-            "لن يتم قطعها؛ سيستمر lifecycle الخاص بها."
-        )
+        warning = f"\n\nℹ️ يوجد حالياً <b>{active_count}</b> طلب نشط. لن يتم قطعها؛ سيستمر lifecycle الخاص بها."
     elif target == MaintenanceMode.EMERGENCY and active_count:
-        warning = (
-            f"\n\n⚠️ يوجد <b>{active_count}</b> طلب نشط. "
-            "وضع الطوارئ سيمنع المستخدمين من متابعة التفاعل حتى يرفعه الأدمن. "
-            "استخدمه فقط عند الحاجة."
-        )
-
+        warning = f"\n\n⚠️ يوجد <b>{active_count}</b> طلب نشط. وضع الطوارئ سيمنع المستخدمين من متابعة التفاعل حتى يرفعه الأدمن. استخدمه فقط عند الحاجة."
     await callback.message.edit_text(
-        f"⚠️ <b>تأكيد تغيير وضع التشغيل</b>\n\n"
-        f"من: <b>{_MODE_LABELS[current]}</b>\n"
-        f"إلى: <b>{_MODE_LABELS[target]}</b>\n\n"
-        f"{_MODE_DESCRIPTIONS[target]}{warning}\n\n"
-        "لن يتم تطبيق التغيير إلا بعد الضغط على زر التأكيد.",
-        parse_mode="HTML",
-        reply_markup=maintenance_confirm_keyboard(target.value),
+        f"⚠️ <b>تأكيد تغيير وضع التشغيل</b>\n\nمن: <b>{_MODE_LABELS[current]}</b>\nإلى: <b>{_MODE_LABELS[target]}</b>\n\n"
+        f"{_MODE_DESCRIPTIONS[target]}{warning}\n\nلن يتم تطبيق التغيير إلا بعد الضغط على زر التأكيد.",
+        parse_mode="HTML", reply_markup=maintenance_confirm_keyboard(target.value),
     )
     await callback.answer()
 
@@ -112,27 +97,25 @@ async def confirm_maintenance_mode(callback: CallbackQuery):
     if raw not in {mode.value for mode in MaintenanceMode}:
         await callback.answer("❌ وضع غير صالح", show_alert=True)
         return
-
     target = MaintenanceMode(raw)
     current = await MaintenanceService.get_mode()
     if target == current:
         await callback.answer("لم يتغير الوضع.", show_alert=True)
         return
-
     applied = await MaintenanceService.set_mode(target, admin_id=callback.from_user.id)
     if applied != target:
         await callback.answer("تعذر تطبيق التغيير؛ أعد فتح لوحة الصيانة.", show_alert=True)
         return
 
+    notification = await MaintenanceService.notify_customers(callback.message.bot, target)
+    icon = "🚨" if target == MaintenanceMode.EMERGENCY else "🛠️" if target == MaintenanceMode.MAINTENANCE else "🟡" if target == MaintenanceMode.LIMITED else "✅"
     await callback.message.edit_text(
-        f"{'🚨' if target == MaintenanceMode.EMERGENCY else '🛠️' if target == MaintenanceMode.MAINTENANCE else '🟡' if target == MaintenanceMode.LIMITED else '✅'} "
-        f"<b>تم تغيير وضع التشغيل إلى {_MODE_LABELS[target]}</b>\n\n"
-        f"{_MODE_DESCRIPTIONS[target]}",
+        f"{icon} <b>تم تغيير وضع التشغيل إلى {_MODE_LABELS[target]}</b>\n\n"
+        f"{_MODE_DESCRIPTIONS[target]}\n\n"
+        f"📨 <b>إشعار المستخدمين:</b> {notification['sent']}\n"
+        f"❌ <b>فشل الإرسال:</b> {notification['failed']}\n"
+        f"👥 <b>المستهدفون:</b> {notification['total']}",
         parse_mode="HTML",
     )
-    await callback.message.answer(
-        "⚙️ <b>لوحة التحكم</b>",
-        reply_markup=admin_menu_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback.answer("تم تطبيق التغيير")
+    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await callback.answer("تم تطبيق التغيير وإرسال الإشعارات")
