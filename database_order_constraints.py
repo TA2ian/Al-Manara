@@ -40,32 +40,18 @@ async def install_order_constraints(conn):
             IF NEW.user_id IS NULL THEN
                 RAISE EXCEPTION 'order customer is required' USING ERRCODE='23514';
             END IF;
-
             SELECT id, full_name, telegram_id, username, shamcash_account,
                    is_verified, phone_verified, phone_number, terms_accepted
               INTO customer_row
-              FROM users
-             WHERE id = NEW.user_id;
-
-            IF NOT FOUND THEN
-                RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
-            END IF;
-            IF customer_row.terms_accepted IS NOT TRUE THEN
-                RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514';
-            END IF;
-            IF customer_row.is_verified IS NOT TRUE THEN
-                RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514';
-            END IF;
+              FROM users WHERE id = NEW.user_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514'; END IF;
+            IF customer_row.terms_accepted IS NOT TRUE THEN RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514'; END IF;
+            IF customer_row.is_verified IS NOT TRUE THEN RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514'; END IF;
             IF customer_row.phone_verified IS NOT TRUE OR customer_row.phone_number IS NULL OR btrim(customer_row.phone_number) = '' THEN
                 RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
             END IF;
-            IF customer_row.full_name IS NULL OR btrim(customer_row.full_name) = '' THEN
-                RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514';
-            END IF;
-            IF customer_row.shamcash_account IS NULL OR btrim(customer_row.shamcash_account) = '' THEN
-                RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514';
-            END IF;
-
+            IF customer_row.full_name IS NULL OR btrim(customer_row.full_name) = '' THEN RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514'; END IF;
+            IF customer_row.shamcash_account IS NULL OR btrim(customer_row.shamcash_account) = '' THEN RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514'; END IF;
             IF TG_OP = 'INSERT' THEN
                 NEW.customer_full_name_snapshot := customer_row.full_name;
                 NEW.customer_telegram_id_snapshot := customer_row.telegram_id;
@@ -73,10 +59,7 @@ async def install_order_constraints(conn):
                 NEW.customer_shamcash_account_snapshot := customer_row.shamcash_account;
                 RETURN NEW;
             END IF;
-
-            IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
-                RAISE EXCEPTION 'order customer snapshot is immutable' USING ERRCODE='23514';
-            END IF;
+            IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN RAISE EXCEPTION 'order customer snapshot is immutable' USING ERRCODE='23514'; END IF;
             IF NEW.customer_full_name_snapshot IS DISTINCT FROM OLD.customer_full_name_snapshot
                OR NEW.customer_telegram_id_snapshot IS DISTINCT FROM OLD.customer_telegram_id_snapshot
                OR NEW.customer_username_snapshot IS DISTINCT FROM OLD.customer_username_snapshot
@@ -106,7 +89,6 @@ async def install_order_constraints(conn):
                 END IF;
                 RETURN NEW;
             END IF;
-
             SELECT id, address, network, qr_photo_id, verification_status, deleted_at INTO wallet_row
               FROM saved_addresses
              WHERE user_id = NEW.user_id AND address = NEW.wallet_address AND network = NEW.network AND deleted_at IS NULL
@@ -129,17 +111,13 @@ async def install_order_constraints(conn):
         RETURNS TRIGGER AS $$
         DECLARE method_row RECORD;
         BEGIN
-            IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN
-                RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514';
-            END IF;
+            IF NEW.payment_currency NOT IN ('USD', 'NEW.SYP') THEN RAISE EXCEPTION 'unsupported payment currency: %', NEW.payment_currency USING ERRCODE='23514'; END IF;
             IF NEW.payment_method_code IS NULL THEN
                 SELECT code, account_identifier, recipient_name, qr_photo_id INTO method_row
-                FROM payment_methods WHERE provider='ShamCash' AND currency=NEW.payment_currency AND enabled=TRUE
-                ORDER BY id ASC LIMIT 1;
+                FROM payment_methods WHERE provider='ShamCash' AND currency=NEW.payment_currency AND enabled=TRUE ORDER BY id ASC LIMIT 1;
             ELSE
                 SELECT code, account_identifier, recipient_name, qr_photo_id INTO method_row
-                FROM payment_methods WHERE code=NEW.payment_method_code AND provider='ShamCash'
-                  AND currency=NEW.payment_currency AND enabled=TRUE LIMIT 1;
+                FROM payment_methods WHERE code=NEW.payment_method_code AND provider='ShamCash' AND currency=NEW.payment_currency AND enabled=TRUE LIMIT 1;
                 IF NOT FOUND THEN RAISE EXCEPTION 'invalid or disabled payment method for order currency' USING ERRCODE='23514'; END IF;
             END IF;
             IF NOT FOUND THEN RAISE EXCEPTION 'no enabled ShamCash payment method for order currency' USING ERRCODE='23514'; END IF;
@@ -182,7 +160,8 @@ async def install_order_constraints(conn):
         RETURNS TRIGGER AS $$
         BEGIN
             IF TG_OP = 'UPDATE' AND OLD.payment_deadline IS NOT NULL
-               AND NEW.payment_deadline IS DISTINCT FROM OLD.payment_deadline THEN
+               AND NEW.payment_deadline IS DISTINCT FROM OLD.payment_deadline
+               AND NEW.status <> 'pending' THEN
                 RAISE EXCEPTION 'payment deadline is immutable once assigned' USING ERRCODE='23514';
             END IF;
             IF NEW.payment_deadline IS NOT NULL AND NEW.approved_at IS NOT NULL
@@ -199,7 +178,7 @@ async def install_order_constraints(conn):
     """)
     await conn.execute("DROP TRIGGER IF EXISTS trg_protect_order_payment_deadline ON orders")
     await conn.execute("""CREATE TRIGGER trg_protect_order_payment_deadline
-        BEFORE INSERT OR UPDATE OF payment_deadline, approved_at, created_at
+        BEFORE INSERT OR UPDATE OF payment_deadline, approved_at, created_at, status
         ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_deadline()""")
 
     await conn.execute("""
