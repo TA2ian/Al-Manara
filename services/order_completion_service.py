@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int, admin_id: int):
-    """Finalize an approved USDT order only for its active fulfillment owner."""
+    """Finalize an approved USDT order from the configured single-admin session."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -30,20 +30,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 return False
             if order["status"] != "payment_confirmed":
                 await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
-                await state.clear()
-                return False
-
-            claim = await conn.fetchrow(
-                """
-                SELECT admin_id, released_at, completed_at
-                FROM order_fulfillment_claims
-                WHERE order_id = $1
-                FOR UPDATE
-                """,
-                order_id,
-            )
-            if not claim or int(claim["admin_id"]) != int(admin_id) or claim["released_at"] is not None or claim["completed_at"] is not None:
-                await msg.answer("⚠️ لم تعد جلسة التحويل هذه مالكة للطلب. لا ترسل إثباتاً آخر قبل إعادة حجز التحويل.")
                 await state.clear()
                 return False
 
@@ -63,18 +49,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 await msg.answer("⚠️ تم إكمال هذا الطلب مسبقاً أو تغيرت حالته.")
                 await state.clear()
                 return False
-
-            await conn.execute(
-                """
-                UPDATE order_fulfillment_claims
-                SET completed_at = NOW(), txid = $2, screenshot_id = $3
-                WHERE order_id = $1 AND admin_id = $4 AND released_at IS NULL AND completed_at IS NULL
-                """,
-                order_id,
-                txid,
-                screenshot_id or None,
-                admin_id,
-            )
 
             order = await conn.fetchrow(
                 "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
