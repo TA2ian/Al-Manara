@@ -47,7 +47,7 @@ def test_order_rejection_uses_authoritative_transition_and_preserves_wallet_snap
 def test_wallet_add_message_describes_all_supported_inputs_and_matching():
     source = inspect.getsource(wallets.wallet_add)
     assert "عنوان المحفظة" in source
-    assert "صورة <b>QR</b>" in source
+    assert "صورة QR" in source
     assert "شارك المحفظة مباشرة" in source
     assert "العنوان مع QR" in source
     assert "يطابق العنوان مع QR" in source
