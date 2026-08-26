@@ -43,7 +43,7 @@ async def install_order_constraints(conn):
     await conn.execute(
         """UPDATE orders o
               SET customer_full_name_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'full_name'), ''),
-                  customer_telegram_id_snapshot = NULLIF(to_jsonb(u)->>'telegram_id', '')::BIGINT,
+                  customer_telegram_id_snapshot = u.telegram_id,
                   customer_username_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'username'), ''),
                   customer_shamcash_account_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'shamcash_account'), '')
              FROM users u
@@ -58,8 +58,6 @@ async def install_order_constraints(conn):
         CREATE OR REPLACE FUNCTION snapshot_order_customer_identity()
         RETURNS TRIGGER AS $$
         DECLARE
-            customer_row RECORD;
-            customer_json JSONB;
             customer_full_name TEXT;
             customer_username TEXT;
             customer_shamcash_account TEXT;
@@ -74,7 +72,7 @@ async def install_order_constraints(conn):
             END IF;
 
             SELECT u.is_verified, u.phone_verified, u.phone_number, u.terms_accepted,
-                   to_jsonb(u)->>'telegram_id', to_jsonb(u)->>'full_name',
+                   u.telegram_id, to_jsonb(u)->>'full_name',
                    to_jsonb(u)->>'username', to_jsonb(u)->>'shamcash_account'
               INTO customer_is_verified, customer_phone_verified, customer_phone_number,
                    customer_terms_accepted, customer_telegram_id, customer_full_name,
@@ -85,7 +83,6 @@ async def install_order_constraints(conn):
                 RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
             END IF;
 
-            customer_telegram_id := NULLIF(customer_telegram_id::TEXT, '')::BIGINT;
             customer_full_name := NULLIF(BTRIM(customer_full_name), '');
             customer_username := NULLIF(BTRIM(customer_username), '');
             customer_shamcash_account := NULLIF(BTRIM(customer_shamcash_account), '');
@@ -100,7 +97,7 @@ async def install_order_constraints(conn):
             IF customer_phone_verified IS NOT TRUE OR customer_phone_number IS NULL THEN
                 RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
             END IF;
-            IF to_jsonb(ROW(customer_full_name)) IS NOT NULL AND EXISTS (
+            IF EXISTS (
                 SELECT 1 FROM information_schema.columns
                  WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'full_name'
             ) AND customer_full_name IS NULL THEN
