@@ -62,11 +62,17 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
     if claim_state == "owned_by_other_admin":
         await callback.answer("⚠️ هذا التحويل قيد التنفيذ من قبل مسؤول آخر.", show_alert=True)
         return
+    if claim_state == "owned_by_current_admin":
+        await callback.answer("⚠️ هذا التحويل محجوز بالفعل لجلسة التحويل الحالية.", show_alert=True)
+        return
     if claim_state == "completed":
         await callback.answer("⚠️ هذا الطلب مكتمل بالفعل.", show_alert=True)
         return
     if claim_state in {"missing_order", "invalid_order_state"}:
         await callback.answer("⚠️ تغيرت حالة الطلب. حدّث لوحة الطلبات وحاول مجدداً.", show_alert=True)
+        return
+    if claim_state != "claimed":
+        await callback.answer("⚠️ تعذر حجز تنفيذ التحويل. حاول مرة أخرى.", show_alert=True)
         return
 
     await state.clear()
