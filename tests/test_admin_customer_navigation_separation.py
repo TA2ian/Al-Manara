@@ -1,12 +1,19 @@
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _function_source(source: str, function_name: str) -> str:
+    tree = ast.parse(source)
+    lines = source.splitlines()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"Function {function_name!r} was not found")
+
+
 def test_admin_entry_points_are_admin_guarded():
-    # These are the authoritative admin entry-point policies currently
-    # registered by the dispatcher. Do not reference legacy/non-existent
-    # modules here: this test is about the actual production routing surface.
     for relative_path in (
         "handlers/admin_tools_policy.py",
         "handlers/admin_settings_policy.py",
@@ -27,17 +34,20 @@ def test_admin_and_customer_keyboards_are_separate_definitions():
     assert "def main_menu_inline" in source
     assert "def quick_actions_keyboard" in source
 
-    admin_start = source.index("def admin_menu_keyboard")
-    customer_start = source.index("def main_menu_inline")
-    quick_start = source.index("def quick_actions_keyboard")
-    assert admin_start != customer_start != quick_start
+    tree = ast.parse(source)
+    functions = {
+        node.name: node.lineno
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert functions["admin_menu_keyboard"] != functions["main_menu_inline"]
+    assert functions["main_menu_inline"] != functions["quick_actions_keyboard"]
+    assert functions["admin_menu_keyboard"] != functions["quick_actions_keyboard"]
 
 
 def test_admin_menu_callback_is_not_a_customer_navigation_target():
     source = (ROOT / "keyboards/inline.py").read_text(encoding="utf-8")
-    customer_sections = (
-        source[source.index("def main_menu_inline"):source.index("def network_selection_keyboard")],
-        source[source.index("def quick_actions_keyboard"):],
-    )
-    for section in customer_sections:
-        assert 'callback_data="admin_menu"' not in section
+    main_menu = _function_source(source, "main_menu_inline")
+    quick_actions = _function_source(source, "quick_actions_keyboard")
+    assert 'callback_data="admin_menu"' not in main_menu
+    assert 'callback_data="admin_menu"' not in quick_actions
