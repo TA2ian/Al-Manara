@@ -38,7 +38,8 @@ def test_customer_deadline_message_uses_operational_duration_policy():
     assert "OperationalPolicyService.get_payment_timeout_minutes" in source
     assert "deadline.strftime" not in source
     assert "format_order_datetime" not in source
-    assert "لديك <b>{deadline_minutes} دقيقة</b>" in source
+    assert "deadline_minutes" in source
+    assert "لديك <b>{_html(deadline_minutes)} دقيقة</b>" in source
 
 
 def test_admin_approval_displays_duration_not_geographic_clock_time():
