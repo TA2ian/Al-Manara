@@ -87,6 +87,22 @@ async def init_db():
                 key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_notification_jobs (
+                id BIGSERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                mode TEXT NOT NULL,
+                has_active_order BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                available_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                locked_at TIMESTAMP,
+                sent_at TIMESTAMP,
+                last_error TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE (telegram_id, mode, created_at)
+            )
+        """)
 
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE")
@@ -118,18 +134,8 @@ async def init_db():
             await conn.execute("UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() WHERE currency = 'SYP'")
             await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v1', 'done')")
 
-        legacy_method = await conn.fetchrow(
-            """SELECT id, account_identifier, qr_photo_id, enabled
-               FROM payment_methods
-              WHERE provider = 'ShamCash' AND code = 'shamcash_syp'
-              LIMIT 1"""
-        )
-        canonical_syp = await conn.fetchrow(
-            """SELECT id, account_identifier, qr_photo_id
-               FROM payment_methods
-              WHERE provider = 'ShamCash' AND code = 'shamcash_new_syp'
-              LIMIT 1"""
-        )
+        legacy_method = await conn.fetchrow("""SELECT id, account_identifier, qr_photo_id, enabled FROM payment_methods WHERE provider = 'ShamCash' AND code = 'shamcash_syp' LIMIT 1""")
+        canonical_syp = await conn.fetchrow("""SELECT id, account_identifier, qr_photo_id FROM payment_methods WHERE provider = 'ShamCash' AND code = 'shamcash_new_syp' LIMIT 1""")
         if legacy_method:
             if canonical_syp:
                 if not canonical_syp["account_identifier"] and legacy_method["account_identifier"]:
@@ -140,14 +146,8 @@ async def init_db():
             else:
                 await conn.execute("""UPDATE payment_methods SET code = 'shamcash_new_syp', currency = 'NEW.SYP', display_name = 'ShamCash الليرة السورية الجديدة', updated_at = NOW() WHERE id = $1""", legacy_method["id"])
 
-        await conn.execute("""INSERT INTO payment_methods
-            (code, provider, currency, display_name, account_identifier, enabled)
-            VALUES ('shamcash_usd', 'ShamCash', 'USD', 'ShamCash USD', $1, TRUE)
-            ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_usd())
-        await conn.execute("""INSERT INTO payment_methods
-            (code, provider, currency, display_name, account_identifier, enabled)
-            VALUES ('shamcash_new_syp', 'ShamCash', 'NEW.SYP', 'ShamCash NEW.SYP', $1, TRUE)
-            ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_syp())
+        await conn.execute("""INSERT INTO payment_methods (code, provider, currency, display_name, account_identifier, enabled) VALUES ('shamcash_usd', 'ShamCash', 'USD', 'ShamCash USD', $1, TRUE) ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_usd())
+        await conn.execute("""INSERT INTO payment_methods (code, provider, currency, display_name, account_identifier, enabled) VALUES ('shamcash_new_syp', 'ShamCash', 'NEW.SYP', 'ShamCash NEW.SYP', $1, TRUE) ON CONFLICT (code) DO NOTHING""", Config.get_shamcash_syp())
 
         await conn.execute("""
             CREATE OR REPLACE FUNCTION enforce_canonical_payment_method_row()
@@ -164,9 +164,7 @@ async def init_db():
             $$ LANGUAGE plpgsql;
         """)
         await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_canonical_payment_method_row ON payment_methods")
-        await conn.execute("""CREATE TRIGGER trg_enforce_canonical_payment_method_row
-            BEFORE INSERT OR UPDATE OF code, currency, provider ON payment_methods
-            FOR EACH ROW EXECUTE FUNCTION enforce_canonical_payment_method_row()""")
+        await conn.execute("""CREATE TRIGGER trg_enforce_canonical_payment_method_row BEFORE INSERT OR UPDATE OF code, currency, provider ON payment_methods FOR EACH ROW EXECUTE FUNCTION enforce_canonical_payment_method_row()""")
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_telegram_id ON blocked_users (telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders (user_id, status)")
@@ -174,77 +172,20 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses (user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_currency_enabled ON payment_methods (currency, enabled)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone_verified ON users (phone_verified)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_maintenance_notification_jobs_pending ON maintenance_notification_jobs (status, available_at)")
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_addresses_active ON saved_addresses (user_id, address, network) WHERE deleted_at IS NULL")
 
-        await conn.execute("""
-            CREATE OR REPLACE FUNCTION protect_verified_wallet()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                IF TG_OP = 'UPDATE' AND OLD.verification_status = 'verified' THEN
-                    IF NEW.address IS DISTINCT FROM OLD.address OR NEW.network IS DISTINCT FROM OLD.network
-                       OR NEW.qr_photo_id IS DISTINCT FROM OLD.qr_photo_id OR NEW.verification_status IS DISTINCT FROM OLD.verification_status THEN
-                        RAISE EXCEPTION 'Verified wallet is immutable; delete and add a new wallet instead';
-                    END IF;
-                END IF;
-                IF TG_OP = 'DELETE' THEN
-                    IF EXISTS (SELECT 1 FROM orders WHERE user_id = OLD.user_id AND wallet_address = OLD.address
-                              AND network = OLD.network AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed')) THEN
-                        RAISE EXCEPTION 'Wallet is linked to an active order and cannot be deleted';
-                    END IF;
-                    RETURN OLD;
-                END IF;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
+        await conn.execute("""CREATE OR REPLACE FUNCTION protect_verified_wallet() RETURNS TRIGGER AS $$ BEGIN IF TG_OP = 'UPDATE' AND OLD.verification_status = 'verified' THEN IF NEW.address IS DISTINCT FROM OLD.address OR NEW.network IS DISTINCT FROM OLD.network OR NEW.qr_photo_id IS DISTINCT FROM OLD.qr_photo_id OR NEW.verification_status IS DISTINCT FROM OLD.verification_status THEN RAISE EXCEPTION 'Verified wallet is immutable; delete and add a new wallet instead'; END IF; END IF; IF TG_OP = 'DELETE' THEN IF EXISTS (SELECT 1 FROM orders WHERE user_id = OLD.user_id AND wallet_address = OLD.address AND network = OLD.network AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed')) THEN RAISE EXCEPTION 'Wallet is linked to an active order and cannot be deleted'; END IF; RETURN OLD; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql""")
         await conn.execute("DROP TRIGGER IF EXISTS trg_protect_verified_wallet ON saved_addresses")
-        await conn.execute("""CREATE TRIGGER trg_protect_verified_wallet
-            BEFORE UPDATE OR DELETE ON saved_addresses
-            FOR EACH ROW EXECUTE FUNCTION protect_verified_wallet()""")
-
-        await conn.execute("""
-            CREATE OR REPLACE FUNCTION prevent_multiple_active_orders()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                IF NEW.status IN ('pending','waiting_payment','receipt_received','payment_confirmed') AND NEW.user_id IS NOT NULL
-                   AND (TG_OP = 'INSERT' OR OLD.status NOT IN ('pending','waiting_payment','receipt_received','payment_confirmed')) THEN
-                    PERFORM pg_advisory_xact_lock(2147483000, NEW.user_id);
-                    IF EXISTS (SELECT 1 FROM orders WHERE user_id = NEW.user_id
-                               AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
-                               AND id <> COALESCE(NEW.id, -1)) THEN
-                        RAISE EXCEPTION 'active order already exists for user %', NEW.user_id USING ERRCODE = '23514';
-                    END IF;
-                END IF;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
+        await conn.execute("CREATE TRIGGER trg_protect_verified_wallet BEFORE UPDATE OR DELETE ON saved_addresses FOR EACH ROW EXECUTE FUNCTION protect_verified_wallet()")
+        await conn.execute("""CREATE OR REPLACE FUNCTION prevent_multiple_active_orders() RETURNS TRIGGER AS $$ BEGIN IF NEW.status IN ('pending','waiting_payment','receipt_received','payment_confirmed') AND NEW.user_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status NOT IN ('pending','waiting_payment','receipt_received','payment_confirmed')) THEN PERFORM pg_advisory_xact_lock(2147483000, NEW.user_id); IF EXISTS (SELECT 1 FROM orders WHERE user_id = NEW.user_id AND status IN ('pending','waiting_payment','receipt_received','payment_confirmed') AND id <> COALESCE(NEW.id, -1)) THEN RAISE EXCEPTION 'active order already exists for user %', NEW.user_id USING ERRCODE = '23514'; END IF; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql""")
         await conn.execute("DROP TRIGGER IF EXISTS trg_prevent_multiple_active_orders ON orders")
-        await conn.execute("""CREATE TRIGGER trg_prevent_multiple_active_orders
-            BEFORE INSERT OR UPDATE OF user_id, status ON orders
-            FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()""")
+        await conn.execute("CREATE TRIGGER trg_prevent_multiple_active_orders BEFORE INSERT OR UPDATE OF user_id, status ON orders FOR EACH ROW EXECUTE FUNCTION prevent_multiple_active_orders()")
 
         await install_order_constraints(conn)
-
-        await conn.execute("""
-            CREATE OR REPLACE FUNCTION enforce_order_state_transition()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                IF NEW.status IS DISTINCT FROM OLD.status THEN
-                    IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR
-                            (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')) OR
-                            (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR
-                            (OLD.status='payment_confirmed' AND NEW.status IN ('completed'))) THEN
-                        RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001';
-                    END IF;
-                END IF;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
+        await conn.execute("""CREATE OR REPLACE FUNCTION enforce_order_state_transition() RETURNS TRIGGER AS $$ BEGIN IF NEW.status IS DISTINCT FROM OLD.status THEN IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')) OR (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR (OLD.status='payment_confirmed' AND NEW.status IN ('completed'))) THEN RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001'; END IF; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql""")
         await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_order_state_transition ON orders")
-        await conn.execute("""CREATE TRIGGER trg_enforce_order_state_transition
-            BEFORE UPDATE OF status ON orders FOR EACH ROW EXECUTE FUNCTION enforce_order_state_transition()""")
+        await conn.execute("CREATE TRIGGER trg_enforce_order_state_transition BEFORE UPDATE OF status ON orders FOR EACH ROW EXECUTE FUNCTION enforce_order_state_transition()")
 
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
