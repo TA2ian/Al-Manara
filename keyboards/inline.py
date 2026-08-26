@@ -82,7 +82,7 @@ def order_admin_keyboard(order_id: int, status: str) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="✅ تأكيد الدفع", callback_data=f"admin_confirm_payment_{order_id}"), InlineKeyboardButton(text="❌ رفض الإيصال", callback_data=f"admin_reject_receipt_{order_id}")])
         buttons.append([InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"admin_reject_{order_id}")])
     elif status == "payment_confirmed":
-        buttons.append([InlineKeyboardButton(text="🚀 إرسال USDT", callback_data=f"admin_send_usdt_{order_id}"), InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"admin_reject_{order_id}")])
+        buttons.append([InlineKeyboardButton(text="🚀 إرسال USDT", callback_data=f"admin_send_usdt_{order_id}")])
     buttons.append([InlineKeyboardButton(text="📝 ملاحظة", callback_data=f"admin_note_{order_id}"), InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
