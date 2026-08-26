@@ -1,10 +1,14 @@
 """Middleware enforcing administrative customer-service suspensions."""
+import logging
+
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 
 from config import Config
 from database import get_pool
 from services.user_misconduct_service import get_suspension, suspension_notice
+
+logger = logging.getLogger(__name__)
 
 
 class UserSuspensionMiddleware(BaseMiddleware):
@@ -23,6 +27,7 @@ class UserSuspensionMiddleware(BaseMiddleware):
             async with pool.acquire() as conn:
                 suspension = await get_suspension(conn, user.id)
         except Exception:
+            logger.exception("Failed to resolve suspension for telegram user %s", user.id)
             return await handler(event, data)
 
         if not suspension:
@@ -42,7 +47,7 @@ class UserSuspensionMiddleware(BaseMiddleware):
                 if stored_lang in ("ar", "en"):
                     lang = stored_lang
             except Exception:
-                pass
+                logger.exception("Failed to resolve stored language for suspended user %s", user.id)
 
             notice = suspension_notice(
                 suspension["reason"],
