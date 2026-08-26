@@ -28,6 +28,13 @@ def test_customer_deadline_message_uses_operational_duration_policy():
     assert "لديك <b>{deadline_minutes} دقيقة</b>" in source
 
 
+def test_admin_approval_displays_duration_not_geographic_clock_time():
+    source = inspect.getsource(admin_approval_policy.approve_order_authoritative)
+    assert "OperationalPolicyService.get_payment_timeout_minutes" in source
+    assert "format_order_datetime" not in source
+    assert "المهلة المحددة: <b>{timeout_minutes} دقيقة</b> من لحظة اعتماد الطلب" in source
+
+
 def test_admin_approval_contains_customer_identity_and_shamcash_context():
     source = inspect.getsource(admin_approval_policy.approve_order_authoritative)
     assert "u.full_name" in source
