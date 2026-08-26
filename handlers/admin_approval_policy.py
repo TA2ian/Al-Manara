@@ -2,7 +2,7 @@
 import asyncio
 import html
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
@@ -15,6 +15,7 @@ from services.formatters import money, usdt
 from services.notification_service import NotificationService
 from services.operational_policy_service import OperationalPolicyService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
+from services.time_service import format_order_datetime, utc_now_naive
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
 
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.full_name, u.username, u.telegram_id, u.language "
+            "SELECT o.*, u.full_name, u.username, u.shamcash_account, u.telegram_id, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id,
         )
@@ -79,21 +80,23 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             return
 
         account = (order["payment_account_snapshot"] or "").strip()
+        recipient = (order["payment_recipient_name_snapshot"] or "").strip()
         qr_photo_id = (order["payment_qr_photo_id"] or "").strip()
-        if not account or not qr_photo_id:
-            await callback.answer("⚠️ بيانات ShamCash لهذه العملة غير مكتملة. ثبّت الحساب وQR أولاً.", show_alert=True)
+        if not account or not recipient or not qr_photo_id:
+            await callback.answer("⚠️ بيانات ShamCash لهذه العملة غير مكتملة. ثبّت الاسم والحساب وQR أولاً.", show_alert=True)
             await callback.message.answer(
                 "⚠️ <b>لا يمكن اعتماد الطلب بعد.</b>\n\n"
-                "بيانات الدفع الخاصة بالعملة المختارة غير مكتملة. يجب على الأدمن تثبيت حساب ShamCash وQR الخاصين به من <b>وسائل الدفع</b> ثم إعادة المحاولة.",
+                "بيانات الدفع الخاصة بالعملة المختارة غير مكتملة. يجب على الأدمن تثبيت اسم المستلم وحساب ShamCash وQR الخاصين به من <b>وسائل الدفع</b> ثم إعادة المحاولة.",
                 parse_mode="HTML",
             )
             return
 
-        deadline = datetime.now() + timedelta(minutes=timeout_minutes)
+        now_utc = utc_now_naive()
+        deadline = now_utc + timedelta(minutes=timeout_minutes)
         try:
             await transition_order(
                 conn, order_id, "waiting_payment", admin_id=callback.from_user.id,
-                updates={"approved_at": datetime.now(), "payment_deadline": deadline},
+                updates={"approved_at": now_utc, "payment_deadline": deadline},
             )
         except InvalidOrderTransition:
             await callback.answer("الطلب لم يعد بانتظار الموافقة", show_alert=True)
@@ -101,7 +104,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
 
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
-            "SELECT o.*, u.full_name, u.username, u.telegram_id, u.language "
+            "SELECT o.*, u.full_name, u.username, u.shamcash_account, u.telegram_id, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
             order_id,
         )
@@ -156,12 +159,15 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
     admin_update_text = (
         f"💳 <b>تمت الموافقة على الطلب</b>\n\n"
         f"📦 #{html.escape(order['order_number'])}\n"
-        f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
-        f"🆔 <code>{user_id}</code>\n"
+        f"👤 العميل: <b>{html.escape(order['full_name'] or 'N/A')}</b>\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"👤 المستخدم: @{html.escape(order['username'] or 'N/A')}\n"
+        f"🏦 ShamCash العميل: <code>{html.escape(order['shamcash_account'] or 'N/A')}</code>\n"
+        f"💳 الدفع إلى: <b>{html.escape(order['payment_recipient_name_snapshot'] or 'N/A')}</b> — <code>{html.escape(order['payment_account_snapshot'] or 'N/A')}</code>\n"
         f"💰 {usdt(order['amount_usdt'])} USDT\n"
         f"🌐 {html.escape(order['network'] or '')}\n"
         f"💵 الإجمالي: {money(order['total_amount'])} {html.escape(order['payment_currency'])}\n"
-        f"⏱ المهلة: {timeout_minutes} دقيقة\n\n"
+        f"⏱ الموعد النهائي: <b>{format_order_datetime(order['payment_deadline'])}</b>\n\n"
         "📎 بانتظار إثبات دفع العميل..."
     )
     await asyncio.gather(*[bot.send_message(admin_id, admin_update_text, parse_mode="HTML") for admin_id in Config.ADMIN_IDS], return_exceptions=True)
