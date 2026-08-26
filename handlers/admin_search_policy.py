@@ -3,7 +3,7 @@ import html
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import Config
 from database import get_pool
@@ -17,6 +17,20 @@ router = Router()
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
+
+
+def _customer_action_keyboard(telegram_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
+    action = "admin_unban_" if is_blocked else "admin_ban_"
+    action_text = "✅ فك الحظر" if is_blocked else "🚫 حظر"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✉️ رسالة خاصة", callback_data=f"admin_personal_message_{telegram_id}")],
+        [
+            InlineKeyboardButton(text=action_text, callback_data=f"{action}{telegram_id}"),
+            InlineKeyboardButton(text="🗑️ حذف العميل", callback_data=f"admin_del_user_{telegram_id}"),
+        ],
+        [InlineKeyboardButton(text="🔍 بحث عميل آخر", callback_data="admin_search_user")],
+        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+    ])
 
 
 @router.message(AdminStates.waiting_search, F.text)
@@ -133,4 +147,4 @@ async def search_input(message: Message, state: FSMContext):
         f"💰 USDT مكتمل: <b>{usdt(stats['usdt_completed'])}</b>\n"
         f"📅 التسجيل: {user['created_at'].strftime('%Y-%m-%d')}"
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=personal_message_keyboard(user["telegram_id"], user["is_blocked"]))
+    await message.answer(text, parse_mode="HTML", reply_markup=_customer_action_keyboard(user["telegram_id"], user["is_blocked"]))
