@@ -3,11 +3,24 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 
 from config import Config
+from database import get_pool
 from services.maintenance_service import MaintenanceMode, MaintenanceService
+from states import ReceiptStates
 
 
 class MaintenanceMiddleware(BaseMiddleware):
-    """Block only operations that the active maintenance mode actually disables."""
+    """Block new customer operations while preserving active receipt submission."""
+
+    async def _is_receipt_submission(self, event, data) -> bool:
+        state = data.get("state")
+        if isinstance(event, Message) and state is not None:
+            try:
+                return await state.get_state() == ReceiptStates.waiting_receipt.state
+            except Exception:
+                return False
+        if isinstance(event, CallbackQuery):
+            return event.data.startswith("upload_receipt_")
+        return False
 
     async def __call__(self, handler, event, data):
         mode = await MaintenanceService.get_mode()
@@ -16,6 +29,9 @@ class MaintenanceMiddleware(BaseMiddleware):
 
         user_id = event.from_user.id if isinstance(event, (Message, CallbackQuery)) else None
         if user_id in Config.ADMIN_IDS:
+            return await handler(event, data)
+
+        if mode == MaintenanceMode.MAINTENANCE and await self._is_receipt_submission(event, data):
             return await handler(event, data)
 
         lang = "ar"
