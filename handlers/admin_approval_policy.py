@@ -2,7 +2,7 @@
 import asyncio
 import html
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
@@ -13,6 +13,7 @@ from database import get_pool
 from keyboards.inline import receipt_upload_keyboard
 from services.formatters import money, usdt
 from services.notification_service import NotificationService
+from services.operational_policy_service import OperationalPolicyService
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
 from services.settings_service import SettingsService
 
@@ -22,15 +23,6 @@ logger = logging.getLogger(__name__)
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
-
-
-async def _payment_timeout_minutes() -> int:
-    raw = await SettingsService.get("payment_timeout_minutes", str(Config.PAYMENT_TIMEOUT))
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = Config.PAYMENT_TIMEOUT
-    return max(1, min(value, 1440))
 
 
 async def _sync_customer_status_message(bot: Bot, order: dict, approved: bool) -> bool:
@@ -72,7 +64,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
 
     order_id = int(callback.data.replace("admin_approve_", ""))
     pool = await get_pool()
-    timeout_minutes = await _payment_timeout_minutes()
+    timeout_minutes = await OperationalPolicyService.get_payment_timeout_minutes()
 
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
@@ -98,7 +90,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             )
             return
 
-        deadline = datetime.now() + timedelta(minutes=timeout_minutes)
+        deadline = datetime.now() + __import__("datetime", fromlist=["timedelta"]).timedelta(minutes=timeout_minutes)
         try:
             await transition_order(
                 conn, order_id, "waiting_payment", admin_id=callback.from_user.id,
