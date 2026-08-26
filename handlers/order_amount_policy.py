@@ -13,10 +13,10 @@ from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.formatters import usdt
 from services.locale_service import locale_service
 from services.operational_policy_service import OperationalPolicyService, OperationalPolicyError
+from services.order_lifecycle import ACTIVE_ORDER_STATUSES
 from states import OrderStates, WalletStates
 
 router = Router()
-ACTIVE_STATUSES = ("pending", "waiting_payment", "receipt_received", "payment_confirmed")
 
 
 async def _user(telegram_id: int):
@@ -33,7 +33,7 @@ async def _active_order(user_id: int):
     async with pool.acquire() as conn:
         return await conn.fetchrow(
             "SELECT order_number, amount_usdt, status FROM orders WHERE user_id = $1 AND status = ANY($2) ORDER BY created_at DESC LIMIT 1",
-            user_id, ACTIVE_STATUSES,
+            user_id, list(ACTIVE_ORDER_STATUSES),
         )
 
 
@@ -93,7 +93,7 @@ async def start_order_authoritative(message: Message, state: FSMContext):
     if active:
         await message.answer(
             "⚠️ <b>لديك طلب نشط بالفعل.</b> افتح طلباتي لمتابعته ولا يمكنك إنشاء طلب جديد قبل اكتماله." if lang == "ar" else
-            "⚠️ <b>You already have an active order.</b> Open Orders to follow it; a new order cannot be created until it is completed.",
+            "⚠️ <b>You already have an active order.</b> Open Orders to follow it; a new order cannot be created until the current one is completed.",
             parse_mode="HTML",
         )
         return
@@ -117,7 +117,7 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
     if active:
         await message.answer(
             "⚠️ <b>لديك طلب نشط بالفعل.</b> افتح طلباتي لمتابعته ولا يمكنك إنشاء طلب جديد قبل اكتماله." if lang == "ar" else
-            "⚠️ <b>You already have an active order</b> Open Orders to follow it; a new order cannot be created until it is completed.",
+            "⚠️ <b>You already have an active order</b> Open Orders to follow it; a new order cannot be created until the current one is completed.",
             parse_mode="HTML",
         )
         await state.clear()
