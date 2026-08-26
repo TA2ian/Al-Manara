@@ -1,6 +1,9 @@
 """Release-gate checks for the current production routing surface."""
+import ast
 import importlib
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
 
 POLICY_MODULES = [
     "handlers.admin_approval_policy", "handlers.admin_broadcast_policy",
@@ -29,17 +32,49 @@ REMOVED_MODULES = (
 )
 
 
+def _registered_router_modules():
+    """Return router module names actually registered by bot.create_dispatcher()."""
+    tree = ast.parse((ROOT / "bot.py").read_text(encoding="utf-8"))
+    registered = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "include_router":
+            continue
+        if len(node.args) != 1:
+            continue
+        router = node.args[0]
+        if not isinstance(router, ast.Attribute) or router.attr != "router":
+            continue
+        if isinstance(router.value, ast.Name):
+            registered.append(router.value.id)
+    return tuple(registered)
+
+
 def test_release_policy_modules_import():
     for module_name in POLICY_MODULES:
         module = importlib.import_module(module_name)
         assert hasattr(module, "router"), module_name
 
 
+def test_every_registered_router_is_covered_by_release_gate():
+    registered = set(_registered_router_modules())
+    covered = {module.rsplit(".", 1)[-1] for module in POLICY_MODULES}
+    missing = sorted(registered - covered)
+    assert not missing, "Production routers missing from release gate: " + repr(missing)
+
+
+def test_release_gate_has_no_stale_router_entries():
+    registered = set(_registered_router_modules())
+    covered = {module.rsplit(".", 1)[-1] for module in POLICY_MODULES}
+    stale = sorted(covered - registered)
+    assert not stale, "Release gate contains unregistered routers: " + repr(stale)
+
+
 def test_removed_compatibility_modules_are_not_importable_from_the_repository():
-    root = Path(__file__).resolve().parents[1]
     for module_name in REMOVED_MODULES:
         relative = Path(*module_name.split("."))
-        assert not (root / relative).with_suffix(".py").exists()
+        assert not (ROOT / relative).with_suffix(".py").exists()
 
 
 def test_authoritative_order_services_import():
@@ -53,13 +88,12 @@ def test_authoritative_order_services_import():
 
 
 def test_release_gate_does_not_require_retired_monolithic_order_handler():
-    root = Path(__file__).resolve().parents[1]
-    assert not (root / "handlers" / "order.py").exists()
-    assert not (root / "handlers" / "my_orders.py").exists()
+    assert not (ROOT / "handlers" / "order.py").exists()
+    assert not (ROOT / "handlers" / "my_orders.py").exists()
 
 
 def test_historical_payment_ingress_is_explicit_and_narrow():
-    source = (Path(__file__).resolve().parents[1] / "handlers" / "payment_method_callback_policy.py").read_text(encoding="utf-8")
+    source = (ROOT / "handlers" / "payment_method_callback_policy.py").read_text(encoding="utf-8")
     assert "HISTORICAL_CODE_ALIASES" in source
     assert "HISTORICAL_CALLBACK_PATTERN" in source
     assert "CANONICAL_CODE_PATTERN" not in source
