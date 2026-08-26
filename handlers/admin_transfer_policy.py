@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from database import get_pool
 from services.formatters import usdt
-from services.fulfillment_claim_service import claim_order_fulfillment, release_order_fulfillment
 from services.order_completion_service import complete_order
 from states import AdminStates
 
@@ -35,7 +34,7 @@ def _valid_txid(txid: str, network: str | None = None) -> bool:
 
 @router.callback_query(F.data.startswith("admin_send_usdt_"))
 async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
-    """Claim a payment-confirmed order before the admin performs the external transfer."""
+    """Start the direct single-admin USDT transfer completion flow."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -58,23 +57,6 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer(f"⚠️ لا يمكن إرسال USDT من الحالة الحالية: {order['status']}", show_alert=True)
         return
 
-    claim_state = await claim_order_fulfillment(order_id, callback.from_user.id)
-    if claim_state == "owned_by_other_admin":
-        await callback.answer("⚠️ هذا التحويل قيد التنفيذ من قبل مسؤول آخر.", show_alert=True)
-        return
-    if claim_state == "owned_by_current_admin":
-        await callback.answer("⚠️ هذا التحويل محجوز بالفعل لجلسة التحويل الحالية.", show_alert=True)
-        return
-    if claim_state == "completed":
-        await callback.answer("⚠️ هذا الطلب مكتمل بالفعل.", show_alert=True)
-        return
-    if claim_state in {"missing_order", "invalid_order_state"}:
-        await callback.answer("⚠️ تغيرت حالة الطلب. حدّث لوحة الطلبات وحاول مجدداً.", show_alert=True)
-        return
-    if claim_state != "claimed":
-        await callback.answer("⚠️ تعذر حجز تنفيذ التحويل. حاول مرة أخرى.", show_alert=True)
-        return
-
     await state.clear()
     await state.update_data(
         admin_txid_order_id=order_id,
@@ -88,28 +70,23 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         f"💰 المبلغ: <b>{usdt(order['amount_usdt'])} USDT</b>\n"
         f"🌐 الشبكة: <b>{html.escape(order['network'] or 'TRC20')}</b>\n"
         f"📍 المحفظة: <code>{html.escape(order['wallet_address'])}</code>\n\n"
-        "🔒 <b>تم حجز تنفيذ هذا التحويل لك.</b> مسؤول آخر لن يستطيع بدء نفس التحويل الآن.\n\n"
         "بعد تنفيذ التحويل الخارجي، أرسل <b>TXID</b> كنص.\n"
         "ويمكنك بدلاً من ذلك إرسال صورة إثبات التحويل، ثم إرسال TXID في رسالة لاحقة.\n\n"
         "⚠️ لا تنفذ التحويل الخارجي أكثر من مرة لهذا الطلب.",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء الحجز", callback_data="admin_cancel_transfer")]]),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_cancel_transfer")]]),
     )
     await callback.answer()
 
 
 @router.callback_query(F.data == "admin_cancel_transfer")
 async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
-    """Release the fulfillment claim without changing the order state."""
+    """Cancel the current admin transfer input session without changing order state."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    data = await state.get_data()
-    order_id = data.get("admin_txid_order_id")
-    if order_id:
-        await release_order_fulfillment(int(order_id), callback.from_user.id)
     await state.clear()
-    await callback.message.edit_text("⚙️ <b>تم إلغاء حجز التحويل.</b>\n\nلم يتم تغيير حالة الطلب.", parse_mode="HTML")
+    await callback.message.edit_text("⚙️ <b>تم إلغاء إدخال بيانات التحويل.</b>\n\nلم يتم تغيير حالة الطلب.", parse_mode="HTML")
     await callback.answer("تم الإلغاء")
 
 
@@ -137,12 +114,11 @@ async def admin_transfer_photo_first(message: Message, state: FSMContext):
         "🔗 الآن أرسل TXID الصحيح كنص لإكمال الطلب وإرسال الإثبات للعميل.",
         parse_mode="HTML",
     )
-    await state.set_state(AdminStates.waiting_typing_txid)
 
 
 @router.message(AdminStates.waiting_typing_txid, F.text)
-async def admin_transfer_txid_after_photo(message: Message, state: FSMContext):
-    """Complete the order when TXID arrives after a screenshot."""
+async def admin_transfer_txid(message: Message, state: FSMContext):
+    """Read and finalize the TXID directly from the single configured admin."""
     data = await state.get_data()
     order_id = data.get("admin_txid_order_id")
     screenshot_id = data.get("admin_screenshot_id", "")
