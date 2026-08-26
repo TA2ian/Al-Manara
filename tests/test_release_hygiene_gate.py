@@ -38,14 +38,13 @@ def test_removed_runtime_compatibility_surfaces_stay_removed():
         assert not (ROOT / relative_path).exists(), relative_path
 
 
-def test_payment_method_runtime_has_one_current_owner_and_one_narrow_historical_ingress():
+def test_payment_method_runtime_has_one_current_owner():
     bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
     canonical_source = (ROOT / "handlers/payment_method_setup_policy.py").read_text(encoding="utf-8")
-    ingress_source = (ROOT / "handlers/payment_method_callback_policy.py").read_text(encoding="utf-8")
     keyboard_source = (ROOT / "keyboards/inline.py").read_text(encoding="utf-8")
 
     assert "payment_method_setup_policy" in bot_source
-    assert "payment_method_callback_policy" in bot_source
+    assert "payment_method_callback_policy" not in bot_source
     assert "payment_method_legacy_compat" not in bot_source
     assert "admin_pm_account_" not in bot_source
     assert "admin_pm_qr_" not in bot_source
@@ -53,8 +52,6 @@ def test_payment_method_runtime_has_one_current_owner_and_one_narrow_historical_
     assert "admin_pm_qr_" not in canonical_source
     assert "payment_methods_keyboard" not in keyboard_source
     assert "payment_method_actions" not in keyboard_source
-    assert "HISTORICAL_CODE_ALIASES" in ingress_source
-    assert "[^\\s]+" not in ingress_source
 
 
 def test_canonical_order_constraint_surface_is_active():
