@@ -198,27 +198,3 @@ def quick_actions_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📋 Disclaimer", callback_data="menu_disclaimer"), InlineKeyboardButton(text="🌐 Change Language", callback_data="quick_change_lang")],
         ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def payment_methods_keyboard(methods) -> InlineKeyboardMarkup:
-    """Admin list of persistent ShamCash payment methods."""
-    rows = []
-    for method in methods:
-        code = method["code"]
-        currency = method["currency"]
-        status = "🟢" if method["enabled"] else "🔴"
-        rows.append([InlineKeyboardButton(text=f"{status} {currency}", callback_data=f"admin_pm_view_{code}")])
-    rows.append([InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def payment_method_actions(code: str, enabled: bool) -> InlineKeyboardMarkup:
-    """Actions for one persistent payment method."""
-    toggle = "⏸ تعطيل" if enabled else "▶️ تفعيل"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 تعديل الحساب", callback_data=f"admin_pm_account_{code}")],
-        [InlineKeyboardButton(text="🖼️ حفظ/تحديث QR", callback_data=f"admin_pm_qr_{code}")],
-        [InlineKeyboardButton(text=toggle, callback_data=f"admin_pm_toggle_{code}")],
-        [InlineKeyboardButton(text="🔙 وسائل الدفع", callback_data="admin_payment_methods")],
-        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
-    ])
