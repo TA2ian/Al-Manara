@@ -2,7 +2,7 @@
 
 
 async def install_receipt_retry_constraints(conn) -> None:
-    """Allow only the canonical five-minute retry extension after receipt rejection."""
+    """Allow only canonical receipt retry extensions and valid receipt submissions."""
     await conn.execute(
         """
         CREATE OR REPLACE FUNCTION protect_order_payment_deadline()
@@ -42,5 +42,45 @@ async def install_receipt_retry_constraints(conn) -> None:
         CREATE TRIGGER trg_protect_order_payment_deadline
         BEFORE INSERT OR UPDATE OF payment_deadline, approved_at, created_at, status
         ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_deadline()
+        """
+    )
+
+    await conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION protect_receipt_submission_window()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'UPDATE'
+               AND (
+                    NEW.receipt_photo_id IS DISTINCT FROM OLD.receipt_photo_id
+                    OR NEW.receipt_upload_count IS DISTINCT FROM OLD.receipt_upload_count
+               )
+            THEN
+                IF NEW.status = 'waiting_payment'
+                   AND NEW.payment_deadline IS NOT NULL
+                   AND NEW.payment_deadline > CURRENT_TIMESTAMP
+                THEN
+                    RETURN NEW;
+                END IF;
+
+                IF OLD.status = 'waiting_payment'
+                   AND NEW.status = 'receipt_received'
+                THEN
+                    RETURN NEW;
+                END IF;
+
+                RAISE EXCEPTION 'receipt submission is not allowed outside the active payment window' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    await conn.execute("DROP TRIGGER IF EXISTS trg_protect_receipt_submission_window ON orders")
+    await conn.execute(
+        """
+        CREATE TRIGGER trg_protect_receipt_submission_window
+        BEFORE UPDATE OF receipt_photo_id, receipt_upload_count, status, payment_deadline
+        ON orders FOR EACH ROW EXECUTE FUNCTION protect_receipt_submission_window()
         """
     )
