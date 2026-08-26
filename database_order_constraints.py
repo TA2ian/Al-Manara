@@ -1,11 +1,16 @@
-"""Canonical PostgreSQL constraints for wallet and payment snapshots."""
+"""Canonical PostgreSQL constraints for wallet, payment, identity, and time snapshots."""
 from config import Config
 
 
 async def install_order_constraints(conn):
-    """Install canonical database invariants used by wallet and payment flows."""
+    """Install canonical database invariants used by wallet, payment, identity, and order flows."""
     await conn.execute("ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS recipient_name TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_recipient_name_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_full_name_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_telegram_id_snapshot BIGINT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_username_snapshot TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_shamcash_account_snapshot TEXT")
+
     await conn.execute(
         """UPDATE payment_methods
               SET recipient_name = COALESCE(NULLIF(BTRIM(recipient_name), ''), NULLIF(BTRIM($1), ''), 'ShamCash')
@@ -13,10 +18,86 @@ async def install_order_constraints(conn):
         Config.get_shamcash_name(),
     )
 
+    await conn.execute(
+        """UPDATE orders o
+              SET customer_full_name_snapshot = u.full_name,
+                  customer_telegram_id_snapshot = u.telegram_id,
+                  customer_username_snapshot = u.username,
+                  customer_shamcash_account_snapshot = u.shamcash_account
+             FROM users u
+            WHERE o.user_id = u.id
+              AND (o.customer_full_name_snapshot IS NULL
+                OR o.customer_telegram_id_snapshot IS NULL
+                OR o.customer_username_snapshot IS NULL
+                OR o.customer_shamcash_account_snapshot IS NULL)"""
+    )
+
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION snapshot_order_customer_identity()
+        RETURNS TRIGGER AS $$
+        DECLARE customer_row RECORD;
+        BEGIN
+            IF NEW.user_id IS NULL THEN
+                RAISE EXCEPTION 'order customer is required' USING ERRCODE='23514';
+            END IF;
+
+            SELECT id, full_name, telegram_id, username, shamcash_account,
+                   is_verified, phone_verified, phone_number, terms_accepted
+              INTO customer_row
+              FROM users
+             WHERE id = NEW.user_id;
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
+            END IF;
+            IF customer_row.terms_accepted IS NOT TRUE THEN
+                RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514';
+            END IF;
+            IF customer_row.is_verified IS NOT TRUE THEN
+                RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514';
+            END IF;
+            IF customer_row.phone_verified IS NOT TRUE OR customer_row.phone_number IS NULL OR btrim(customer_row.phone_number) = '' THEN
+                RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
+            END IF;
+            IF customer_row.full_name IS NULL OR btrim(customer_row.full_name) = '' THEN
+                RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514';
+            END IF;
+            IF customer_row.shamcash_account IS NULL OR btrim(customer_row.shamcash_account) = '' THEN
+                RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514';
+            END IF;
+
+            IF TG_OP = 'INSERT' THEN
+                NEW.customer_full_name_snapshot := customer_row.full_name;
+                NEW.customer_telegram_id_snapshot := customer_row.telegram_id;
+                NEW.customer_username_snapshot := customer_row.username;
+                NEW.customer_shamcash_account_snapshot := customer_row.shamcash_account;
+                RETURN NEW;
+            END IF;
+
+            IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+                RAISE EXCEPTION 'order customer snapshot is immutable' USING ERRCODE='23514';
+            END IF;
+            IF NEW.customer_full_name_snapshot IS DISTINCT FROM OLD.customer_full_name_snapshot
+               OR NEW.customer_telegram_id_snapshot IS DISTINCT FROM OLD.customer_telegram_id_snapshot
+               OR NEW.customer_username_snapshot IS DISTINCT FROM OLD.customer_username_snapshot
+               OR NEW.customer_shamcash_account_snapshot IS DISTINCT FROM OLD.customer_shamcash_account_snapshot THEN
+                RAISE EXCEPTION 'order customer identity snapshot is immutable' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    await conn.execute("DROP TRIGGER IF EXISTS trg_snapshot_order_customer_identity ON orders")
+    await conn.execute("""CREATE TRIGGER trg_snapshot_order_customer_identity
+        BEFORE INSERT OR UPDATE OF user_id, customer_full_name_snapshot,
+            customer_telegram_id_snapshot, customer_username_snapshot,
+            customer_shamcash_account_snapshot
+        ON orders FOR EACH ROW EXECUTE FUNCTION snapshot_order_customer_identity()""")
+
     await conn.execute("""
         CREATE OR REPLACE FUNCTION enforce_order_wallet_snapshot()
         RETURNS TRIGGER AS $$
-        DECLARE wallet_row RECORD; customer_row RECORD;
+        DECLARE wallet_row RECORD;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
                 IF NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
@@ -25,13 +106,7 @@ async def install_order_constraints(conn):
                 END IF;
                 RETURN NEW;
             END IF;
-            SELECT is_verified, phone_verified, phone_number, terms_accepted INTO customer_row FROM users WHERE id = NEW.user_id;
-            IF NOT FOUND THEN RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514'; END IF;
-            IF customer_row.terms_accepted IS NOT TRUE THEN RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514'; END IF;
-            IF customer_row.is_verified IS NOT TRUE THEN RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514'; END IF;
-            IF customer_row.phone_verified IS NOT TRUE OR customer_row.phone_number IS NULL OR btrim(customer_row.phone_number) = '' THEN
-                RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
-            END IF;
+
             SELECT id, address, network, qr_photo_id, verification_status, deleted_at INTO wallet_row
               FROM saved_addresses
              WHERE user_id = NEW.user_id AND address = NEW.wallet_address AND network = NEW.network AND deleted_at IS NULL
