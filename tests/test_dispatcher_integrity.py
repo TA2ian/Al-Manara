@@ -44,6 +44,7 @@ class DispatcherIntegrityTests(unittest.TestCase):
         orders = (ROOT / "handlers/customer_orders_policy.py").read_text(encoding="utf-8")
         settings = (ROOT / "handlers/customer_settings_policy.py").read_text(encoding="utf-8")
         navigation = (ROOT / "handlers/customer_navigation_policy.py").read_text(encoding="utf-8")
+        legal = (ROOT / "handlers/legal_navigation_policy.py").read_text(encoding="utf-8")
 
         for router in (
             "profile",
@@ -51,6 +52,7 @@ class DispatcherIntegrityTests(unittest.TestCase):
             "customer_orders_policy",
             "customer_settings_policy",
             "customer_navigation_policy",
+            "legal_navigation_policy",
         ):
             self.assertIn(f"dp.include_router({router}.router)", bot)
 
@@ -64,12 +66,13 @@ class DispatcherIntegrityTests(unittest.TestCase):
             self.assertIn(label, settings)
         self.assertIn("_normalize_menu_label", settings)
         self.assertIn('F.data == "quick_reorder"', navigation)
+        self.assertIn("menu_disclaimer", legal)
 
     def test_customer_navigation_has_single_authority(self):
         source = (ROOT / "handlers/customer_navigation_policy.py").read_text(encoding="utf-8")
         self.assertIn('F.data == "quick_reorder"', source)
         self.assertIn('F.data == "menu_help"', source)
-        self.assertIn('F.data == "menu_disclaimer"', source)
+        self.assertNotIn('F.data == "menu_disclaimer"', source)
         self.assertIn('F.data == "quick_saved_addresses"', source)
         self.assertIn('F.data.startswith("view_addr_")', source)
         self.assertIn('F.data.startswith("del_addr_")', source)
