@@ -32,7 +32,7 @@ async def _load_owned_order(order_id: int, telegram_id: int) -> Any | None:
         return await conn.fetchrow(
             """
             SELECT o.*, u.telegram_id AS user_telegram_id, u.full_name,
-                   u.shamcash_account, u.language
+                   u.username, u.shamcash_account, u.language
             FROM orders o
             JOIN users u ON o.user_id = u.id
             WHERE o.id = $1 AND u.telegram_id = $2
@@ -86,8 +86,8 @@ async def _verify_receipt(order: Any, image_bytes: bytes) -> dict:
     return await ReceiptVerifier.verify_shamcash_receipt(
         image_bytes=image_bytes,
         order_date=order["created_at"],
-        customer_name=order["full_name"] or "",
-        customer_shamcash_account=order["shamcash_account"] or "",
+        customer_name=(order.get("customer_full_name_snapshot") or order.get("full_name") or ""),
+        customer_shamcash_account=(order.get("customer_shamcash_account_snapshot") or order.get("shamcash_account") or ""),
         admin_name=Config.get_shamcash_name(),
         admin_shamcash_account=admin_account,
         expected_amount=float(order["total_amount"]),
@@ -258,6 +258,28 @@ async def notify_admins_receipt(
     is_document: bool | None,
     manual_review_requested: bool = False,
 ) -> None:
+    pool = await get_pool()
+    customer_name = order.get("customer_full_name_snapshot") or order.get("full_name") or "N/A"
+    customer_telegram_id = order.get("customer_telegram_id_snapshot") or order.get("user_telegram_id")
+    customer_username = order.get("customer_username_snapshot") or order.get("username") or username or "N/A"
+    customer_shamcash = order.get("customer_shamcash_account_snapshot") or order.get("shamcash_account") or "N/A"
+
+    if order.get("user_id") and (
+        customer_name == "N/A"
+        or customer_telegram_id is None
+        or customer_shamcash == "N/A"
+    ):
+        async with pool.acquire() as conn:
+            customer = await conn.fetchrow(
+                "SELECT telegram_id, full_name, username, shamcash_account FROM users WHERE id = $1",
+                order["user_id"],
+            )
+        if customer:
+            customer_name = customer_name if customer_name != "N/A" else (customer["full_name"] or "N/A")
+            customer_telegram_id = customer_telegram_id or customer["telegram_id"]
+            customer_username = customer_username if customer_username != "N/A" else (customer["username"] or "N/A")
+            customer_shamcash = customer_shamcash if customer_shamcash != "N/A" else (customer["shamcash_account"] or "N/A")
+
     score = verification_result.get("score", 0) if verification_result else 0
     score_label = verification_result.get("score_label", "فاشل") if verification_result else "فاشل"
     details = verification_result.get("details", []) if verification_result else []
@@ -286,10 +308,10 @@ async def notify_admins_receipt(
         f"💵 الإجمالي: <b>{money(order['total_amount'])}</b> {currency_display}\n"
         f"🌐 الشبكة: {html.escape(order.get('network') or '')}\n"
         f"📍 المحفظة: <code>{html.escape(order.get('wallet_address') or '')}</code>\n"
-        f"👤 العميل: <b>{html.escape(order.get('full_name') or 'N/A')}</b>\n"
-        f"🆔 <code>{order.get('user_telegram_id') or ''}</code>\n"
-        f"📱 @{html.escape(username or 'N/A')}\n"
-        f"🏦 ShamCash: <code>{html.escape(order.get('shamcash_account') or 'N/A')}</code>\n\n"
+        f"👤 العميل: <b>{html.escape(customer_name)}</b>\n"
+        f"🆔 <code>{customer_telegram_id or 'N/A'}</code>\n"
+        f"📱 @{html.escape(customer_username.lstrip('@'))}\n"
+        f"🏦 ShamCash: <code>{html.escape(customer_shamcash)}</code>\n\n"
         f"{verification_block}"
     )
     for admin_id in Config.ADMIN_IDS:
