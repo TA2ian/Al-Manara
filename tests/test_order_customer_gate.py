@@ -64,7 +64,11 @@ class OrderCustomerGateTests(unittest.IsolatedAsyncioTestCase):
                     payment_method_code TEXT,
                     payment_recipient_name_snapshot TEXT,
                     payment_account_snapshot TEXT,
-                    payment_qr_photo_id TEXT
+                    payment_qr_photo_id TEXT,
+                    order_number TEXT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    approved_at TIMESTAMP,
+                    payment_deadline TIMESTAMP
                 )
             """)
             await conn.execute("""
