@@ -1,9 +1,6 @@
 """Durable ownership for the manual USDT fulfillment step."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-
 from database import get_pool
 
 
@@ -96,63 +93,3 @@ async def release_order_fulfillment(order_id: int, admin_id: int) -> bool:
             admin_id,
         )
     return result == "UPDATE 1"
-
-
-async def validate_order_fulfillment_owner(order_id: int, admin_id: int) -> bool:
-    """Return whether the admin still owns the active fulfillment claim."""
-    pool = await get_pool()
-    if pool is None:
-        raise RuntimeError("Database pool is not initialized")
-    async with pool.acquire() as conn:
-        return bool(
-            await conn.fetchval(
-                """
-                SELECT EXISTS(
-                    SELECT 1 FROM order_fulfillment_claims
-                    WHERE order_id = $1 AND admin_id = $2 AND released_at IS NULL AND completed_at IS NULL
-                )
-                """,
-                order_id,
-                admin_id,
-            )
-        )
-
-
-async def mark_order_fulfillment_completed(
-    order_id: int,
-    admin_id: int,
-    txid: str,
-    screenshot_id: str,
-) -> bool:
-    """Persist the transfer evidence while closing the active claim."""
-    pool = await get_pool()
-    if pool is None:
-        raise RuntimeError("Database pool is not initialized")
-    async with pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE order_fulfillment_claims
-            SET completed_at = NOW(), txid = $3, screenshot_id = $4
-            WHERE order_id = $1 AND admin_id = $2 AND released_at IS NULL AND completed_at IS NULL
-            """,
-            order_id,
-            admin_id,
-            txid,
-            screenshot_id or None,
-        )
-    return result == "UPDATE 1"
-
-
-async def get_order_fulfillment_claim(order_id: int) -> Any | None:
-    """Return the current fulfillment claim for diagnostics and reporting."""
-    pool = await get_pool()
-    if pool is None:
-        raise RuntimeError("Database pool is not initialized")
-    async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            """
-            SELECT order_id, admin_id, claimed_at, released_at, completed_at, txid, screenshot_id
-            FROM order_fulfillment_claims WHERE order_id = $1
-            """,
-            order_id,
-        )
