@@ -15,6 +15,7 @@ from bot import create_dispatcher
 from keep_alive import keep_alive
 from services.settings_service import SettingsService
 from services.order_state_service import transition_order, InvalidOrderTransition
+from services.fulfillment_claim_service import init_fulfillment_claims
 from services.formatters import usdt
 
 os.makedirs("logs", exist_ok=True)
@@ -123,6 +124,7 @@ async def check_expired_orders(bot: Bot):
 async def on_startup(bot: Bot):
     logger.info("Starting bot...")
     await init_db()
+    await init_fulfillment_claims()
     await SettingsService.init()
     maintenance_active = await SettingsService.get_bool('maintenance_mode', False)
     Config.set_maintenance_mode_sync(maintenance_active)
