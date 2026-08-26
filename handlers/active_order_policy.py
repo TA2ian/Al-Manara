@@ -7,15 +7,9 @@ from aiogram.fsm.context import FSMContext
 from database import get_pool
 from keyboards.reply import compact_reply_keyboard
 from services.formatters import usdt
+from services.order_lifecycle import ACTIVE_ORDER_STATUSES
 
 router = Router()
-
-ACTIVE_STATUSES = (
-    "pending",
-    "waiting_payment",
-    "receipt_received",
-    "payment_confirmed",
-)
 
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
@@ -35,7 +29,7 @@ async def guide_active_order(message: Message, state: FSMContext):
         active_order = await conn.fetchrow(
             "SELECT order_number, created_at, amount_usdt, status FROM orders "
             "WHERE user_id = $1 AND status = ANY($2) ORDER BY created_at DESC LIMIT 1",
-            user["id"], ACTIVE_STATUSES,
+            user["id"], list(ACTIVE_ORDER_STATUSES),
         )
 
     if not active_order:
