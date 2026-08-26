@@ -1,7 +1,6 @@
 """Regression coverage for customer quick-menu and legal onboarding routing."""
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -47,11 +46,8 @@ def test_complete_legal_center_has_seven_contextual_sections():
     legal_source = (ROOT / "services/legal_policy.py").read_text(encoding="utf-8")
     assert "legal_section_[1-7]" in source
     for title in (
-        "المحفظة وعنوان الاستلام",
-        "التوثيق والخصوصية",
-        "الطلبات والمعالجة",
-        "الأمان ومكافحة الاحتيال",
-        "التحديثات والسجلات",
+        "المحفظة وعنوان الاستلام", "التوثيق والخصوصية", "الطلبات والمعالجة",
+        "الأمان ومكافحة الاحتيال", "التحديثات والسجلات",
     ):
         assert title in source or title in legal_source
 
@@ -66,15 +62,11 @@ def test_start_and_disclaimer_share_the_same_legal_policy_owner():
     assert "from services.legal_policy import get_terms_text" in locale_source
 
 
-def test_phone_keyboard_cleanup_router_precedes_canonical_verification_router():
+def test_phone_verification_has_one_canonical_runtime_owner():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    cleanup = source.index("dp.include_router(verification_keyboard_cleanup.router)")
-    verification = source.index("dp.include_router(verification_policy.router)")
-    assert cleanup < verification
-
-
-def test_phone_keyboard_cleanup_removes_reply_keyboard_after_valid_contact():
-    source = (ROOT / "handlers/verification_keyboard_cleanup.py").read_text(encoding="utf-8")
-    assert "ReplyKeyboardRemove" in source
-    assert "await receive_phone(message, state)" in source
-    assert "VerificationStates.waiting_full_name" in source
+    verification = source.count("dp.include_router(verification_policy.router)")
+    assert verification == 1
+    assert "verification_keyboard_cleanup" not in source
+    policy = (ROOT / "handlers/verification_policy.py").read_text(encoding="utf-8")
+    assert "@router.message(VerificationStates.waiting_phone, F.contact)" in policy
+    assert "await _ask_full_name(message, state, lang)" in policy
