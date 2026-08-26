@@ -2,7 +2,6 @@
 import asyncio
 import html
 import logging
-from datetime import datetime
 
 from aiogram import Bot
 
@@ -10,12 +9,19 @@ from config import Config
 from database import get_pool
 from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
+from services.time_service import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
 
 async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int, admin_id: int):
     """Finalize an approved USDT order from the configured single-admin session."""
+    txid = (txid or "").strip()
+    if not txid:
+        await msg.answer("❌ TXID غير صالح.")
+        await state.clear()
+        return False
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -41,7 +47,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                     admin_id=admin_id,
                     updates={
                         "txid": txid,
-                        "completed_at": datetime.now(),
+                        "completed_at": utc_now_naive(),
                         "receipt_photo_id": None,
                     },
                 )
@@ -57,82 +63,90 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             )
 
     bot = Bot(token=Config.BOT_TOKEN)
-    comp_lang = order["language"] or "ar"
-    network_name = order["network"] or "TRC20"
-    amount_text = usdt(order["amount_usdt"])
-
-    if comp_lang == "ar":
-        completion_text = (
-            f"✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
-            f"📦 الطلب: #{order['order_number']}\n"
-            f"💰 المبلغ: {amount_text} USDT إلى {network_name}\n"
-            f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
-            "يمكنك التحقق من المعاملة عبر مستكشف الشبكة."
-        )
-    else:
-        completion_text = (
-            f"✅ <b>Your order has been completed!</b>\n\n"
-            f"📦 Order: #{order['order_number']}\n"
-            f"💰 Amount: {amount_text} USDT on {network_name}\n"
-            f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
-            "You can verify the transaction on the network explorer."
-        )
-
-    if network_name == "BEP20":
-        explorer_url = f"https://bscscan.com/tx/{txid}"
-    else:
-        explorer_url = f"https://tronscan.org/#/transaction/{txid}"
-    completion_text += f"\n<a href='{explorer_url}'>🔍 {'عرض على المستكشف' if comp_lang == 'ar' else 'View on explorer'}</a>"
-
-    from keyboards.reply import compact_reply_keyboard
     try:
-        if screenshot_id:
-            await bot.send_photo(
-                order["telegram_id"], screenshot_id,
-                caption=completion_text,
-                parse_mode="HTML",
-                reply_markup=compact_reply_keyboard(comp_lang),
+        comp_lang = order["language"] or "ar"
+        network_name = order["network"] or "TRC20"
+        amount_text = usdt(order["amount_usdt"])
+
+        if comp_lang == "ar":
+            completion_text = (
+                "✅ <b>تم إتمام طلبك بنجاح!</b>\n\n"
+                f"📦 الطلب: #{order['order_number']}\n"
+                f"💰 المبلغ: {amount_text} USDT إلى {network_name}\n"
+                f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
+                "يمكنك التحقق من المعاملة عبر مستكشف الشبكة."
             )
         else:
-            await bot.send_message(
-                order["telegram_id"], completion_text,
-                parse_mode="HTML",
-                reply_markup=compact_reply_keyboard(comp_lang),
+            completion_text = (
+                "✅ <b>Your order has been completed!</b>\n\n"
+                f"📦 Order: #{order['order_number']}\n"
+                f"💰 Amount: {amount_text} USDT on {network_name}\n"
+                f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
+                "You can verify the transaction on the network explorer."
             )
-    except Exception:
-        logger.exception("Failed to notify customer for completed order %s", order_id)
 
-    admin_done = (
-        f"✅ <b>{'تم إكمال الطلب' if comp_lang == 'ar' else 'Order completed'}</b>\n\n"
-        f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
-        f"🆔 <code>{order['telegram_id']}</code>\n"
-        f"📦 {'الطلب' if comp_lang == 'ar' else 'Order'}: #{order['order_number']}\n"
-        f"💰 {amount_text} USDT\n"
-        f"🌐 {html.escape(network_name)}\n"
-        f"🔗 TXID: <code>{html.escape(txid)}</code>"
-    )
+        if network_name == "BEP20":
+            explorer_url = f"https://bscscan.com/tx/{txid}"
+        else:
+            explorer_url = f"https://tronscan.org/#/transaction/{txid}"
+        completion_text += f"\n<a href='{explorer_url}'>🔍 {'عرض على المستكشف' if comp_lang == 'ar' else 'View on explorer'}</a>"
 
-    await asyncio.gather(*[
-        bot.send_message(admin_id, admin_done, parse_mode="HTML")
-        for admin_id in Config.ADMIN_IDS
-    ], return_exceptions=True)
+        from keyboards.reply import compact_reply_keyboard
+        try:
+            if screenshot_id:
+                await bot.send_photo(
+                    order["telegram_id"],
+                    screenshot_id,
+                    caption=completion_text,
+                    parse_mode="HTML",
+                    reply_markup=compact_reply_keyboard(comp_lang),
+                )
+            else:
+                await bot.send_message(
+                    order["telegram_id"],
+                    completion_text,
+                    parse_mode="HTML",
+                    reply_markup=compact_reply_keyboard(comp_lang),
+                )
+        except Exception:
+            logger.exception("Failed to notify customer for completed order %s", order_id)
 
-    await msg.answer(
-        f"✅ تم إكمال الطلب #{order['order_number']} بنجاح!"
-        if comp_lang == "ar" else
-        f"✅ Order #{order['order_number']} completed successfully!"
-    )
-
-    try:
-        from keyboards.inline import rating_keyboard
-        await bot.send_message(
-            order["telegram_id"],
-            "⭐ يرجى تقييم تجربتك:" if comp_lang == "ar" else "⭐ Please rate your experience:",
-            reply_markup=rating_keyboard(order_id),
+        admin_done = (
+            f"✅ <b>{'تم إكمال الطلب' if comp_lang == 'ar' else 'Order completed'}</b>\n\n"
+            f"👤 {html.escape(order['full_name'] or 'N/A')}\n"
+            f"🆔 <code>{order['telegram_id']}</code>\n"
+            f"📦 {'الطلب' if comp_lang == 'ar' else 'Order'}: #{order['order_number']}\n"
+            f"💰 {amount_text} USDT\n"
+            f"🌐 {html.escape(network_name)}\n"
+            f"🔗 TXID: <code>{html.escape(txid)}</code>"
         )
-        await bot.send_message(order["telegram_id"], "👇", reply_markup=compact_reply_keyboard(comp_lang))
-    except Exception:
-        logger.exception("Failed to send rating prompt for order %s", order_id)
 
-    await state.clear()
-    return True
+        await asyncio.gather(*[
+            bot.send_message(admin_id, admin_done, parse_mode="HTML")
+            for admin_id in Config.ADMIN_IDS
+        ], return_exceptions=True)
+
+        try:
+            await msg.answer(
+                f"✅ تم إكمال الطلب #{order['order_number']} بنجاح!"
+                if comp_lang == "ar" else
+                f"✅ Order #{order['order_number']} completed successfully!"
+            )
+        except Exception:
+            logger.exception("Failed to acknowledge completion to admin for order %s", order_id)
+
+        try:
+            from keyboards.inline import rating_keyboard
+            await bot.send_message(
+                order["telegram_id"],
+                "⭐ يرجى تقييم تجربتك:" if comp_lang == "ar" else "⭐ Please rate your experience:",
+                reply_markup=rating_keyboard(order_id),
+            )
+            await bot.send_message(order["telegram_id"], "👇", reply_markup=compact_reply_keyboard(comp_lang))
+        except Exception:
+            logger.exception("Failed to send rating prompt for order %s", order_id)
+
+        return True
+    finally:
+        await bot.session.close()
+        await state.clear()
