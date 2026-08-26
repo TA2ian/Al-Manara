@@ -3,8 +3,13 @@
 Telegram inline keyboards are persistent messages. Messages created before the
 payment-method callback IDs were canonicalized can therefore remain visible
 and can still send callbacks containing old currency labels or old method-code
-spellings. This router accepts only a closed set of known aliases and delegates
-all state changes to the canonical payment-method implementation.
+spellings. This router accepts only a closed set of known historical aliases
+and delegates all state changes to the canonical payment-method implementation.
+
+The compatibility surface is intentionally closed. Canonical payment-method
+codes and unknown future codes must never match this router, otherwise a future
+canonical callback could be consumed by compatibility logic before its own
+handler is introduced.
 """
 import re
 
@@ -20,7 +25,6 @@ router = Router()
 _CODE_ALIASES = {
     "USD": "shamcash_usd",
     "usd": "shamcash_usd",
-    "shamcash_usd": "shamcash_usd",
     "shamcash_USD": "shamcash_usd",
     "NEW.SYP": "shamcash_new_syp",
     "new_syp": "shamcash_new_syp",
@@ -28,13 +32,13 @@ _CODE_ALIASES = {
     "syp": "shamcash_new_syp",
     "SYP": "shamcash_new_syp",
     "shamcash_syp": "shamcash_new_syp",
-    "shamcash_new_syp": "shamcash_new_syp",
     "shamcash_new.syp": "shamcash_new_syp",
     "shamcash_NEW.SYP": "shamcash_new_syp",
 }
 
+_LEGACY_CODE_PATTERN = "(?:" + "|".join(re.escape(code) for code in _CODE_ALIASES) + ")"
 _CALLBACK_PATTERN = re.compile(
-    r"^admin_pm_(?P<action>view|setup|enable|disable|toggle)_(?P<code>(?!confirm$)[^\s]+)$"
+    rf"^admin_pm_(?P<action>view|setup|enable|disable|toggle)_(?P<code>{_LEGACY_CODE_PATTERN})$"
 )
 
 
@@ -59,7 +63,11 @@ async def _delegate_with_canonical_data(callback: CallbackQuery, canonical_data:
         callback.data = original_data
 
 
-@router.callback_query(F.data.regexp(r"^admin_pm_(?:view|setup|enable|disable|toggle)_(?!confirm$)[^\s]+$"))
+@router.callback_query(
+    F.data.regexp(
+        rf"^admin_pm_(?:view|setup|enable|disable|toggle)_{_LEGACY_CODE_PATTERN}$"
+    )
+)
 async def legacy_payment_method_callback(callback: CallbackQuery, state: FSMContext):
     if callback.from_user is None or callback.from_user.id not in Config.ADMIN_IDS:
         await callback.answer("⛔ Access denied", show_alert=True)
