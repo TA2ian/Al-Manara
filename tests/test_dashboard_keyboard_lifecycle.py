@@ -35,11 +35,9 @@ def test_order_start_explicitly_removes_dashboard_keyboard():
     assert "await state.set_state(OrderStates.waiting_amount)" in source
 
 
-def test_phone_verification_has_a_dedicated_keyboard_cleanup_router():
-    source = (ROOT / "handlers/verification_keyboard_cleanup.py").read_text(encoding="utf-8")
+def test_phone_verification_uses_the_canonical_verification_router_only():
     bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    assert "ReplyKeyboardRemove" in source
-    assert "verification_keyboard_cleanup.router" in bot_source
-    cleanup = bot_source.index("verification_keyboard_cleanup.router")
-    canonical = bot_source.index("verification_policy.router")
-    assert cleanup < canonical
+    policy_source = (ROOT / "handlers/verification_policy.py").read_text(encoding="utf-8")
+    assert bot_source.count("dp.include_router(verification_policy.router)") == 1
+    assert "verification_keyboard_cleanup" not in bot_source
+    assert "@router.message(VerificationStates.waiting_phone, F.contact)" in policy_source
