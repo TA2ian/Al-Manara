@@ -2,13 +2,14 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def message_template_keyboard(prefix: str) -> InlineKeyboardMarkup:
+def message_template_keyboard(prefix: str, cancel_callback: str | None = None) -> InlineKeyboardMarkup:
+    cancel = cancel_callback or ("admin_personal_message_cancel" if prefix == "admin_personal" else "admin_broadcast_cancel")
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 تحديث", callback_data=f"{prefix}_template_update")],
         [InlineKeyboardButton(text="ℹ️ تنبيه خدمي", callback_data=f"{prefix}_template_service")],
         [InlineKeyboardButton(text="🛠️ صيانة", callback_data=f"{prefix}_template_maintenance")],
         [InlineKeyboardButton(text="⚠️ تنبيه مهم", callback_data=f"{prefix}_template_important")],
-        [InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_broadcast_cancel")],
+        [InlineKeyboardButton(text="❌ إلغاء", callback_data=cancel)],
     ])
 
 
