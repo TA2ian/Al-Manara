@@ -59,10 +59,11 @@ def test_order_wallet_state_is_canonical():
 def test_customer_navigation_has_one_runtime_owner():
     bot = (ROOT / "bot.py").read_text(encoding="utf-8")
     navigation = (HANDLERS / "customer_navigation_policy.py").read_text(encoding="utf-8")
+    legal_navigation = (HANDLERS / "legal_navigation_policy.py").read_text(encoding="utf-8")
     assert "dp.include_router(customer_navigation_policy.router)" in bot
+    assert "dp.include_router(legal_navigation_policy.router)" in bot
     for callback in (
         "menu_help",
-        "menu_disclaimer",
         "quick_contact",
         "quick_saved_addresses",
         "view_addr_",
@@ -70,6 +71,8 @@ def test_customer_navigation_has_one_runtime_owner():
         "quick_reorder",
     ):
         assert callback in navigation
+    assert '@router.callback_query(F.data == "menu_disclaimer")' not in navigation
+    assert '@router.callback_query(F.data == "menu_disclaimer")' in legal_navigation
 
 
 def test_admin_graph_has_one_runtime_owner_per_policy():
