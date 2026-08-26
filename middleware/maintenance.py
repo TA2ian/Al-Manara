@@ -3,16 +3,15 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 
 from config import Config
-from services.locale_service import locale_service
-from services.maintenance_service import MaintenanceService, MaintenanceMode
+from services.maintenance_service import MaintenanceMode, MaintenanceService
 
 
 class MaintenanceMiddleware(BaseMiddleware):
-    """Block only flows that the active maintenance mode actually disables."""
+    """Block only operations that the active maintenance mode actually disables."""
 
     async def __call__(self, handler, event, data):
         mode = await MaintenanceService.get_mode()
-        if mode == MaintenanceMode.OFF:
+        if mode in (MaintenanceMode.OFF, MaintenanceMode.LIMITED):
             return await handler(event, data)
 
         user_id = event.from_user.id if isinstance(event, (Message, CallbackQuery)) else None
@@ -25,12 +24,9 @@ class MaintenanceMiddleware(BaseMiddleware):
             if lang not in ("ar", "en"):
                 lang = "ar"
 
-        if mode == MaintenanceMode.LIMITED:
-            return await handler(event, data)
-
-        key = MaintenanceService.user_message_key(mode)
+        notice = MaintenanceService.user_notice(mode, lang)
         if isinstance(event, Message):
-            await event.answer(locale_service.get(key, lang))
+            await event.answer(notice, parse_mode="HTML")
         elif isinstance(event, CallbackQuery):
-            await event.answer(locale_service.get(key, lang), show_alert=True)
+            await event.answer(notice, show_alert=True)
         return
