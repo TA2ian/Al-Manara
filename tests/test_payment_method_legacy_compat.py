@@ -24,8 +24,8 @@ def test_legacy_callbacks_delegate_to_canonical_handlers_and_state_transition():
     assert "_delegate_with_canonical_data" in source
 
 
-def test_legacy_router_is_registered_before_canonical_payment_router():
+def test_canonical_payment_router_is_registered_before_legacy_compat_router():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    legacy = source.index("dp.include_router(payment_method_legacy_compat.router)")
     canonical = source.index("dp.include_router(payment_method_setup_policy.router)")
-    assert legacy < canonical
+    legacy = source.index("dp.include_router(payment_method_legacy_compat.router)")
+    assert canonical < legacy
