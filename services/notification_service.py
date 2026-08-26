@@ -4,6 +4,7 @@ import logging
 from aiogram import Bot
 
 from services.formatters import money, percent, usdt
+from services.time_service import format_order_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class NotificationService:
         currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
         amount = money(order.get("total_amount"))
         deadline = order.get("payment_deadline")
-        deadline_text = deadline.strftime("%Y-%m-%d %H:%M") if deadline else "غير محددة"
+        deadline_text = format_order_datetime(deadline) if deadline else "غير محددة"
         fee_percent = percent(order.get("fee_percent"))
         fee_amount = money(order.get("fee_amount"))
 
