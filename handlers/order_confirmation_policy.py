@@ -1,4 +1,5 @@
 """Authoritative customer order confirmation flow."""
+import html
 import logging
 import uuid
 from datetime import timedelta
@@ -23,6 +24,11 @@ from states import OrderStates
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def _html(value: object) -> str:
+    """Escape a dynamic value before placing it in Telegram HTML."""
+    return html.escape(str(value), quote=True)
 
 
 def _order_number() -> str:
@@ -143,10 +149,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
 
         admin_status = "waiting_payment" if auto_approved else "pending"
         admin_text = (f"📦 <b>{'تم اعتماد طلب USDT تلقائياً' if auto_approved else 'طلب شراء USDT جديد'}</b>\n\n"
-            f"📋 الرقم: #{order_number}\n👤 العميل: {customer_name}\n🆔 المعرف: <code>{callback.from_user.id}</code>\n"
-            f"👤 المستخدم: @{username}\n🏦 ShamCash العميل: <code>{customer_shamcash}</code>\n💰 الكمية: {usdt(data['amount_usdt'])} USDT\n🌐 الشبكة: {wallet['network']}\n"
-            f"💱 عملة الدفع: {currency}\n💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
-            f"📍 <b>عنوان الاستلام:</b> <code>{wallet['address']}</code>\n\n"
+            f"📋 الرقم: #{_html(order_number)}\n👤 العميل: {_html(customer_name)}\n🆔 المعرف: <code>{_html(callback.from_user.id)}</code>\n"
+            f"👤 المستخدم: @{_html(username)}\n🏦 ShamCash العميل: <code>{_html(customer_shamcash)}</code>\n💰 الكمية: {_html(usdt(data['amount_usdt']))} USDT\n🌐 الشبكة: {_html(wallet['network'])}\n"
+            f"💱 عملة الدفع: {_html(currency)}\n💵 الإجمالي: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
+            f"📍 <b>عنوان الاستلام:</b> <code>{_html(wallet['address'])}</code>\n\n"
             + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
         for admin_id in Config.ADMIN_IDS:
             try:
