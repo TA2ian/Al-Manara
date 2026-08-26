@@ -88,6 +88,7 @@ async def check_expired_orders(bot: Bot):
 async def maintenance_notification_worker(bot: Bot):
     """Deliver durable maintenance notification jobs with bounded retries."""
     while True:
+        processed = 0
         try:
             processed = await MaintenanceService.process_notification_jobs(bot, batch_size=50)
             if processed:
