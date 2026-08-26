@@ -1,7 +1,7 @@
 """Authoritative customer order confirmation flow."""
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
@@ -18,6 +18,7 @@ from services.operational_policy_service import OperationalPolicyService
 from services.order_invoice_service import render_order_invoice
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
 from services.settings_service import SettingsService
+from services.time_service import utc_now_naive
 from states import OrderStates
 
 router = Router()
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _order_number() -> str:
-    return f"ORD_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6].upper()}"
+    return f"ORD_{utc_now_naive().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6].upper()}"
 
 
 @router.callback_query(OrderStates.waiting_confirmation, lambda c: c.data == "confirm_order")
@@ -49,7 +50,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
 
         auto_approved = False
         async with pool.acquire() as conn:
-            user = await conn.fetchrow("SELECT id, language, terms_accepted, is_blocked, is_verified FROM users WHERE telegram_id = $1", callback.from_user.id)
+            user = await conn.fetchrow("SELECT id, language, terms_accepted, is_blocked, is_verified, full_name, username, shamcash_account FROM users WHERE telegram_id = $1", callback.from_user.id)
             if not user:
                 await callback.answer("❌ يرجى بدء البوت أولاً: /start", show_alert=True)
                 await state.clear()
@@ -57,6 +58,9 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             lang = user["language"] or "ar"
             if not user["terms_accepted"] or user["is_blocked"] or not user["is_verified"]:
                 await callback.answer("❌ لا يمكن إرسال الطلب قبل اكتمال متطلبات الحساب." if lang == "ar" else "❌ Your account requirements are not complete.", show_alert=True)
+                return
+            if not (user["full_name"] or "").strip() or not (user["shamcash_account"] or "").strip():
+                await callback.answer("❌ بيانات حسابك غير مكتملة. أعد التحقق من الاسم وحساب ShamCash قبل إنشاء الطلب." if lang == "ar" else "❌ Your verified name or ShamCash account is incomplete. Please verify your account again before creating an order.", show_alert=True)
                 return
 
             await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user["id"]))
@@ -85,9 +89,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await callback.answer("❌ عملة الدفع غير صالحة." if lang == "ar" else "❌ Invalid payment currency.", show_alert=True)
                 return
 
-            payment = await conn.fetchrow("""SELECT code, account_identifier, qr_photo_id FROM payment_methods
+            payment = await conn.fetchrow("""SELECT code, account_identifier, qr_photo_id, recipient_name FROM payment_methods
                 WHERE provider = 'ShamCash' AND currency = $1 AND code IN ('shamcash_usd', 'shamcash_new_syp')
                 AND enabled = TRUE AND NULLIF(BTRIM(account_identifier), '') IS NOT NULL AND qr_photo_id IS NOT NULL
+                AND NULLIF(BTRIM(recipient_name), '') IS NOT NULL
                 ORDER BY id ASC LIMIT 1""", currency)
             if not payment:
                 await callback.answer("❌ الدفع بهذه العملة غير متاح حالياً. يرجى المحاولة لاحقاً." if lang == "ar" else "❌ Payment for this currency is temporarily unavailable. Please try again later.", show_alert=True)
@@ -97,30 +102,32 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             order_number = _order_number()
             row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, amount_usdt, exchange_rate,
                 payment_currency, base_amount, fee_percent, fee_amount, total_amount, wallet_address, wallet_qr_photo_id,
-                payment_method_code, payment_account_snapshot, payment_qr_photo_id, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending') RETURNING id""",
+                payment_method_code, payment_account_snapshot, payment_qr_photo_id, payment_recipient_name_snapshot, status)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending') RETURNING id""",
                 order_number, user["id"], wallet["network"], data["amount_usdt"], calculation["exchange_rate"], currency,
                 calculation["base_amount"], calculation["fee_percent"], calculation["fee_amount"], calculation["total_amount"],
-                wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"])
+                wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
             completed_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'", user["id"])
             auto_approved = bool(await SettingsService.get_bool("auto_approve", False) and completed_count >= 3)
             if auto_approved:
-                deadline = datetime.now() + timedelta(minutes=await OperationalPolicyService.get_payment_timeout_minutes())
+                now_utc = utc_now_naive()
+                deadline = now_utc + timedelta(minutes=await OperationalPolicyService.get_payment_timeout_minutes())
                 try:
-                    await transition_order(conn, order_id, "waiting_payment", updates={"approved_at": datetime.now(), "payment_deadline": deadline})
+                    await transition_order(conn, order_id, "waiting_payment", updates={"approved_at": now_utc, "payment_deadline": deadline})
                 except InvalidOrderTransition:
                     logger.exception("Trusted-customer auto approval transition failed for order %s", order_id)
                     auto_approved = False
-            customer = await conn.fetchrow("SELECT full_name, username FROM users WHERE id = $1", user["id"])
+            customer = await conn.fetchrow("SELECT full_name, username, shamcash_account FROM users WHERE id = $1", user["id"])
 
         from aiogram import Bot
         bot = Bot(token=Config.BOT_TOKEN)
-        customer_name = (customer["full_name"] if customer else None) or "N/A"
-        username = (customer["username"] if customer else None) or "N/A"
+        customer_name = (customer["full_name"] if customer else None) or user["full_name"] or "N/A"
+        username = (customer["username"] if customer else None) or user["username"] or "N/A"
+        customer_shamcash = (customer["shamcash_account"] if customer else None) or user["shamcash_account"] or "N/A"
         if auto_approved:
             async with pool.acquire() as conn:
-                order = await conn.fetchrow("SELECT o.*, u.telegram_id, u.language, u.full_name, u.username FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1", order_id)
+                order = await conn.fetchrow("SELECT o.*, u.telegram_id, u.language, u.full_name, u.username, u.shamcash_account FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1", order_id)
             try:
                 delivered = await NotificationService(bot, Config.ADMIN_IDS).notify_order_approved(callback.from_user.id, dict(order), lang=lang)
                 if not delivered:
@@ -137,7 +144,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
         admin_status = "waiting_payment" if auto_approved else "pending"
         admin_text = (f"📦 <b>{'تم اعتماد طلب USDT تلقائياً' if auto_approved else 'طلب شراء USDT جديد'}</b>\n\n"
             f"📋 الرقم: #{order_number}\n👤 العميل: {customer_name}\n🆔 المعرف: <code>{callback.from_user.id}</code>\n"
-            f"👤 المستخدم: @{username}\n💰 الكمية: {usdt(data['amount_usdt'])} USDT\n🌐 الشبكة: {wallet['network']}\n"
+            f"👤 المستخدم: @{username}\n🏦 ShamCash العميل: <code>{customer_shamcash}</code>\n💰 الكمية: {usdt(data['amount_usdt'])} USDT\n🌐 الشبكة: {wallet['network']}\n"
             f"💱 عملة الدفع: {currency}\n💵 الإجمالي: {money(calculation['total_amount'])} {currency}\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{wallet['address']}</code>\n\n"
             + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
