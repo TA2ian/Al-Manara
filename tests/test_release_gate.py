@@ -28,9 +28,9 @@ POLICY_MODULES = [
 REMOVED_MODULES = (
     "handlers.admin", "handlers.admin_settings_alias_policy", "handlers.legacy_wallet_guard",
     "handlers.verification", "handlers.verification_pending_guard", "handlers.verification_keyboard_cleanup",
-    "handlers.order_wallet_qr_policy", "handlers.wallet_qr_first_policy", "services.order_wallet_guard",
-    "database_wallet_guards", "handlers.my_orders", "handlers.receipt_transition_policy",
-    "handlers.payment_methods", "handlers.payment_method_legacy_compat",
+    "handlers.wallet_qr_first_policy", "services.order_wallet_guard", "database_wallet_guards",
+    "handlers.my_orders", "handlers.receipt_transition_policy", "handlers.payment_methods",
+    "handlers.payment_method_legacy_compat",
 )
 
 
@@ -77,6 +77,11 @@ def test_removed_compatibility_modules_are_not_importable_from_the_repository():
     for module_name in REMOVED_MODULES:
         relative = Path(*module_name.split("."))
         assert not (ROOT / relative).with_suffix(".py").exists()
+
+
+def test_retired_order_wallet_qr_guard_is_not_registered():
+    bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "order_wallet_qr_policy" not in bot_source
 
 
 def test_authoritative_services_import():
