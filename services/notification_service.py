@@ -61,7 +61,12 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot and exact order deadline."""
+        """Deliver the immutable payment snapshot and exact order deadline.
+
+        The approval handler owns the receipt-upload prompt. This method sends only
+        the authoritative payment details so manual and automatic approval flows do
+        not create duplicate receipt instructions.
+        """
         recipient = (order.get("payment_recipient_name_snapshot") or "").strip()
         address = (order.get("payment_account_snapshot") or "").strip()
         qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
