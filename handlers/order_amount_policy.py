@@ -12,32 +12,11 @@ from keyboards.reply import remove_dashboard_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
 from services.formatters import usdt
 from services.locale_service import locale_service
-from services.settings_service import SettingsService
+from services.operational_policy_service import OperationalPolicyService, OperationalPolicyError
 from states import OrderStates, WalletStates
 
 router = Router()
 ACTIVE_STATUSES = ("pending", "waiting_payment", "receipt_received", "payment_confirmed")
-
-
-async def _runtime_order_limits() -> tuple[Decimal, Decimal, Decimal]:
-    values = []
-    defaults = (Config.MIN_ORDER, Config.MAX_ORDER, Config.DAILY_LIMIT)
-    keys = ("min_order", "max_order", "daily_limit")
-    for key, default in zip(keys, defaults):
-        raw = await SettingsService.get(key, str(default))
-        try:
-            value = Decimal(str(raw))
-        except (InvalidOperation, TypeError, ValueError):
-            value = Decimal(str(default))
-        values.append(value)
-    minimum, maximum, daily = values
-    if minimum <= 0:
-        minimum = Decimal(str(Config.MIN_ORDER))
-    if maximum < minimum:
-        maximum = Decimal(str(Config.MAX_ORDER))
-    if daily < maximum:
-        daily = Decimal(str(Config.DAILY_LIMIT))
-    return minimum, maximum, daily
 
 
 async def _user(telegram_id: int):
@@ -92,7 +71,6 @@ async def _show_verified_wallets(message: Message, state: FSMContext, user_id: i
 
 @router.message(F.text.in_(["💰 جديد", "💰 New", "💰 إنشاء طلب شراء", "💰 Buy Order"]))
 async def start_order_authoritative(message: Message, state: FSMContext):
-    """Start a new order through the authoritative customer gates."""
     user = await _user(message.from_user.id)
     if not user:
         await message.answer("يرجى بدء البوت أولاً: /start")
@@ -120,11 +98,11 @@ async def start_order_authoritative(message: Message, state: FSMContext):
         )
         return
 
-    minimum, maximum, _ = await _runtime_order_limits()
+    limits = await OperationalPolicyService.get_limits()
     await state.clear()
     await state.set_state(OrderStates.waiting_amount)
     await message.answer("🔄", reply_markup=remove_dashboard_keyboard())
-    await message.answer(locale_service.get("enter_amount", lang, min=minimum, max=maximum), reply_markup=preset_amounts_keyboard(lang))
+    await message.answer(locale_service.get("enter_amount", lang, min=limits["min_order"], max=limits["max_order"]), reply_markup=preset_amounts_keyboard(lang))
 
 
 async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, lang: str, user_id: int):
@@ -144,7 +122,8 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
         )
         await state.clear()
         return
-    minimum, maximum, daily_limit = await _runtime_order_limits()
+    limits = await OperationalPolicyService.get_limits()
+    minimum, maximum, daily_limit = limits["min_order"], limits["max_order"], limits["daily_limit"]
     if amount < minimum or amount > maximum:
         await message.answer(locale_service.get("invalid_amount", lang, min=minimum, max=maximum))
         return
@@ -166,7 +145,7 @@ async def _accept_amount(message: Message, state: FSMContext, amount: Decimal, l
 async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
     try:
         amount = Decimal(callback.data.removeprefix("amount_preset_"))
-    except InvalidOperation:
+    except (InvalidOperation, ValueError):
         await callback.answer("❌ Invalid amount", show_alert=True)
         return
     user = await _user(callback.from_user.id)
@@ -179,8 +158,8 @@ async def enter_amount_preset(callback: CallbackQuery, state: FSMContext):
 async def enter_amount_custom(callback: CallbackQuery, state: FSMContext):
     user = await _user(callback.from_user.id)
     lang = (user["language"] if user else "ar") or "ar"
-    minimum, maximum, _ = await _runtime_order_limits()
-    await callback.message.edit_text(locale_service.get("enter_amount_custom", lang, min=minimum, max=maximum), reply_markup=cancel_keyboard(lang))
+    limits = await OperationalPolicyService.get_limits()
+    await callback.message.edit_text(locale_service.get("enter_amount_custom", lang, min=limits["min_order"], max=limits["max_order"]), reply_markup=cancel_keyboard(lang))
     await callback.answer()
 
 
@@ -191,7 +170,7 @@ async def enter_amount(message: Message, state: FSMContext):
     try:
         amount = Decimal((message.text or "").strip().replace(",", ""))
     except (InvalidOperation, ValueError):
-        minimum, maximum, _ = await _runtime_order_limits()
-        await message.answer(locale_service.get("invalid_amount", lang, min=minimum, max=maximum))
+        limits = await OperationalPolicyService.get_limits()
+        await message.answer(locale_service.get("invalid_amount", lang, min=limits["min_order"], max=limits["max_order"]))
         return
     await _accept_amount(message, state, amount, lang, message.from_user.id)
