@@ -29,12 +29,7 @@ async def confirm_manipulation(
     admin_id: int,
     reason: str = "confirmed_payment_receipt_manipulation",
 ) -> MisconductDecision:
-    """Record one explicit admin-confirmed manipulation incident atomically.
-
-    The caller must invoke this inside the same database transaction that owns the
-    classification callback. A row lock on the user serializes concurrent admin
-    classifications and prevents duplicate incident numbers.
-    """
+    """Record one explicit admin-confirmed manipulation incident atomically."""
     user = await conn.fetchrow(
         "SELECT id, telegram_id, is_blocked FROM users WHERE id = $1 FOR UPDATE",
         user_id,
@@ -52,14 +47,13 @@ async def confirm_manipulation(
     if incident_number > MAX_CONFIRMED_INCIDENTS:
         raise ValueError("customer already reached the final confirmed manipulation incident")
 
-    now = datetime.utcnow()
     if incident_number == 1:
-        suspension_expires_at = now + timedelta(hours=FIRST_INCIDENT_SUSPENSION_HOURS)
+        suspension_expires_at = datetime.utcnow() + timedelta(hours=FIRST_INCIDENT_SUSPENSION_HOURS)
         requires_admin_review = False
         final_warning = False
         suspension_reason = "confirmed manipulation: 4-hour service suspension"
     elif incident_number == 2:
-        suspension_expires_at = now + timedelta(hours=SECOND_INCIDENT_SUSPENSION_HOURS)
+        suspension_expires_at = datetime.utcnow() + timedelta(hours=SECOND_INCIDENT_SUSPENSION_HOURS)
         requires_admin_review = True
         final_warning = False
         suspension_reason = "confirmed manipulation: 24-hour service suspension and admin review"
@@ -83,15 +77,7 @@ async def confirm_manipulation(
         reason,
         suspension_expires_at,
     )
-
-    await conn.execute(
-        "DELETE FROM blocked_users WHERE telegram_id = $1 AND expires_at IS NOT NULL AND expires_at <= NOW()",
-        telegram_id,
-    )
-    await conn.execute(
-        "DELETE FROM blocked_users WHERE telegram_id = $1",
-        telegram_id,
-    )
+    await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
     await conn.execute(
         "INSERT INTO blocked_users (telegram_id, reason, blocked_by, expires_at) VALUES ($1, $2, $3, $4)",
         telegram_id,
@@ -99,13 +85,11 @@ async def confirm_manipulation(
         admin_id,
         suspension_expires_at,
     )
-
     await conn.execute(
         "UPDATE users SET is_blocked = $1 WHERE id = $2",
         incident_number >= MAX_CONFIRMED_INCIDENTS,
         user_id,
     )
-
     await conn.execute(
         """
         INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
@@ -126,7 +110,7 @@ async def confirm_manipulation(
 
 
 async def clear_suspension(conn, *, telegram_id: int, admin_id: int, decision: str) -> None:
-    """Clear an administrative suspension and record the decision."""
+    """Allow a third-incident customer to continue after final admin review."""
     await conn.execute("UPDATE users SET is_blocked = FALSE WHERE telegram_id = $1", telegram_id)
     await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
     await conn.execute(
@@ -138,6 +122,40 @@ async def clear_suspension(conn, *, telegram_id: int, admin_id: int, decision: s
         telegram_id,
         admin_id,
         f"Administrative decision after final manipulation review: {decision}",
+    )
+
+
+async def permanent_ban(conn, *, telegram_id: int, admin_id: int, reason: str) -> None:
+    """Convert the final suspension into an explicit permanent administrative ban."""
+    user = await conn.fetchrow(
+        "SELECT id FROM users WHERE telegram_id = $1 FOR UPDATE",
+        telegram_id,
+    )
+    if not user:
+        raise ValueError("customer does not exist")
+    incident_count = await conn.fetchval(
+        "SELECT COUNT(*) FROM misconduct_incidents WHERE user_id = $1",
+        user["id"],
+    )
+    if int(incident_count) < MAX_CONFIRMED_INCIDENTS:
+        raise ValueError("permanent ban requires three confirmed manipulation incidents")
+
+    await conn.execute("UPDATE users SET is_blocked = TRUE WHERE id = $1", user["id"])
+    await conn.execute("DELETE FROM blocked_users WHERE telegram_id = $1", telegram_id)
+    await conn.execute(
+        "INSERT INTO blocked_users (telegram_id, reason, blocked_by, expires_at) VALUES ($1, $2, $3, NULL)",
+        telegram_id,
+        reason,
+        admin_id,
+    )
+    await conn.execute(
+        """
+        INSERT INTO audit_logs (user_id, admin_id, action, details, severity)
+        VALUES ($1, $2, 'misconduct_permanent_ban', $3, 'critical')
+        """,
+        user["id"],
+        admin_id,
+        reason,
     )
 
 
