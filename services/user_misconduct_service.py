@@ -238,3 +238,29 @@ def customer_notice(decision: MisconductDecision, lang: str) -> str:
         "أكدت الإدارة وجود محاولة تلاعب ثالثة في إثبات الدفع.\n\n"
         "هذه هي <b>الفرصة الأخيرة</b>. الحساب معلّق حتى يقرر الأدمن استمرار الخدمة أو الحظر النهائي."
     )
+
+
+def suspension_notice(reason: str | None, expires_at: datetime | None, lang: str) -> str:
+    """Render the current suspension status without exposing internal moderation reasons."""
+    if expires_at is None:
+        return (
+            "🛑 <b>حسابك معلق حالياً</b>\n\n"
+            "الخدمات متوقفة إلى أن يصدر قرار إداري نهائي بشأن الحساب.\n\n"
+            "إذا كان لديك اعتراض، استخدم قناة الدعم."
+            if lang == "ar" else
+            "🛑 <b>Your account is currently suspended</b>\n\n"
+            "Services are disabled until a final administrative decision is made.\n\n"
+            "If you believe this is an error, contact support."
+        )
+
+    remaining_seconds = max(0, int((expires_at - datetime.utcnow()).total_seconds()))
+    hours, remainder = divmod(remaining_seconds, 3600)
+    minutes = (remainder + 59) // 60
+    duration = f"{hours} ساعة و{minutes} دقيقة" if lang == "ar" else f"{hours}h {minutes}m"
+    return (
+        "🚫 <b>الخدمة معلقة مؤقتاً</b>\n\n"
+        f"يمكنك استخدام الخدمة مجدداً بعد انتهاء التعليق المتبقي: <b>{duration}</b>."
+        if lang == "ar" else
+        "🚫 <b>Service temporarily suspended</b>\n\n"
+        f"You can use the service again after the remaining suspension: <b>{duration}</b>."
+    )
