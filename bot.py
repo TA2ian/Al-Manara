@@ -52,12 +52,15 @@ def create_dispatcher() -> Dispatcher:
     from middleware.maintenance import MaintenanceMiddleware
     from middleware.ownership import OwnershipMiddleware
     from middleware.state_processing_lock import StateProcessingLockMiddleware
+    from middleware.user_suspension import UserSuspensionMiddleware
 
     dp = Dispatcher()
     dp.message.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(MaintenanceMiddleware())
     dp.callback_query.middleware(MaintenanceMiddleware())
+    dp.message.middleware(UserSuspensionMiddleware())
+    dp.callback_query.middleware(UserSuspensionMiddleware())
     dp.message.middleware(StateProcessingLockMiddleware())
     dp.callback_query.middleware(OwnershipMiddleware())
 
