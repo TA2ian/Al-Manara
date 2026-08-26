@@ -14,17 +14,18 @@ POLICY_MODULES = [
     "handlers.order_amount_policy", "handlers.order_confirmation_policy",
     "handlers.order_wallet_policy", "handlers.order_wallet_qr_policy",
     "handlers.payment_currency_policy", "handlers.payment_method_setup_policy",
-    "handlers.receipt_document_policy", "handlers.receipt_processing_policy",
-    "handlers.saved_wallets", "handlers.verification_policy",
-    "handlers.verification_admin_policy", "handlers.verification_pending_policy",
-    "handlers.wallet_qr_first_policy", "handlers.wallets",
+    "handlers.payment_method_callback_policy", "handlers.receipt_document_policy",
+    "handlers.receipt_processing_policy", "handlers.saved_wallets",
+    "handlers.verification_policy", "handlers.verification_admin_policy",
+    "handlers.verification_pending_policy", "handlers.wallet_qr_first_policy",
+    "handlers.wallets",
 ]
 
 REMOVED_MODULES = (
     "handlers.admin", "handlers.admin_settings_alias_policy", "handlers.legacy_wallet_guard",
     "handlers.verification", "handlers.verification_pending_guard", "services.order_wallet_guard",
     "database_wallet_guards", "handlers.my_orders", "handlers.receipt_transition_policy",
-    "handlers.payment_methods",
+    "handlers.payment_methods", "handlers.payment_method_legacy_compat",
 )
 
 
@@ -55,3 +56,13 @@ def test_release_gate_does_not_require_retired_monolithic_order_handler():
     root = Path(__file__).resolve().parents[1]
     assert not (root / "handlers" / "order.py").exists()
     assert not (root / "handlers" / "my_orders.py").exists()
+
+
+def test_historical_payment_ingress_is_explicit_and_narrow():
+    source = (Path(__file__).resolve().parents[1] / "handlers" / "payment_method_callback_policy.py").read_text(encoding="utf-8")
+    assert "HISTORICAL_CODE_ALIASES" in source
+    assert "HISTORICAL_CALLBACK_PATTERN" in source
+    assert "CANONICAL_CODE_PATTERN" not in source
+    assert "[^\\s]+" not in source
+    assert "admin_pm_" in source
+    assert "payment_method_setup_policy" in source
