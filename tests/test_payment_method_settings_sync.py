@@ -72,27 +72,9 @@ def test_payment_method_toggle_renders_directly_without_reusing_view_callback():
     assert 'await callback.answer("تم التفعيل" if enabled else "تم التعطيل")' in toggle_block
 
 
-def test_historical_payment_callbacks_are_a_narrow_input_normalization_surface():
-    source = (ROOT / "handlers/payment_method_callback_policy.py").read_text(encoding="utf-8")
-    assert "HISTORICAL_CODE_ALIASES" in source
-    assert "HISTORICAL_CODE_PATTERN" in source
-    assert "normalize_historical_callback" in source
-    assert "_set_payment_method_enabled" in source
-    assert "payment_method_view" in source
-    assert "payment_method_setup_start" in source
-    assert "[^\\s]+" not in source
-
-
-def test_historical_payment_callbacks_never_define_canonical_or_future_codes():
-    source = (ROOT / "handlers/payment_method_callback_policy.py").read_text(encoding="utf-8")
-    assert '"shamcash_usd": "shamcash_usd"' not in source
-    assert '"shamcash_new_syp": "shamcash_new_syp"' not in source
-    assert "admin_pm_setup_confirm" not in source
-
-
-def test_dispatcher_uses_current_payment_policy_and_new_callback_ingress_only():
+def test_dispatcher_uses_only_the_canonical_payment_method_router():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     assert "payment_method_setup_policy" in source
-    assert "payment_method_callback_policy" in source
+    assert "payment_method_callback_policy" not in source
     assert "payment_method_legacy_compat" not in source
     assert "payment_methods.router" not in source
