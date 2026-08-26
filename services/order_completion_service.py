@@ -14,45 +14,73 @@ from services.order_state_service import InvalidOrderTransition, transition_orde
 logger = logging.getLogger(__name__)
 
 
-async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int):
-    """Finalize an approved USDT order, notify the customer/admins, and request a rating."""
+async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int, admin_id: int):
+    """Finalize an approved USDT order only for its active fulfillment owner."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
-            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
-        )
-        if not order:
-            await msg.answer("❌ الطلب غير موجود.")
-            await state.clear()
-            return False
-        if order["status"] != "payment_confirmed":
-            await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
-            await state.clear()
-            return False
-
-        try:
-            await transition_order(
-                conn,
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
+                "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE",
                 order_id,
-                "completed",
-                updates={
-                    "txid": txid,
-                    "completed_at": datetime.now(),
-                    "receipt_photo_id": None,
-                },
             )
-        except InvalidOrderTransition:
-            await msg.answer("⚠️ تم إكمال هذا الطلب مسبقاً أو تغيرت حالته.")
-            await state.clear()
-            return False
+            if not order:
+                await msg.answer("❌ الطلب غير موجود.")
+                await state.clear()
+                return False
+            if order["status"] != "payment_confirmed":
+                await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
+                await state.clear()
+                return False
 
-        order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
-            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
-        )
+            claim = await conn.fetchrow(
+                """
+                SELECT admin_id, released_at, completed_at
+                FROM order_fulfillment_claims
+                WHERE order_id = $1
+                FOR UPDATE
+                """,
+                order_id,
+            )
+            if not claim or int(claim["admin_id"]) != int(admin_id) or claim["released_at"] is not None or claim["completed_at"] is not None:
+                await msg.answer("⚠️ لم تعد جلسة التحويل هذه مالكة للطلب. لا ترسل إثباتاً آخر قبل إعادة حجز التحويل.")
+                await state.clear()
+                return False
+
+            try:
+                await transition_order(
+                    conn,
+                    order_id,
+                    "completed",
+                    admin_id=admin_id,
+                    updates={
+                        "txid": txid,
+                        "completed_at": datetime.now(),
+                        "receipt_photo_id": None,
+                    },
+                )
+            except InvalidOrderTransition:
+                await msg.answer("⚠️ تم إكمال هذا الطلب مسبقاً أو تغيرت حالته.")
+                await state.clear()
+                return False
+
+            await conn.execute(
+                """
+                UPDATE order_fulfillment_claims
+                SET completed_at = NOW(), txid = $2, screenshot_id = $3
+                WHERE order_id = $1 AND admin_id = $4 AND released_at IS NULL AND completed_at IS NULL
+                """,
+                order_id,
+                txid,
+                screenshot_id or None,
+                admin_id,
+            )
+
+            order = await conn.fetchrow(
+                "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
+                "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+                order_id,
+            )
 
     bot = Bot(token=Config.BOT_TOKEN)
     comp_lang = order["language"] or "ar"
