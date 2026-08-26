@@ -19,8 +19,8 @@ def test_no_replit_runtime_artifacts_remain():
         assert not (ROOT / name).exists(), name
 
 
-def test_legacy_compatibility_surface_is_removed():
-    for relative_path in (
+def test_removed_runtime_compatibility_surfaces_stay_removed():
+    forbidden_paths = (
         "handlers/admin.py",
         "handlers/admin_settings_alias_policy.py",
         "handlers/legacy_wallet_guard.py",
@@ -31,8 +31,27 @@ def test_legacy_compatibility_surface_is_removed():
         "handlers/verification.py",
         "handlers/verification_pending_guard.py",
         "database_wallet_guards.py",
-    ):
+        "handlers/payment_method_legacy_compat.py",
+        "tests/test_payment_method_legacy_compat.py",
+    )
+    for relative_path in forbidden_paths:
         assert not (ROOT / relative_path).exists(), relative_path
+
+
+def test_payment_method_runtime_has_one_current_owner_and_one_narrow_historical_ingress():
+    bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    canonical_source = (ROOT / "handlers/payment_method_setup_policy.py").read_text(encoding="utf-8")
+    ingress_source = (ROOT / "handlers/payment_method_callback_policy.py").read_text(encoding="utf-8")
+
+    assert "payment_method_setup_policy" in bot_source
+    assert "payment_method_callback_policy" in bot_source
+    assert "payment_method_legacy_compat" not in bot_source
+    assert "admin_pm_account_" not in bot_source
+    assert "admin_pm_qr_" not in bot_source
+    assert "admin_pm_account_" not in canonical_source
+    assert "admin_pm_qr_" not in canonical_source
+    assert "HISTORICAL_CODE_ALIASES" in ingress_source
+    assert "[^\\s]+" not in ingress_source
 
 
 def test_canonical_order_constraint_surface_is_active():
