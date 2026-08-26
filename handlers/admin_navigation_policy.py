@@ -1,16 +1,15 @@
 """Authoritative admin navigation and analytics."""
-import logging
+from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import Config
-from database import get_pool
 from keyboards.inline import admin_menu_keyboard
+from services.analytics_service import AnalyticsService
 from states import AdminStates
 
-logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -24,6 +23,13 @@ def _cancel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="❌ إلغاء والعودة للوحة التحكم", callback_data="admin_cancel_input")]
         ]
     )
+
+
+def _format_hours(value) -> str:
+    hours = float(value or 0)
+    if hours < 1:
+        return f"{hours * 60:.0f} دقيقة"
+    return f"{hours:.1f} ساعة"
 
 
 async def _show_admin_menu(callback: CallbackQuery, state: FSMContext) -> None:
@@ -52,39 +58,8 @@ async def financial_dashboard(callback: CallbackQuery):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        today = await conn.fetchrow(
-            """SELECT COUNT(*) AS orders,
-                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt,
-                      COALESCE(SUM(fee_amount), 0) AS fees
-               FROM orders WHERE created_at >= CURRENT_DATE"""
-        )
-        week = await conn.fetchrow(
-            """SELECT COUNT(*) AS orders,
-                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt,
-                      COALESCE(SUM(fee_amount), 0) AS fees
-               FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'"""
-        )
-        month = await conn.fetchrow(
-            """SELECT COUNT(*) AS orders,
-                      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt,
-                      COALESCE(SUM(fee_amount), 0) AS fees
-               FROM orders WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)"""
-        )
-        states = await conn.fetch(
-            """SELECT status, COUNT(*) AS count, COALESCE(SUM(amount_usdt), 0) AS usdt
-               FROM orders
-               WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')
-               GROUP BY status ORDER BY status"""
-        )
-        expired_today = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE status = 'expired' AND created_at >= CURRENT_DATE"
-        )
-
+    data = await AnalyticsService.dashboard()
+    periods = data["periods"]
     labels = {
         "pending": "⏳ معلقة",
         "waiting_payment": "💳 بانتظار الدفع",
@@ -93,30 +68,30 @@ async def financial_dashboard(callback: CallbackQuery):
     }
     state_lines = [
         f"{labels.get(row['status'], row['status'])}: <b>{row['count']}</b> — {row['usdt']:,.2f} USDT"
-        for row in states
+        for row in data["states"]
     ]
     state_text = "\n".join(state_lines) if state_lines else "لا توجد طلبات نشطة"
 
     text = (
         "📊 <b>لوحة الأداء المالي</b>\n\n"
         "━━━ اليوم ━━━\n"
-        f"📦 الطلبات: <b>{today['orders']}</b>\n"
-        f"✅ المكتمل: <b>{today['completed']}</b>\n"
-        f"💰 USDT: <b>{today['usdt']:,.2f}</b>\n"
-        f"💵 الرسوم: <b>{today['fees']:,.2f}</b>\n\n"
+        f"📦 الطلبات: <b>{periods['today_orders']}</b>\n"
+        f"✅ المكتمل: <b>{periods['today_completed']}</b>\n"
+        f"💰 USDT: <b>{periods['today_usdt']:,.2f}</b>\n"
+        f"💵 الرسوم: <b>{periods['today_fees']:,.2f}</b>\n\n"
         "━━━ آخر 7 أيام ━━━\n"
-        f"📦 الطلبات: <b>{week['orders']}</b>\n"
-        f"✅ المكتمل: <b>{week['completed']}</b>\n"
-        f"💰 USDT: <b>{week['usdt']:,.2f}</b>\n"
-        f"💵 الرسوم: <b>{week['fees']:,.2f}</b>\n\n"
+        f"📦 الطلبات: <b>{periods['week_orders']}</b>\n"
+        f"✅ المكتمل: <b>{periods['week_completed']}</b>\n"
+        f"💰 USDT: <b>{periods['week_usdt']:,.2f}</b>\n"
+        f"💵 الرسوم: <b>{periods['week_fees']:,.2f}</b>\n\n"
         "━━━ هذا الشهر ━━━\n"
-        f"📦 الطلبات: <b>{month['orders']}</b>\n"
-        f"✅ المكتمل: <b>{month['completed']}</b>\n"
-        f"💵 الرسوم: <b>{month['fees']:,.2f}</b>\n"
-        f"💰 USDT: <b>{month['usdt']:,.2f}</b>\n\n"
+        f"📦 الطلبات: <b>{periods['month_orders']}</b>\n"
+        f"✅ المكتمل: <b>{periods['month_completed']}</b>\n"
+        f"💵 الرسوم: <b>{periods['month_fees']:,.2f}</b>\n"
+        f"💰 USDT: <b>{periods['month_usdt']:,.2f}</b>\n\n"
         "━━━ الطلبات النشطة ━━━\n"
         f"{state_text}\n\n"
-        f"⌛ منتهية اليوم: <b>{expired_today}</b>"
+        f"⌛ منتهية اليوم: <b>{data['expired_today']}</b>"
     )
     await callback.message.edit_text(
         text,
@@ -133,64 +108,60 @@ async def financial_dashboard(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_analytics")
 async def financial_analytics(callback: CallbackQuery, state: FSMContext):
-    """Show financial/business analytics only."""
+    """Show centralized financial and operational analytics."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
     await state.clear()
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        completed = await conn.fetchrow(
-            """SELECT COUNT(*) AS count,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt,
-                      COALESCE(SUM(fee_amount), 0) AS fees
-               FROM orders WHERE status = 'completed'"""
-        )
-        active = await conn.fetchrow(
-            """SELECT COUNT(*) AS count,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt
-               FROM orders
-               WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')"""
-        )
-        today = await conn.fetchrow(
-            """SELECT COUNT(*) AS count,
-                      COALESCE(SUM(amount_usdt), 0) AS usdt,
-                      COALESCE(SUM(fee_amount), 0) AS fees
-               FROM orders
-               WHERE created_at >= CURRENT_DATE AND status = 'completed'"""
-        )
-        currency_rows = await conn.fetch(
-            """SELECT payment_currency,
-                      COUNT(*) AS count,
-                      COALESCE(SUM(total_amount), 0) AS total
-               FROM orders
-               WHERE status = 'completed'
-               GROUP BY payment_currency
-               ORDER BY payment_currency"""
-        )
+    data = await AnalyticsService.financial()
+    summary = data["summary"]
+    today = data["today"]
+    users = data["users"]
+
+    total_orders = int(summary["total_orders"] or 0)
+    completed_orders = int(summary["completed_orders"] or 0)
+    completion_rate = (completed_orders / total_orders * 100) if total_orders else 0
 
     currency_lines = [
-        f"• {row['payment_currency']}: {row['count']} طلب — {row['total']:,.2f}"
-        for row in currency_rows
+        f"• {row['payment_currency']}: {row['count']} طلب — {row['total_amount']:,.2f} — {row['usdt']:,.2f} USDT"
+        for row in data["currencies"]
     ]
     currency_text = "\n".join(currency_lines) if currency_lines else "• لا توجد بيانات مكتملة بعد"
 
+    network_lines = [
+        f"• {row['network']}: {row['count']} طلب — {row['usdt']:,.2f} USDT"
+        for row in data["networks"]
+    ]
+    network_text = "\n".join(network_lines) if network_lines else "• لا توجد بيانات مكتملة بعد"
+
     text = (
-        "📈 <b>التحليل المالي</b>\n\n"
-        "━━━ الأداء المالي ━━━\n"
-        f"💰 USDT المسلم: <b>{completed['usdt']:,.2f}</b>\n"
-        f"💵 رسوم محققة: <b>{completed['fees']:,.2f}</b>\n"
-        f"📦 طلبات مكتملة: <b>{completed['count']}</b>\n\n"
-        "━━━ اليوم ━━━\n"
-        f"📦 مكتمل: <b>{today['count']}</b>\n"
+        "📈 <b>التحليل المالي والتشغيلي</b>\n\n"
+        "━━━ الأداء الكلي ━━━\n"
+        f"📦 إجمالي الطلبات: <b>{total_orders}</b>\n"
+        f"✅ مكتملة: <b>{completed_orders}</b>\n"
+        f"📊 معدل الإكمال: <b>{completion_rate:.1f}%</b>\n"
+        f"❌ مرفوضة: <b>{summary['rejected_orders']}</b>\n"
+        f"⌛ منتهية: <b>{summary['expired_orders']}</b>\n"
+        f"💰 USDT المسلم: <b>{summary['completed_usdt']:,.2f}</b>\n"
+        f"💵 الرسوم المحققة: <b>{summary['completed_fees']:,.2f}</b>\n\n"
+        "━━━ التشغيل الحالي ━━━\n"
+        f"⏳ الطلبات النشطة: <b>{summary['active_orders']}</b>\n"
+        f"💰 قيمتها: <b>{summary['active_usdt']:,.2f} USDT</b>\n"
+        f"⏱ متوسط إتمام الطلب: <b>{_format_hours(summary['average_completion_hours'])}</b>\n"
+        f"⭐ متوسط تقييم العملاء: <b>{float(summary['average_rating'] or 0):.2f}/5</b>\n\n"
+        "━━━ اليوم المكتمل ━━━\n"
+        f"📦 الطلبات: <b>{today['completed_orders']}</b>\n"
         f"💰 USDT: <b>{today['usdt']:,.2f}</b>\n"
-        f"💵 رسوم: <b>{today['fees']:,.2f}</b>\n\n"
-        "━━━ قيد التنفيذ ━━━\n"
-        f"⏳ الطلبات النشطة: <b>{active['count']}</b>\n"
-        f"💰 قيمتها: <b>{active['usdt']:,.2f} USDT</b>\n\n"
+        f"💵 الرسوم: <b>{today['fees']:,.2f}</b>\n\n"
+        "━━━ العملاء ━━━\n"
+        f"👤 إجمالي العملاء: <b>{users['total_users']}</b>\n"
+        f"🆕 جدد اليوم: <b>{users['new_today']}</b>\n"
+        f"📅 جدد خلال 30 يوماً: <b>{users['new_30d']}</b>\n\n"
         "━━━ حسب عملة الدفع ━━━\n"
-        f"{currency_text}"
+        f"{currency_text}\n\n"
+        "━━━ حسب الشبكة ━━━\n"
+        f"{network_text}"
     )
     await callback.message.edit_text(
         text,
