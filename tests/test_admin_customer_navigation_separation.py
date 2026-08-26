@@ -37,7 +37,7 @@ def test_admin_menu_callback_is_not_a_customer_navigation_target():
     source = (ROOT / "keyboards/inline.py").read_text(encoding="utf-8")
     customer_sections = (
         source[source.index("def main_menu_inline"):source.index("def network_selection_keyboard")],
-        source[source.index("def quick_actions_keyboard"):source.index("def payment_methods_keyboard")],
+        source[source.index("def quick_actions_keyboard"):],
     )
     for section in customer_sections:
         assert 'callback_data="admin_menu"' not in section
