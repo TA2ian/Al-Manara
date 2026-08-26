@@ -21,10 +21,10 @@ POLICY_MODULES = [
     "handlers.admin_note_policy", "handlers.admin_order_list_policy",
     "handlers.admin_user_management_policy", "handlers.admin_utility_policy",
     "handlers.admin_maintenance_policy", "handlers.admin_settings_policy",
-    "handlers.payment_method_setup_policy", "handlers.payment_method_callback_policy",
-    "handlers.language_policy", "handlers.customer_navigation_policy",
-    "handlers.customer_settings_policy", "handlers.admin_tools_policy",
-    "handlers.admin_search_policy", "handlers.legal_navigation_policy",
+    "handlers.payment_method_setup_policy", "handlers.language_policy",
+    "handlers.customer_navigation_policy", "handlers.customer_settings_policy",
+    "handlers.admin_tools_policy", "handlers.admin_search_policy",
+    "handlers.legal_navigation_policy",
 ]
 
 REMOVED_MODULES = (
@@ -96,11 +96,10 @@ def test_release_gate_does_not_require_retired_monolithic_order_handler():
     assert not (ROOT / "handlers" / "my_orders.py").exists()
 
 
-def test_historical_payment_ingress_is_explicit_and_narrow():
-    source = (ROOT / "handlers" / "payment_method_callback_policy.py").read_text(encoding="utf-8")
-    assert "HISTORICAL_CODE_ALIASES" in source
-    assert "HISTORICAL_CALLBACK_PATTERN" in source
-    assert "CANONICAL_CODE_PATTERN" not in source
-    assert "[^\\s]+" not in source
-    assert "admin_pm_" in source
-    assert "payment_method_setup_policy" in source
+def test_payment_method_runtime_is_canonical_only():
+    bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    canonical_source = (ROOT / "handlers/payment_method_setup_policy.py").read_text(encoding="utf-8")
+    assert "payment_method_setup_policy" in bot_source
+    assert "payment_method_callback_policy" not in bot_source
+    assert "payment_method_legacy_compat" not in bot_source
+    assert "CANONICAL_CODE_PATTERN" in canonical_source
