@@ -7,29 +7,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 POLICY_MODULES = [
     "handlers.start", "handlers.saved_wallets", "handlers.order_wallet_policy",
-    "handlers.order_wallet_qr_policy", "handlers.payment_currency_policy",
-    "handlers.wallet_qr_first_policy", "handlers.wallets", "handlers.order_amount_policy",
+    "handlers.payment_currency_policy", "handlers.wallets", "handlers.order_amount_policy",
     "handlers.order_confirmation_policy", "handlers.profile", "handlers.active_order_policy",
     "handlers.receipt_processing_policy", "handlers.receipt_document_policy",
     "handlers.customer_orders_policy", "handlers.feedback", "handlers.admin_entry",
     "handlers.admin_reply_shortcut", "handlers.admin_broadcast_policy",
     "handlers.verification_admin_policy", "handlers.verification_pending_policy",
-    "handlers.verification_policy", "handlers.verification_keyboard_cleanup",
-    "handlers.admin_rate_policy", "handlers.admin_navigation_policy",
-    "handlers.admin_approval_policy", "handlers.admin_rejection_policy",
-    "handlers.admin_payment_confirmation_policy", "handlers.admin_transfer_policy",
-    "handlers.admin_note_policy", "handlers.admin_order_list_policy",
-    "handlers.admin_user_management_policy", "handlers.admin_utility_policy",
-    "handlers.admin_maintenance_policy", "handlers.admin_settings_policy",
-    "handlers.payment_method_setup_policy", "handlers.language_policy",
-    "handlers.customer_navigation_policy", "handlers.customer_settings_policy",
-    "handlers.admin_tools_policy", "handlers.admin_search_policy",
-    "handlers.legal_navigation_policy",
+    "handlers.verification_policy", "handlers.admin_rate_policy",
+    "handlers.admin_navigation_policy", "handlers.admin_approval_policy",
+    "handlers.admin_rejection_policy", "handlers.admin_payment_confirmation_policy",
+    "handlers.admin_transfer_policy", "handlers.admin_note_policy",
+    "handlers.admin_order_list_policy", "handlers.admin_user_management_policy",
+    "handlers.admin_utility_policy", "handlers.admin_maintenance_policy",
+    "handlers.admin_settings_policy", "handlers.payment_method_setup_policy",
+    "handlers.language_policy", "handlers.customer_navigation_policy",
+    "handlers.customer_settings_policy", "handlers.admin_tools_policy",
+    "handlers.admin_search_policy", "handlers.legal_navigation_policy",
 ]
 
 REMOVED_MODULES = (
     "handlers.admin", "handlers.admin_settings_alias_policy", "handlers.legacy_wallet_guard",
-    "handlers.verification", "handlers.verification_pending_guard", "services.order_wallet_guard",
+    "handlers.verification", "handlers.verification_pending_guard", "handlers.verification_keyboard_cleanup",
+    "handlers.order_wallet_qr_policy", "handlers.wallet_qr_first_policy", "services.order_wallet_guard",
     "database_wallet_guards", "handlers.my_orders", "handlers.receipt_transition_policy",
     "handlers.payment_methods", "handlers.payment_method_legacy_compat",
 )
@@ -103,3 +102,19 @@ def test_payment_method_runtime_is_canonical_only():
     assert "payment_method_callback_policy" not in bot_source
     assert "payment_method_legacy_compat" not in bot_source
     assert "CANONICAL_CODE_PATTERN" in canonical_source
+
+
+def test_wallet_runtime_is_canonical_only():
+    bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "wallet_qr_first_policy" not in bot_source
+    assert "order_wallet_qr_policy" not in bot_source
+    assert "handlers.wallets" not in bot_source
+    assert "dp.include_router(wallets.router)" in bot_source
+
+
+def test_verification_runtime_is_canonical_only():
+    bot_source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "verification_keyboard_cleanup" not in bot_source
+    assert "verification_pending_guard" not in bot_source
+    assert "verification_policy" in bot_source
+    assert "verification_admin_policy" in bot_source
