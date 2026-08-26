@@ -1,9 +1,4 @@
-"""Authoritative admin user-management policy.
-
-User deletion is intentionally available only from customer search results,
-not from the customer list, because the list is designed to scale without
-turning every row into an action-heavy UI.
-"""
+"""Authoritative admin user-management policy."""
 import html
 import logging
 
@@ -46,7 +41,7 @@ async def _fetch_users():
 
 @router.callback_query(F.data == "admin_list_users")
 async def admin_list_users(callback: CallbackQuery):
-    """List active users without destructive/action buttons."""
+    """List active users with explicit per-row deletion access."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -66,8 +61,11 @@ async def admin_list_users(callback: CallbackQuery):
 async def _render_user_page(callback: CallbackQuery, users, page: int, total_pages: int, page_size: int):
     page = max(0, min(page, total_pages - 1))
     start = page * page_size
+    page_users = users[start:start + page_size]
     lines = []
-    for i, user in enumerate(users[start:start + page_size], start + 1):
+    buttons = []
+
+    for i, user in enumerate(page_users, start + 1):
         name = html.escape(user["full_name"] or "—")
         username = html.escape(user["username"] or "—")
         verified = "✅" if user["is_verified"] else "⏳"
@@ -76,8 +74,13 @@ async def _render_user_page(callback: CallbackQuery, users, page: int, total_pag
             f"{i}. {verified} <b>{name}</b>\n"
             f"   🆔 <code>{user['telegram_id']}</code> | @{username} | {lang_flag}"
         )
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🗑️ حذف {name[:24]}",
+                callback_data=f"admin_del_user_{user['telegram_id']}",
+            )
+        ])
 
-    buttons = []
     if total_pages > 1:
         nav = []
         if page > 0:
@@ -86,13 +89,14 @@ async def _render_user_page(callback: CallbackQuery, users, page: int, total_pag
         if page < total_pages - 1:
             nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"users_page_{page + 1}"))
         buttons.append(nav)
+
     buttons.append([InlineKeyboardButton(text="🔍 بحث عن عميل", callback_data="admin_search_user")])
     buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_menu")])
 
     text = (
         f"📍 <b>قائمة العملاء</b> ({len(users)})\n"
         "━━━━━━━━━━━━━━━━━━\n" + "\n".join(lines) + "\n\n"
-        "لإدارة أو حذف عميل، استخدم <b>بحث عميل</b>."
+        "يمكن حذف أي عميل من القائمة بعد تأكيد مستقل."
     )
     await callback.message.edit_text(
         text,
