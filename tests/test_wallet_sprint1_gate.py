@@ -5,13 +5,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_wallet_architecture_has_single_registration_owner():
     wallets = (ROOT / "handlers/wallets.py").read_text(encoding="utf-8")
-    qr_first = (ROOT / "handlers/wallet_qr_first_policy.py").read_text(encoding="utf-8")
     saved = (ROOT / "handlers/saved_wallets.py").read_text(encoding="utf-8")
 
     assert "@router.callback_query(F.data == \"wallet_add\")" in wallets
     assert "@router.message(WalletStates.waiting_address)" in wallets
+    assert "@router.message(WalletStates.waiting_address, F.photo)" in wallets
     assert "@router.message(WalletStates.waiting_qr, F.photo)" in wallets
-    assert "@router.message(WalletStates.waiting_address, F.photo)" in qr_first
     assert "@router.callback_query(F.data.startswith(\"order_use_saved_\"))" in saved
     assert "@router.callback_query(OrderStates.waiting_save_address, F.data == \"save_address_yes\")" in saved
 
@@ -35,10 +34,12 @@ def test_retired_per_order_wallet_qr_architecture_is_absent():
     assert not (ROOT / "handlers/legacy_wallet_guard.py").exists()
 
 
-def test_dispatcher_order_keeps_qr_first_before_wallet_registry():
+def test_dispatcher_uses_one_wallet_registration_router():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
-    assert source.index("dp.include_router(wallet_qr_first_policy.router)") < source.index("dp.include_router(wallets.router)")
+    assert "wallet_qr_first_policy" not in source
+    assert "order_wallet_qr_policy" not in source
     assert source.index("dp.include_router(saved_wallets.router)") < source.index("dp.include_router(order_wallet_policy.router)")
+    assert source.index("dp.include_router(order_wallet_policy.router)") < source.index("dp.include_router(wallets.router)")
 
 
 def test_back_to_wallet_returns_to_wallet_state_not_currency_state():
