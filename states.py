@@ -43,6 +43,8 @@ class AdminStates(StatesGroup):
     waiting_transfer_screenshot = State()
     waiting_broadcast = State()
     waiting_broadcast_preview = State()
+    waiting_personal_message = State()
+    waiting_personal_message_preview = State()
     waiting_min_order = State()
     waiting_max_order = State()
     waiting_daily_limit = State()
