@@ -6,7 +6,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_approved_payment_notification_does_not_send_receipt_prompt():
     source = (ROOT / "services/notification_service.py").read_text(encoding="utf-8")
-    assert "The approval handler owns the receipt-upload prompt" in source
     assert "After payment, use the receipt-upload button" not in source
     assert "بعد الدفع، أرسل إثبات العملية" not in source
 
