@@ -3,10 +3,11 @@ import html
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message
 
 from config import Config
 from database import get_pool
+from keyboards.admin_messaging import personal_message_keyboard
 from keyboards.inline import admin_menu_keyboard
 from services.formatters import money, rate, usdt
 from states import AdminStates
@@ -16,19 +17,6 @@ router = Router()
 
 def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
-
-
-def _customer_action_keyboard(telegram_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
-    action = "admin_unban_" if is_blocked else "admin_ban_"
-    action_text = "✅ فك الحظر" if is_blocked else "🚫 حظر"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=action_text, callback_data=f"{action}{telegram_id}"),
-            InlineKeyboardButton(text="🗑️ حذف العميل", callback_data=f"admin_del_user_{telegram_id}"),
-        ],
-        [InlineKeyboardButton(text="🔍 بحث عميل آخر", callback_data="admin_search_user")],
-        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
-    ])
 
 
 @router.message(AdminStates.waiting_search, F.text)
@@ -51,11 +39,7 @@ async def search_input(message: Message, state: FSMContext):
         order_number = query.upper()
         if not order_number.startswith("ORD_"):
             await state.clear()
-            await message.answer(
-                "❌ صيغة رقم الطلب غير صحيحة. يجب أن يبدأ بـ <code>ORD_</code>.",
-                reply_markup=admin_menu_keyboard(),
-                parse_mode="HTML",
-            )
+            await message.answer("❌ صيغة رقم الطلب غير صحيحة. يجب أن يبدأ بـ <code>ORD_</code>.", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
             return
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -124,14 +108,12 @@ async def search_input(message: Message, state: FSMContext):
     if len(result_rows) > 1:
         await message.answer(
             f"🔎 تم العثور على <b>{len(result_rows)}</b> عملاء مطابقين.\n\n"
-            "لإدارة أو حذف عميل، اجعل البحث أكثر تحديداً باستخدام Telegram ID أو @username أو الهاتف أو حساب ShamCash.",
-            parse_mode="HTML",
-            reply_markup=admin_menu_keyboard(),
+            "لإدارة أو مراسلة عميل، اجعل البحث أكثر تحديداً باستخدام Telegram ID أو @username أو الهاتف أو حساب ShamCash.",
+            parse_mode="HTML", reply_markup=admin_menu_keyboard(),
         )
         for user, _stats in result_rows[:10]:
             await message.answer(
-                f"👤 <b>{html.escape(user['full_name'] or 'N/A')}</b> — "
-                f"<code>{user['telegram_id']}</code> — @{html.escape(user['username'] or 'N/A')}",
+                f"👤 <b>{html.escape(user['full_name'] or 'N/A')}</b> — <code>{user['telegram_id']}</code> — @{html.escape(user['username'] or 'N/A')}",
                 parse_mode="HTML",
             )
         return
@@ -151,8 +133,4 @@ async def search_input(message: Message, state: FSMContext):
         f"💰 USDT مكتمل: <b>{usdt(stats['usdt_completed'])}</b>\n"
         f"📅 التسجيل: {user['created_at'].strftime('%Y-%m-%d')}"
     )
-    await message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=_customer_action_keyboard(user["telegram_id"], user["is_blocked"]),
-    )
+    await message.answer(text, parse_mode="HTML", reply_markup=personal_message_keyboard(user["telegram_id"], user["is_blocked"]))
