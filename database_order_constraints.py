@@ -11,6 +11,22 @@ async def install_order_constraints(conn):
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_username_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_shamcash_account_snapshot TEXT")
 
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS misconduct_incidents (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            telegram_id BIGINT NOT NULL,
+            order_id INTEGER NOT NULL REFERENCES orders(id),
+            admin_id BIGINT NOT NULL,
+            incident_number INTEGER NOT NULL CHECK (incident_number BETWEEN 1 AND 3),
+            reason TEXT NOT NULL,
+            suspension_expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_misconduct_user_created ON misconduct_incidents (user_id, created_at DESC)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_misconduct_order ON misconduct_incidents (order_id)")
+
     await conn.execute(
         """UPDATE payment_methods
               SET recipient_name = COALESCE(NULLIF(BTRIM(recipient_name), ''), NULLIF(BTRIM($1), ''), 'ShamCash')
