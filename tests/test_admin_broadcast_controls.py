@@ -9,7 +9,7 @@ from handlers.admin_broadcast_policy import (
 
 
 def test_broadcast_length_limit():
-    assert MAX_BROADCAST_LENGTH == 4096
+    assert MAX_BROADCAST_LENGTH == 3500
     assert len("x" * MAX_BROADCAST_LENGTH) == MAX_BROADCAST_LENGTH
     assert len("x" * (MAX_BROADCAST_LENGTH + 1)) > MAX_BROADCAST_LENGTH
 
