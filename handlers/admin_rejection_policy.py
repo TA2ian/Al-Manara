@@ -17,6 +17,7 @@ from keyboards.inline import (
 from keyboards.reply import compact_reply_keyboard
 from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
+from services.receipt_retry_policy import expired_retry_extension
 from services.user_misconduct_service import (
     MAX_CONFIRMED_INCIDENTS,
     clear_suspension,
@@ -57,7 +58,7 @@ def _remaining_payment_time(order) -> str:
     deadline = order.get("payment_deadline")
     if not deadline:
         return ""
-    seconds = int((deadline - datetime.now()).total_seconds())
+    seconds = int((deadline - datetime.now(deadline.tzinfo)).total_seconds())
     if seconds <= 0:
         return ""
     return f"⏱ الوقت المتبقي: <b>{seconds // 60} دقيقة و{seconds % 60} ثانية</b>"
@@ -81,48 +82,83 @@ async def reject_receipt(callback: CallbackQuery):
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        order = await conn.fetchrow(
-            "SELECT o.*, u.telegram_id, u.full_name, u.language "
-            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
-            order_id,
-        )
-        if not order:
-            await callback.answer("الطلب غير موجود", show_alert=True)
-            return
-        if order["status"] != "receipt_received":
-            await callback.answer("لا يمكن رفض الإيصال من الحالة الحالية", show_alert=True)
-            return
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                "SELECT o.*, u.telegram_id, u.full_name, u.language "
+                "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE",
+                order_id,
+            )
+            if not order:
+                await callback.answer("الطلب غير موجود", show_alert=True)
+                return
+            if order["status"] != "receipt_received":
+                await callback.answer("لا يمكن رفض الإيصال من الحالة الحالية", show_alert=True)
+                return
 
-        try:
-            await transition_order(conn, order_id, "waiting_payment", admin_id=callback.from_user.id)
-        except InvalidOrderTransition as exc:
-            logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
-            await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
-            return
+            extension_deadline = expired_retry_extension(
+                order.get("payment_deadline"),
+                order.get("receipt_upload_count"),
+            )
+            updates = {"payment_deadline": extension_deadline} if extension_deadline else None
+            try:
+                updated_order = await transition_order(
+                    conn,
+                    order_id,
+                    "waiting_payment",
+                    admin_id=callback.from_user.id,
+                    updates=updates,
+                )
+            except InvalidOrderTransition as exc:
+                logger.warning("Receipt rejection transition failed for order %s: %s", order_id, exc)
+                await callback.answer("لا يمكن تغيير حالة الطلب من الحالة الحالية", show_alert=True)
+                return
+            order = updated_order
 
     remaining = _remaining_payment_time(order)
     lang = order["language"] or "ar"
+    extension_notice_ar = (
+        "⏱ <b>انتهت المهلة السابقة، لذلك مُنحت 5 دقائق إضافية لهذه المحاولة.</b>\n"
+        if order.get("payment_deadline") and not remaining and extension_deadline
+        else ""
+    )
+    extension_notice_en = (
+        "⏱ <b>The previous deadline had expired, so 5 additional minutes were granted for this retry.</b>\n"
+        if order.get("payment_deadline") and extension_deadline
+        else ""
+    )
     status_text = (
         f"⚠️ <b>تم رفض إيصال الطلب #{html.escape(order['order_number'])}</b>\n\n"
         "📎 تم رفض الإيصال من الإدارة. أرسل إيصالاً جديداً واضحاً لإعادة المراجعة.\n"
-        f"{remaining}"
+        f"{extension_notice_ar}{remaining}"
     ) if lang == "ar" else (
         f"⚠️ <b>Receipt rejected for order #{html.escape(order['order_number'])}</b>\n\n"
         "📎 Please upload a clear new receipt for another review.\n"
-        f"{remaining}"
+        f"{extension_notice_en}{remaining}"
     )
 
     bot = Bot(token=Config.BOT_TOKEN)
     await _sync_customer_status(bot, order, status_text)
     try:
-        await bot.send_message(
-            order["telegram_id"],
+        customer_text = (
             "⚠️ <b>تم رفض الإيصال</b>\n\n"
             f"عذراً {html.escape(order['full_name'] or 'عميلنا العزيز')}، الإيصال غير مطابق أو غير واضح.\n\n"
             "📌 أرسل إيصالاً جديداً يظهر المبلغ واسم المستفيد والتاريخ.\n\n"
+            f"{extension_notice_ar}"
             "📎 اضغط لإعادة رفع الإيصال.\n"
             f"{remaining}\n\n"
-            "⚠️ إذا انتهت المهلة سيتم إلغاء الطلب تلقائياً.",
+            "⚠️ إذا انتهت المهلة سيتم إلغاء الطلب تلقائياً."
+        ) if lang == "ar" else (
+            "⚠️ <b>Receipt rejected</b>\n\n"
+            f"Sorry {html.escape(order['full_name'] or 'customer')}, the receipt does not match or is unclear.\n\n"
+            "📌 Submit a new receipt showing the amount, recipient name, and date.\n\n"
+            f"{extension_notice_en}"
+            "📎 Upload a new receipt.\n"
+            f"{remaining}\n\n"
+            "⚠️ If the deadline expires, the order will be cancelled automatically."
+        )
+        await bot.send_message(
+            order["telegram_id"],
+            customer_text,
             reply_markup=receipt_upload_keyboard(order_id, lang),
             parse_mode="HTML",
         )
