@@ -2,7 +2,7 @@
 import asyncio
 import html
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
@@ -90,7 +90,7 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
             )
             return
 
-        deadline = datetime.now() + __import__("datetime", fromlist=["timedelta"]).timedelta(minutes=timeout_minutes)
+        deadline = datetime.now() + timedelta(minutes=timeout_minutes)
         try:
             await transition_order(
                 conn, order_id, "waiting_payment", admin_id=callback.from_user.id,
