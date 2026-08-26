@@ -1,14 +1,16 @@
-"""Authoritative admin maintenance-mode policy."""
+"""Authoritative Maintenance 2.0 administration flow."""
+from __future__ import annotations
+
 import logging
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram import F, Router
+from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from services.locale_service import locale_service
-from services.settings_service import SettingsService
-from keyboards.inline import admin_menu_keyboard, maintenance_confirmation_keyboard
+from keyboards.inline import admin_menu_keyboard
+from keyboards.maintenance import maintenance_confirm_keyboard, maintenance_mode_keyboard
+from services.maintenance_service import MaintenanceMode, MaintenanceService
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -18,29 +20,27 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-async def _notify_users_maintenance(admin_msg: Message, locale_key: str = "maintenance_notification"):
+async def _active_orders_count() -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        users = await conn.fetch("SELECT telegram_id, language FROM users WHERE terms_accepted = TRUE")
-    from aiogram import Bot
-    bot = Bot(token=Config.BOT_TOKEN)
-    sent = failed = 0
-    for user in users:
-        try:
-            await bot.send_message(user["telegram_id"], locale_service.get(locale_key, user["language"] or "ar"), parse_mode="HTML")
-            sent += 1
-        except Exception:
-            failed += 1
-    await admin_msg.answer(f"📨 <b>إشعار الصيانة للمستخدمين</b>\n\n✅ تم الإشعار: {sent}\n❌ فشل: {failed}\n📊 المجموع: {len(users)}", parse_mode="HTML")
-
-
-async def _active_orders():
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        return await conn.fetch(
-            "SELECT o.order_number, o.status, o.amount_usdt, u.full_name FROM orders o JOIN users u ON o.user_id = u.id "
-            "WHERE o.status IN ('pending','waiting_payment','receipt_received','payment_confirmed') ORDER BY o.created_at ASC"
+        return await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting_payment','receipt_received','payment_confirmed')"
         )
+
+
+_MODE_LABELS = {
+    MaintenanceMode.OFF: "الوضع الطبيعي",
+    MaintenanceMode.LIMITED: "الخدمة المحدودة",
+    MaintenanceMode.MAINTENANCE: "الصيانة الكاملة",
+    MaintenanceMode.EMERGENCY: "حالة الطوارئ",
+}
+
+_MODE_DESCRIPTIONS = {
+    MaintenanceMode.OFF: "جميع الخدمات تعمل بشكل طبيعي.",
+    MaintenanceMode.LIMITED: "تظل الخدمة متاحة، ويمكن للميزات التي تدعم هذا الوضع تقييد عمليات جديدة تدريجياً.",
+    MaintenanceMode.MAINTENANCE: "يتم إيقاف العمليات الجديدة فقط. الطلبات الحالية تبقى محفوظة وتستمر في دورة حياتها.",
+    MaintenanceMode.EMERGENCY: "توقف تشغيلي شامل للمستخدمين لمعالجة مشكلة عاجلة. الإدارة تبقى متاحة.",
+}
 
 
 @router.callback_query(F.data == "admin_maintenance")
@@ -48,73 +48,83 @@ async def admin_maintenance(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-
-    enabled = Config.get_maintenance_mode()
-    if enabled:
-        await callback.message.edit_text(
-            "⚠️ <b>وضع الصيانة مفعّل حالياً</b>\n\n"
-            "سيتم السماح بعودة المستخدمين إلى الخدمات بعد تأكيد الإيقاف.\n\nهل تريد إيقاف وضع الصيانة؟",
-            reply_markup=maintenance_confirmation_keyboard(True), parse_mode="HTML",
-        )
-        await callback.answer()
-        return
-
-    active_orders = await _active_orders()
-    if active_orders:
-        labels = {"pending": "⏳ قيد الانتظار", "waiting_payment": "💳 انتظار الدفع", "receipt_received": "📎 قيد المراجعة", "payment_confirmed": "🚀 انتظار الإرسال"}
-        lines = [f"• #{row['order_number']} — {labels.get(row['status'], row['status'])} — {row['full_name'] or 'N/A'} — {row['amount_usdt']} USDT" for row in active_orders[:10]]
-        if len(active_orders) > 10:
-            lines.append(f"... و{len(active_orders) - 10} طلب آخر")
-        await callback.message.edit_text(
-            "⛔ <b>لا يمكن تفعيل وضع الصيانة الآن</b>\n\n"
-            f"يوجد <b>{len(active_orders)}</b> طلب نشط. يجب إنهاؤها أولاً قبل الدخول في وضع الصيانة.\n\n" + "\n".join(lines),
-            reply_markup=admin_menu_keyboard(), parse_mode="HTML",
-        )
-        await callback.answer()
-        return
-
+    mode = await MaintenanceService.get_mode()
+    active_count = await _active_orders_count()
     await callback.message.edit_text(
-        "⚠️ <b>تأكيد تفعيل وضع الصيانة</b>\n\n"
-        "سيتم منع المستخدمين من بدء العمليات الجديدة، مع إبقاء صلاحيات الإدارة متاحة.\n"
-        "سيتم تسجيل عملية التفعيل وإشعار المستخدمين بعد التنفيذ.\n\n"
-        "هل تريد المتابعة؟",
-        reply_markup=maintenance_confirmation_keyboard(False), parse_mode="HTML",
+        "🛠️ <b>إدارة وضع التشغيل</b>\n\n"
+        f"الحالة الحالية: <b>{_MODE_LABELS[mode]}</b>\n"
+        f"الطلبات النشطة: <b>{active_count}</b>\n\n"
+        "اختر الوضع المطلوب. لن يتم تنفيذ أي تغيير من هذه الشاشة مباشرة؛ ستظهر خطوة تأكيد مستقلة.\n\n"
+        "<b>الصيانة الكاملة:</b> تمنع الطلبات الجديدة ولا تقطع الطلبات القائمة.\n"
+        "<b>الطوارئ:</b> توقف تعامل المستخدمين مع الخدمة مؤقتاً.",
+        parse_mode="HTML", reply_markup=maintenance_mode_keyboard(mode.value)
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_maintenance_confirm_on")
-async def confirm_maintenance_on(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("admin_maintenance_mode_"))
+async def choose_maintenance_mode(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    active_orders = await _active_orders()
-    if active_orders:
-        await callback.answer("⛔ ظهرت طلبات نشطة؛ لم يتم تفعيل الصيانة.", show_alert=True)
-        await callback.message.edit_text("⛔ <b>تم إلغاء التفعيل</b>\n\nهناك طلبات نشطة. يجب إكمالها أولاً.", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    raw = callback.data.removeprefix("admin_maintenance_mode_")
+    if raw not in {mode.value for mode in MaintenanceMode}:
+        await callback.answer("❌ وضع غير صالح", show_alert=True)
         return
-    await SettingsService.set_bool("maintenance_mode", True)
-    Config.set_maintenance_mode_sync(True)
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("INSERT INTO audit_logs (admin_id, action, details, new_value, severity) VALUES ($1, 'maintenance_enabled', 'Maintenance mode enabled', 'on', 'warning')", callback.from_user.id)
-    await callback.message.edit_text("🛑 <b>تم تفعيل وضع الصيانة</b>\n\nالمستخدمون لن يتمكنوا من بدء عمليات جديدة، ويمكن للإدارة متابعة العمل.", parse_mode="HTML")
-    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-    await callback.answer("تم تفعيل الصيانة")
-    await _notify_users_maintenance(callback.message)
+    mode = MaintenanceMode(raw)
+    current = await MaintenanceService.get_mode()
+    if mode == current:
+        await callback.answer("هذا الوضع مفعّل بالفعل.", show_alert=True)
+        return
+    active_count = await _active_orders_count()
+    warning = ""
+    if mode == MaintenanceMode.MAINTENANCE and active_count:
+        warning = f"\n\nℹ️ يوجد حالياً <b>{active_count}</b> طلب نشط. لن يتم قطعها؛ سيستمر lifecycle الخاص بها."
+    if mode == MaintenanceMode.EMERGENCY and active_count:
+        warning = f"\n\n⚠️ يوجد <b>{active_count}</b> طلب نشط. وضع الطوارئ سيمنع المستخدمين من متابعة التفاعل حتى يرفعه الأدمن. استخدمه فقط عند الحاجة."
+    await callback.message.edit_text(
+        f"⚠️ <b>تأكيد تغيير وضع التشغيل</b>\n\n"
+        f"من: <b>{_MODE_LABELS[current]}</b>\n"
+        f"إلى: <b>{_MODE_LABELS[mode]}</b>\n\n"
+        f"{_MODE_DESCRIPTIONS[mode]}{warning}\n\n"
+        "لن يتم تطبيق التغيير إلا بعد الضغط على زر التأكيد.",
+        parse_mode="HTML", reply_markup=maintenance_confirm_keyboard(mode.value)
+    )
+    await callback.answer()
 
 
-@router.callback_query(F.data == "admin_maintenance_confirm_off")
-async def confirm_maintenance_off(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("admin_maintenance_confirm_"))
+async def confirm_maintenance_mode(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    await SettingsService.set_bool("maintenance_mode", False)
-    Config.set_maintenance_mode_sync(False)
+    raw = callback.data.removeprefix("admin_maintenance_confirm_")
+    if raw not in {mode.value for mode in MaintenanceMode}:
+        await callback.answer("❌ وضع غير صالح", show_alert=True)
+        return
+    target = MaintenanceMode(raw)
+    current = await MaintenanceService.get_mode()
+    if target == current:
+        await callback.answer("لم يتغير الوضع.", show_alert=True)
+        return
+
+    await MaintenanceService.set_mode(target)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("INSERT INTO audit_logs (admin_id, action, details, new_value, severity) VALUES ($1, 'maintenance_disabled', 'Maintenance mode disabled', 'off', 'info')", callback.from_user.id)
-    await callback.message.edit_text("✅ <b>تم إيقاف وضع الصيانة</b>\n\nالبوت متاح للمستخدمين الآن.", parse_mode="HTML")
+        await conn.execute(
+            """INSERT INTO audit_logs (admin_id, action, details, new_value, severity)
+               VALUES ($1, $2, $3, $4, $5)""",
+            callback.from_user.id,
+            "maintenance_mode_changed",
+            f"Maintenance mode changed from {current.value} to {target.value}",
+            target.value,
+            "critical" if target == MaintenanceMode.EMERGENCY else "warning" if target != MaintenanceMode.OFF else "info",
+        )
+
+    await callback.message.edit_text(
+        f"{'🚨' if target == MaintenanceMode.EMERGENCY else '🛠️' if target == MaintenanceMode.MAINTENANCE else '🟡' if target == MaintenanceMode.LIMITED else '✅'} "
+        f"<b>تم تغيير وضع التشغيل إلى {_MODE_LABELS[target]}</b>\n\n{_MODE_DESCRIPTIONS[target]}",
+        parse_mode="HTML",
+    )
     await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
-    await callback.answer("تم إيقاف الصيانة")
-    await _notify_users_maintenance(callback.message, "maintenance_ended")
+    await callback.answer("تم تطبيق التغيير")
