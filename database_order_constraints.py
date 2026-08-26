@@ -20,10 +20,10 @@ async def install_order_constraints(conn):
 
     await conn.execute(
         """UPDATE orders o
-              SET customer_full_name_snapshot = u.full_name,
-                  customer_telegram_id_snapshot = u.telegram_id,
-                  customer_username_snapshot = u.username,
-                  customer_shamcash_account_snapshot = u.shamcash_account
+              SET customer_full_name_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'full_name'), ''),
+                  customer_telegram_id_snapshot = NULLIF(to_jsonb(u)->>'telegram_id', '')::BIGINT,
+                  customer_username_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'username'), ''),
+                  customer_shamcash_account_snapshot = NULLIF(BTRIM(to_jsonb(u)->>'shamcash_account'), '')
              FROM users u
             WHERE o.user_id = u.id
               AND (o.customer_full_name_snapshot IS NULL
@@ -35,31 +35,62 @@ async def install_order_constraints(conn):
     await conn.execute("""
         CREATE OR REPLACE FUNCTION snapshot_order_customer_identity()
         RETURNS TRIGGER AS $$
-        DECLARE customer_row RECORD;
+        DECLARE
+            customer_row RECORD;
+            customer_json JSONB;
+            customer_full_name TEXT;
+            customer_username TEXT;
+            customer_shamcash_account TEXT;
+            customer_telegram_id BIGINT;
+            customer_is_verified BOOLEAN;
+            customer_phone_verified BOOLEAN;
+            customer_phone_number TEXT;
+            customer_terms_accepted BOOLEAN;
         BEGIN
             IF NEW.user_id IS NULL THEN
                 RAISE EXCEPTION 'order customer is required' USING ERRCODE='23514';
             END IF;
-            SELECT id, full_name, telegram_id, username, shamcash_account,
-                   is_verified, phone_verified, phone_number, terms_accepted
-              INTO customer_row
-              FROM users WHERE id = NEW.user_id;
-            IF NOT FOUND THEN RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514'; END IF;
-            IF customer_row.terms_accepted IS NOT TRUE THEN RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514'; END IF;
-            IF customer_row.is_verified IS NOT TRUE THEN RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514'; END IF;
-            IF customer_row.phone_verified IS NOT TRUE OR customer_row.phone_number IS NULL OR btrim(customer_row.phone_number) = '' THEN
+            SELECT u INTO customer_row FROM users u WHERE u.id = NEW.user_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
+            END IF;
+
+            customer_json := to_jsonb(customer_row);
+            customer_telegram_id := NULLIF(customer_json->>'telegram_id', '')::BIGINT;
+            customer_full_name := NULLIF(BTRIM(customer_json->>'full_name'), '');
+            customer_username := NULLIF(BTRIM(customer_json->>'username'), '');
+            customer_shamcash_account := NULLIF(BTRIM(customer_json->>'shamcash_account'), '');
+            customer_is_verified := NULLIF(customer_json->>'is_verified', '')::BOOLEAN;
+            customer_phone_verified := NULLIF(customer_json->>'phone_verified', '')::BOOLEAN;
+            customer_phone_number := NULLIF(BTRIM(customer_json->>'phone_number'), '');
+            customer_terms_accepted := NULLIF(customer_json->>'terms_accepted', '')::BOOLEAN;
+
+            IF customer_terms_accepted IS NOT TRUE THEN
+                RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514';
+            END IF;
+            IF customer_is_verified IS NOT TRUE THEN
+                RAISE EXCEPTION 'order customer is not verified' USING ERRCODE='23514';
+            END IF;
+            IF customer_phone_verified IS NOT TRUE OR customer_phone_number IS NULL THEN
                 RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
             END IF;
-            IF customer_row.full_name IS NULL OR btrim(customer_row.full_name) = '' THEN RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514'; END IF;
-            IF customer_row.shamcash_account IS NULL OR btrim(customer_row.shamcash_account) = '' THEN RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514'; END IF;
+            IF customer_json ? 'full_name' AND customer_full_name IS NULL THEN
+                RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514';
+            END IF;
+            IF customer_json ? 'shamcash_account' AND customer_shamcash_account IS NULL THEN
+                RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514';
+            END IF;
+
             IF TG_OP = 'INSERT' THEN
-                NEW.customer_full_name_snapshot := customer_row.full_name;
-                NEW.customer_telegram_id_snapshot := customer_row.telegram_id;
-                NEW.customer_username_snapshot := customer_row.username;
-                NEW.customer_shamcash_account_snapshot := customer_row.shamcash_account;
+                NEW.customer_full_name_snapshot := customer_full_name;
+                NEW.customer_telegram_id_snapshot := customer_telegram_id;
+                NEW.customer_username_snapshot := customer_username;
+                NEW.customer_shamcash_account_snapshot := customer_shamcash_account;
                 RETURN NEW;
             END IF;
-            IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN RAISE EXCEPTION 'order customer snapshot is immutable' USING ERRCODE='23514'; END IF;
+            IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+                RAISE EXCEPTION 'order customer snapshot is immutable' USING ERRCODE='23514';
+            END IF;
             IF NEW.customer_full_name_snapshot IS DISTINCT FROM OLD.customer_full_name_snapshot
                OR NEW.customer_telegram_id_snapshot IS DISTINCT FROM OLD.customer_telegram_id_snapshot
                OR NEW.customer_username_snapshot IS DISTINCT FROM OLD.customer_username_snapshot
