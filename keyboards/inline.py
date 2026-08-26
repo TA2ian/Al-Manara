@@ -141,7 +141,7 @@ def saved_addresses_keyboard(addresses: list, lang: str = "ar", select_mode: boo
         short_addr = full[:6] + "..." + full[-4:]
         display = f"{label} - {short_addr}" if label else short_addr
         prefix = "select_addr_" if select_mode else "view_addr_"
-        buttons.append([InlineKeyboardButton(text=f"📍 {display} [{address['network']}]", callback_data=f"{prefix}{address['id']}")])
+        buttons.append([InlineKeyboardButton(text=f"📍 {display} [{address['network']}]", callback_data=f"{prefix}{address['id']}" )])
     buttons.append([InlineKeyboardButton(text="❌ " + ("إلغاء" if lang == "ar" else "Cancel"), callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -165,3 +165,20 @@ def quick_actions_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
     else:
         buttons = [[InlineKeyboardButton(text="🔄 Reorder", callback_data="quick_reorder"), InlineKeyboardButton(text="📍 Saved Addresses", callback_data="quick_saved_addresses")], [InlineKeyboardButton(text="💱 Exchange Rate", callback_data="quick_rate"), InlineKeyboardButton(text="📞 Support & Feedback", callback_data="quick_contact")], [InlineKeyboardButton(text="📋 Disclaimer", callback_data="menu_disclaimer"), InlineKeyboardButton(text="🌐 Change Language", callback_data="quick_change_lang")]]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def manipulation_confirmation_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    """Require explicit admin classification before counting a manipulation incident."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ تأكيد محاولة تلاعب", callback_data=f"admin_confirm_manipulation_{order_id}")],
+        [InlineKeyboardButton(text="↩️ رفض عادي بدون مخالفة", callback_data=f"admin_dismiss_manipulation_{order_id}")],
+        [InlineKeyboardButton(text="🔙 لوحة التحكم", callback_data="admin_menu")],
+    ])
+
+
+def misconduct_final_review_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    """Admin-only final decision controls after the third confirmed incident."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ السماح بالاستمرار", callback_data=f"misconduct_continue_{telegram_id}"),
+        InlineKeyboardButton(text="🚫 حظر نهائي", callback_data=f"misconduct_ban_{telegram_id}"),
+    ]])
