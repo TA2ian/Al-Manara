@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_legal_navigation_router_is_registered_before_legacy_disclaimer_handler():
+def test_legal_navigation_router_is_registered_before_customer_navigation():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     legal_router = source.index("dp.include_router(legal_navigation_policy.router)")
     customer_navigation = source.index("dp.include_router(customer_navigation_policy.router)")
@@ -30,7 +30,6 @@ def test_legal_navigation_uses_canonical_policy_source():
     assert "menu_disclaimer" in source
 
 
-def test_legacy_monolithic_disclaimer_remains_fallback_only():
+def test_customer_navigation_has_no_legacy_disclaimer_fallback():
     source = (ROOT / "handlers/customer_navigation_policy.py").read_text(encoding="utf-8")
-    assert '@router.callback_query(F.data == "menu_disclaimer")' in source
-    assert 'locale_service.get(' in source
+    assert '@router.callback_query(F.data == "menu_disclaimer")' not in source
