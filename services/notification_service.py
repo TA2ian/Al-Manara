@@ -4,7 +4,7 @@ import logging
 from aiogram import Bot
 
 from services.formatters import money, percent, usdt
-from services.time_service import format_order_datetime
+from services.operational_policy_service import OperationalPolicyService
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +62,16 @@ class NotificationService:
         await self.notify_admins(text)
 
     async def notify_order_approved(self, user_id: int, order: dict, lang: str = "ar") -> bool:
-        """Deliver the immutable payment snapshot and exact order deadline.
-
-        The approval handler owns the receipt-upload prompt. This method sends only
-        the authoritative payment details so manual and automatic approval flows do
-        not create duplicate receipt instructions.
-        """
+        """Deliver immutable payment details and the configured payment deadline duration."""
         recipient = (order.get("payment_recipient_name_snapshot") or "").strip()
         address = (order.get("payment_account_snapshot") or "").strip()
         qr_photo_id = (order.get("payment_qr_photo_id") or "").strip()
         order_number = order.get("order_number", "N/A")
         currency = "NEW.SYP" if order.get("payment_currency") in ("SYP", "NEW.SYP") else "USD"
         amount = money(order.get("total_amount"))
-        deadline = order.get("payment_deadline")
-        deadline_text = format_order_datetime(deadline) if deadline else "غير محددة"
         fee_percent = percent(order.get("fee_percent"))
         fee_amount = money(order.get("fee_amount"))
+        deadline_minutes = await OperationalPolicyService.get_payment_timeout_minutes()
 
         if not recipient or not address or not qr_photo_id:
             logger.error(
@@ -112,8 +106,8 @@ class NotificationService:
                 f"💰 المبلغ المستحق: <b>{amount} {currency}</b>\n"
                 f"🏷️ رسوم الخدمة: <b>{fee_amount} {currency}</b> ({fee_percent}%)"
                 f"{old_syp_line}\n\n"
-                "⏱️ <b>الموعد النهائي للدفع</b>\n"
-                f"{deadline_text}\n\n"
+                "⏱️ <b>مهلة إتمام الدفع</b>\n"
+                f"لديك <b>{deadline_minutes} دقيقة</b> من اعتماد الطلب لإتمام الدفع وإرسال الإثبات.\n\n"
                 "🔎 <b>قبل التحويل</b>\n"
                 "تحقق من اسم المستلم والعنوان مرة أخيرة. بعد إتمام الدفع ارفع الإثبات من داخل هذا الطلب."
             )
@@ -128,7 +122,7 @@ class NotificationService:
                 f"💰 Amount due: <b>{amount} {currency}</b>\n"
                 f"🏷️ Service fee: <b>{fee_amount} {currency}</b> ({fee_percent}%)\n\n"
                 "⏱️ <b>Payment deadline</b>\n"
-                f"{deadline_text}\n\n"
+                f"You have <b>{deadline_minutes} minutes</b> from order approval to complete the payment and upload the proof.\n\n"
                 "🔎 <b>Before sending</b>\n"
                 "Verify the recipient name and address one last time, then upload your proof from this order."
             )
