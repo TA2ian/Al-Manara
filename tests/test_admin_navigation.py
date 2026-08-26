@@ -7,6 +7,7 @@ from keyboards.inline import (
     order_pagination_keyboard,
     settings_keyboard,
     auto_approve_keyboard,
+    orders_pagination_keyboard,
 )
 from handlers.verification_admin_policy import (
     _verification_review_keyboard,
@@ -61,6 +62,14 @@ def test_settings_and_auto_approve_have_back_control():
     assert "setting_shamcash_syp" not in data
     assert "setting_shamcash_name" not in data
     assert "admin_menu" in callback_data(auto_approve_keyboard(False))
+
+
+def test_customer_order_history_has_a_real_close_handler():
+    assert "close_orders_list" in callback_data(orders_pagination_keyboard(1, 2, "ar"))
+    source = (Path(__file__).resolve().parents[1] / "handlers/customer_orders_policy.py").read_text(encoding="utf-8")
+    assert '@router.callback_query(F.data == "close_orders_list")' in source
+    assert "async def close_orders_list" in source
+    assert "await callback.message.delete()" in source
 
 
 def test_order_lifecycle_never_auto_sends_admin_dashboard():
