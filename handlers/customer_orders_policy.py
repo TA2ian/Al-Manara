@@ -30,7 +30,7 @@ EN_STATUS = {
     "payment_confirmed": "🚀 Payment confirmed — awaiting USDT transfer by admin",
     "completed": "✅ Completed and USDT sent",
     "rejected": "❌ Order rejected",
-    "expired": "⌛ Order expired",
+    "expired": "⌛ Expired",
 }
 
 
@@ -68,7 +68,7 @@ async def _get_user(message_or_callback):
     telegram_id = message_or_callback.from_user.id
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await pool.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
+        return await conn.fetchrow("SELECT id, language FROM users WHERE telegram_id = $1", telegram_id)
 
 
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
