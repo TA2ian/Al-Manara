@@ -3,7 +3,7 @@
 import inspect
 
 from handlers import admin_approval_policy, order_confirmation_policy
-from services import notification_service
+from services import notification_service, order_completion_service
 
 
 def test_order_timestamp_source_is_server_utc_not_local_naive_clock():
@@ -18,6 +18,19 @@ def test_admin_approval_timestamp_source_is_server_utc():
     assert "utc_now_naive" in source
     assert "datetime.now()" not in source
     assert "datetime.utcnow()" not in source
+
+
+def test_completion_timestamp_source_is_server_utc():
+    source = inspect.getsource(order_completion_service.complete_order)
+    assert "utc_now_naive" in source
+    assert "datetime.now()" not in source
+    assert "datetime.utcnow()" not in source
+
+
+def test_completion_closes_ephemeral_bot_session():
+    source = inspect.getsource(order_completion_service.complete_order)
+    assert "bot.session.close()" in source
+    assert "finally:" in source
 
 
 def test_customer_deadline_message_uses_operational_duration_policy():
