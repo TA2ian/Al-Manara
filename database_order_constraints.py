@@ -178,6 +178,31 @@ async def install_order_constraints(conn):
         ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_snapshot()""")
 
     await conn.execute("""
+        CREATE OR REPLACE FUNCTION protect_order_payment_deadline()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'UPDATE' AND OLD.payment_deadline IS NOT NULL
+               AND NEW.payment_deadline IS DISTINCT FROM OLD.payment_deadline THEN
+                RAISE EXCEPTION 'payment deadline is immutable once assigned' USING ERRCODE='23514';
+            END IF;
+            IF NEW.payment_deadline IS NOT NULL AND NEW.approved_at IS NOT NULL
+               AND NEW.payment_deadline < NEW.approved_at THEN
+                RAISE EXCEPTION 'payment deadline cannot precede approval time' USING ERRCODE='23514';
+            END IF;
+            IF NEW.payment_deadline IS NOT NULL AND NEW.created_at IS NOT NULL
+               AND NEW.payment_deadline < NEW.created_at THEN
+                RAISE EXCEPTION 'payment deadline cannot precede order creation time' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    await conn.execute("DROP TRIGGER IF EXISTS trg_protect_order_payment_deadline ON orders")
+    await conn.execute("""CREATE TRIGGER trg_protect_order_payment_deadline
+        BEFORE INSERT OR UPDATE OF payment_deadline, approved_at, created_at
+        ON orders FOR EACH ROW EXECUTE FUNCTION protect_order_payment_deadline()""")
+
+    await conn.execute("""
         CREATE OR REPLACE FUNCTION prevent_active_order_deletion()
         RETURNS TRIGGER AS $$
         BEGIN
