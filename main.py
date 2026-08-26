@@ -1,4 +1,4 @@
-"""Main entry point for Crypto Top-Up Bot."""
+"""Main entry point for Al-Manara customer top-up bot."""
 import asyncio
 import logging
 import os
@@ -11,6 +11,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from config import Config
 from database import init_db, close_db, get_pool
+from database_receipt_retry_constraints import install_receipt_retry_constraints
 from bot import create_dispatcher
 from keep_alive import keep_alive
 from services.maintenance_service import MaintenanceMode, MaintenanceService
@@ -48,6 +49,7 @@ async def send_expiry_reminders(bot: Bot):
                         "SELECT o.*, u.telegram_id, u.language FROM orders o "
                         "JOIN users u ON o.user_id = u.id "
                         "WHERE o.status = 'waiting_payment' "
+                        "AND COALESCE(o.receipt_upload_count, 0) < 3 "
                         "AND o.payment_deadline BETWEEN NOW() + INTERVAL '9 minutes' AND NOW() + INTERVAL '12 minutes'"
                     )
                     for order in soon_expiring:
@@ -89,7 +91,9 @@ async def check_expired_orders(bot: Bot):
                     expired = await conn.fetch(
                         "SELECT o.*, u.telegram_id, u.language FROM orders o "
                         "JOIN users u ON o.user_id = u.id "
-                        "WHERE o.status = 'waiting_payment' AND o.payment_deadline < NOW()"
+                        "WHERE o.status = 'waiting_payment' "
+                        "AND COALESCE(o.receipt_upload_count, 0) < 3 "
+                        "AND o.payment_deadline < NOW()"
                     )
                     for order in expired:
                         try:
@@ -124,6 +128,9 @@ async def check_expired_orders(bot: Bot):
 async def on_startup(bot: Bot):
     logger.info("Starting bot...")
     await init_db()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await install_receipt_retry_constraints(conn)
     await init_fulfillment_claims()
     maintenance_mode = await MaintenanceService.get_mode()
     Config.set_maintenance_mode_sync(
