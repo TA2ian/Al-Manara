@@ -105,12 +105,14 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 return
 
             calculation = data["calculation"]
+            requested_amount = calculation.get("requested_amount_usdt", data["amount_usdt"])
+            net_amount = calculation.get("net_amount_usdt", data["amount_usdt"])
             order_number = _order_number()
-            row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, amount_usdt, exchange_rate,
+            row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, requested_amount_usdt, amount_usdt, exchange_rate,
                 payment_currency, base_amount, fee_percent, fee_amount, total_amount, wallet_address, wallet_qr_photo_id,
                 payment_method_code, payment_account_snapshot, payment_qr_photo_id, payment_recipient_name_snapshot, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending') RETURNING id""",
-                order_number, user["id"], wallet["network"], data["amount_usdt"], calculation["exchange_rate"], currency,
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending') RETURNING id""",
+                order_number, user["id"], wallet["network"], requested_amount, net_amount, calculation["exchange_rate"], currency,
                 calculation["base_amount"], calculation["fee_percent"], calculation["fee_amount"], calculation["total_amount"],
                 wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
@@ -150,8 +152,11 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
         admin_status = "waiting_payment" if auto_approved else "pending"
         admin_text = (f"📦 <b>{'تم اعتماد طلب USDT تلقائياً' if auto_approved else 'طلب شراء USDT جديد'}</b>\n\n"
             f"📋 الرقم: #{_html(order_number)}\n👤 العميل: {_html(customer_name)}\n🆔 المعرف: <code>{_html(callback.from_user.id)}</code>\n"
-            f"👤 المستخدم: @{_html(username)}\n🏦 ShamCash العميل: <code>{_html(customer_shamcash)}</code>\n💰 الكمية: {_html(usdt(data['amount_usdt']))} USDT\n🌐 الشبكة: {_html(wallet['network'])}\n"
-            f"💱 عملة الدفع: {_html(currency)}\n💵 الإجمالي: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
+            f"👤 المستخدم: @{_html(username)}\n🏦 ShamCash العميل: <code>{_html(customer_shamcash)}</code>\n"
+            f"💰 المبلغ المحدد: {_html(usdt(requested_amount))} USDT\n💸 المبلغ المستحق للعميل: {_html(usdt(net_amount))} USDT\n"
+            f"🌐 الشبكة: {_html(wallet['network'])}\n💱 عملة الدفع: {_html(currency)}\n"
+            f"💵 المبلغ المدفوع: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
+            f"💰 رسوم الشبكة: {_html(money(calculation['fee_amount']))} {_html(currency)} ({_html(calculation['fee_percent'])}%)\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{_html(wallet['address'])}</code>\n\n"
             + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
         for admin_id in Config.ADMIN_IDS:
@@ -162,7 +167,8 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
 
         invoice = render_order_invoice(
             order_number=order_number,
-            amount_usdt_value=data["amount_usdt"],
+            requested_amount_usdt_value=requested_amount,
+            amount_usdt_value=net_amount,
             network=wallet["network"],
             wallet=wallet["address"],
             currency=currency,
