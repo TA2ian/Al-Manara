@@ -6,6 +6,8 @@ from database import get_pool
 from services.settings_service import SettingsService
 
 MONEY_QUANT = Decimal("0.01")
+FEE_QUANT = Decimal("0.000001")
+SUPPORTED_FEE_NETWORKS = ("BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH")
 
 
 class OperationalPolicyError(ValueError):
@@ -24,10 +26,44 @@ class OperationalPolicyService:
         return parsed
 
     @classmethod
-    async def get_fee_percent(cls) -> Decimal:
+    async def get_fee_percent(cls, network: str | None = None) -> Decimal:
         fallback = cls._decimal(Config.SERVICE_FEE_PERCENT, Decimal("0"))
-        value = cls._decimal(await SettingsService.get("service_fee_percent", str(fallback)), fallback)
+        normalized = (network or "").strip().upper()
+        if normalized == "ERC20":
+            normalized = "ETH"
+        elif normalized == "ARBITRUM":
+            normalized = "ARB"
+        elif normalized == "SOL":
+            normalized = "SOLANA"
+        key = f"service_fee_percent_{normalized.lower()}" if normalized in SUPPORTED_FEE_NETWORKS else "service_fee_percent"
+        value = cls._decimal(await SettingsService.get(key, str(fallback)), fallback)
         return max(Decimal("0"), min(value, Decimal("100")))
+
+    @classmethod
+    async def get_all_fee_percents(cls) -> dict[str, Decimal]:
+        return {network: await cls.get_fee_percent(network) for network in SUPPORTED_FEE_NETWORKS}
+
+    @classmethod
+    async def set_fee_percent(cls, value: object, admin_id: int, network: str | None = None) -> Decimal:
+        fee = cls._decimal(value, Decimal("-1"))
+        if fee < 0 or fee > 100:
+            raise OperationalPolicyError("Fee percent must be between 0 and 100")
+        fee = fee.quantize(FEE_QUANT, rounding=ROUND_HALF_UP)
+        normalized = (network or "").strip().upper()
+        if normalized == "ERC20":
+            normalized = "ETH"
+        elif normalized == "ARBITRUM":
+            normalized = "ARB"
+        elif normalized == "SOL":
+            normalized = "SOLANA"
+        if normalized and normalized not in SUPPORTED_FEE_NETWORKS:
+            raise OperationalPolicyError("Unknown fee network")
+        key = f"service_fee_percent_{normalized.lower()}" if normalized else "service_fee_percent"
+        fallback = str(Config.SERVICE_FEE_PERCENT)
+        previous = await SettingsService.get(key, fallback)
+        await SettingsService.set(key, str(fee))
+        await cls._audit(admin_id, "setting_update", key, previous, str(fee), f"Updated service fee percent for {normalized or 'default'}")
+        return fee
 
     @classmethod
     async def get_payment_timeout_minutes(cls) -> int:
@@ -53,17 +89,6 @@ class OperationalPolicyService:
             raise OperationalPolicyError("Maximum order cannot be below minimum order")
         if daily < maximum:
             raise OperationalPolicyError("Daily limit cannot be below maximum order")
-
-    @classmethod
-    async def set_fee_percent(cls, value: object, admin_id: int) -> Decimal:
-        fee = cls._decimal(value, Decimal("-1"))
-        if fee < 0 or fee > 100:
-            raise OperationalPolicyError("Fee percent must be between 0 and 100")
-        fee = fee.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-        previous = await SettingsService.get("service_fee_percent", str(Config.SERVICE_FEE_PERCENT))
-        await SettingsService.set("service_fee_percent", str(fee))
-        await cls._audit(admin_id, "setting_update", "service_fee_percent", previous, str(fee), "Updated service fee percent")
-        return fee
 
     @classmethod
     async def set_payment_timeout(cls, value: object, admin_id: int) -> int:
