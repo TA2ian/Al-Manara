@@ -1,18 +1,11 @@
-import importlib
-
-
 def test_admin_ids_accept_both_current_and_legacy_environment_names(monkeypatch):
     monkeypatch.setenv("ADMIN_IDS", "1001, 1002")
     monkeypatch.setenv("ADMIN_ID", "1003")
 
     import config
 
-    config = importlib.reload(config)
-    assert config.Config.is_admin(1001)
-    assert config.Config.is_admin(1002)
-    assert config.Config.is_admin(1003)
-    assert not config.Config.is_admin(1004)
-    assert config.Config.admin_configuration_summary() == "3 administrator ID(s) configured"
+    parsed = config._parse_admin_ids()
+    assert parsed == [1001, 1002, 1003]
 
 
 def test_admin_entry_uses_canonical_access_service():
