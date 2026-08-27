@@ -8,16 +8,16 @@ def test_wallet_architecture_has_single_registration_owner():
     saved = (ROOT / "handlers/saved_wallets.py").read_text(encoding="utf-8")
 
     assert "@router.callback_query(F.data == \"wallet_add\")" in wallets
+    assert "@router.callback_query(WalletStates.waiting_network, F.data.startswith(\"wallet_network_\"))" in wallets
     assert "@router.message(WalletStates.waiting_address)" in wallets
     assert "@router.message(WalletStates.waiting_address, F.photo)" in wallets
     assert "@router.message(WalletStates.waiting_qr, F.photo)" in wallets
     assert "@router.callback_query(F.data.startswith(\"order_use_saved_\"))" in saved
-    assert "@router.callback_query(OrderStates.waiting_save_address, F.data == \"save_address_yes\")" in saved
 
 
 def test_order_wallet_flow_uses_only_verified_saved_wallets_or_registry():
     source = (ROOT / "handlers/order_wallet_policy.py").read_text(encoding="utf-8")
-    assert "WalletStates.waiting_address" in source
+    assert "WalletStates.waiting_network" in source
     assert "verification_status = 'verified'" in source
     assert "qr_photo_id IS NOT NULL" in source
     assert "waiting_wallet_qr" not in source
