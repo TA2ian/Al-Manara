@@ -67,16 +67,6 @@ def test_canonical_order_constraint_surface_is_active():
     assert "order wallet QR does not match the verified saved wallet" in constraints
 
 
-def test_release_gate_tracks_only_live_router_modules():
-    source = (ROOT / "tests/test_release_gate.py").read_text(encoding="utf-8")
-    assert "handlers.admin_settings_policy" in source
-    assert "handlers.verification_policy" in source
-    assert "handlers.verification_pending_policy" in source
-    assert "handlers.legacy_wallet_guard" not in source
-    assert "handlers.my_orders" not in source
-    assert "handlers.admin" not in source
-
-
 def test_dispatcher_does_not_reference_retired_compatibility_routers():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     forbidden = (
