@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from keyboards.admin import enhanced_admin_menu_keyboard
 from keyboards.inline import settings_keyboard
-from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService
+from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService, SUPPORTED_FEE_NETWORKS
 from states import AdminStates
 
 router = Router()
@@ -19,21 +19,15 @@ def is_admin(user_id: int) -> bool:
 
 
 async def _back_to_admin(message: Message) -> None:
-    await message.answer(
-        "👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:",
-        reply_markup=enhanced_admin_menu_keyboard(),
-        parse_mode="HTML",
-    )
+    await message.answer("👨‍💼 <b>لوحة الإدارة</b>\n\nاختر العملية المطلوبة:", reply_markup=enhanced_admin_menu_keyboard(), parse_mode="HTML")
 
 
 async def _show_settings(callback: CallbackQuery, state: FSMContext | None = None) -> None:
     if state is not None:
         await state.clear()
     await callback.message.edit_text(
-        "⚙️ <b>الإعدادات التشغيلية</b>\n\n"
-        "هذه الإعدادات تؤثر على الطلبات الجديدة فقط. الرسوم والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
-        reply_markup=settings_keyboard(),
-        parse_mode="HTML",
+        "⚙️ <b>الإعدادات التشغيلية</b>\n\nهذه الإعدادات تؤثر على الطلبات الجديدة فقط. الرسوم والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
+        reply_markup=settings_keyboard(), parse_mode="HTML",
     )
 
 
@@ -60,15 +54,31 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    fee_percent = await OperationalPolicyService.get_fee_percent()
+    fees = await OperationalPolicyService.get_all_fee_percents()
+    labels = {"BEP20": "🟡 BEP20", "TRC20": "🔷 TRC20", "TON": "💎 TON", "ARB": "🔵 ARB", "SOLANA": "🟣 Solana", "ETH": "⚪ Ethereum"}
+    buttons = [[InlineKeyboardButton(text=f"{labels[n]} · {fees[n]:g}%", callback_data=f"setting_fee_network_{n}")] for n in SUPPORTED_FEE_NETWORKS]
+    buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")])
+    await state.clear()
+    await callback.message.edit_text("💰 <b>رسوم الخدمة حسب الشبكة</b>\n\nاختر الشبكة لتعديل رسومها. الرسوم مستقلة لكل شبكة وتُثبت داخل الطلب عند إنشائه.", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("setting_fee_network_"))
+async def setting_fee_network(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    network = callback.data.removeprefix("setting_fee_network_").upper()
+    if network not in SUPPORTED_FEE_NETWORKS:
+        await callback.answer("❌ شبكة غير صالحة", show_alert=True)
+        return
+    fee = await OperationalPolicyService.get_fee_percent(network)
+    await state.update_data(fee_network=network)
+    await state.set_state(AdminStates.waiting_fee_percent)
     await callback.message.edit_text(
-        "💰 <b>رسوم الخدمة</b>\n\n"
-        f"النسبة الحالية: <b>{fee_percent:g}%</b>\n\n"
-        "أرسل نسبة الرسوم الجديدة من 0 إلى 100.\n"
-        "سيتم استخدامها في عروض الأسعار والطلبات الجديدة، بينما تبقى الرسوم المثبتة في الطلبات السابقة دون تغيير.",
+        f"💰 <b>رسوم شبكة {network}</b>\n\nالنسبة الحالية: <b>{fee:g}%</b>\n\nأرسل النسبة الجديدة من 0 إلى 100.\nسيتم تطبيقها على الطلبات الجديدة لهذه الشبكة فقط.",
         parse_mode="HTML",
     )
-    await state.set_state(AdminStates.waiting_fee_percent)
     await callback.answer()
 
 
@@ -78,14 +88,16 @@ async def admin_set_fee_percent(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer("⛔ Access denied")
         return
+    data = await state.get_data()
+    network = data.get("fee_network")
     try:
         value = Decimal((message.text or "").strip().replace(",", ""))
-        saved = await OperationalPolicyService.set_fee_percent(value, message.from_user.id)
+        saved = await OperationalPolicyService.set_fee_percent(value, message.from_user.id, network=network)
     except (OperationalPolicyError, ValueError):
         await message.answer("❌ قيمة غير صالحة. أرسل نسبة بين 0 و100.")
         return
     await state.clear()
-    await message.answer(f"✅ تم تحديث رسوم الخدمة إلى <b>{saved:g}%</b>.", parse_mode="HTML")
+    await message.answer(f"✅ تم تحديث رسوم شبكة <b>{network}</b> إلى <b>{saved:g}%</b>.", parse_mode="HTML")
     await _back_to_admin(message)
 
 
@@ -95,13 +107,7 @@ async def setting_timeout(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     timeout = await OperationalPolicyService.get_payment_timeout_minutes()
-    await callback.message.edit_text(
-        "⏱ <b>مهلة الدفع</b>\n\n"
-        f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\n"
-        "أرسل المهلة الجديدة بالدقائق من 1 إلى 1440.\n"
-        "تُطبق عند اعتماد الطلبات الجديدة ولا تغيّر المهل المثبتة للطلبات القائمة.",
-        parse_mode="HTML",
-    )
+    await callback.message.edit_text("⏱ <b>مهلة الدفع</b>\n\n" f"المهلة الحالية: <b>{timeout} دقيقة</b>\n\nأرسل المهلة الجديدة بالدقائق من 1 إلى 1440.", parse_mode="HTML")
     await state.set_state(AdminStates.waiting_timeout)
     await callback.answer()
 
@@ -133,24 +139,14 @@ async def setting_limits(callback: CallbackQuery) -> None:
         [InlineKeyboardButton(text="📅 الحد اليومي", callback_data="setting_limit_daily")],
         [InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")],
     ])
-    await callback.message.edit_text(
-        "📊 <b>حدود الطلبات</b>\n\n"
-        f"🔹 الحد الأدنى: <b>{limits['min_order']:g} USDT</b>\n"
-        f"🔹 الحد الأقصى: <b>{limits['max_order']:g} USDT</b>\n"
-        f"🔹 الحد اليومي للعميل: <b>{limits['daily_limit']:g} USDT</b>\n\n"
-        "يجب دائماً أن يكون: الحد الأدنى ≤ الحد الأقصى ≤ الحد اليومي.",
-        reply_markup=keyboard, parse_mode="HTML",
-    )
+    await callback.message.edit_text("📊 <b>حدود الطلبات</b>\n\n" f"🔹 الحد الأدنى: <b>{limits['min_order']:g} USDT</b>\n" f"🔹 الحد الأقصى: <b>{limits['max_order']:g} USDT</b>\n" f"🔹 الحد اليومي للعميل: <b>{limits['daily_limit']:g} USDT</b>\n\nيجب دائماً أن يكون: الحد الأدنى ≤ الحد الأقصى ≤ الحد اليومي.", reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 
 async def _prompt_limit(callback: CallbackQuery, state: FSMContext, kind: str, title: str, state_name) -> None:
     limits = await OperationalPolicyService.get_limits()
-    current = limits[kind if kind != "min" else "min_order"] if kind in {"min_order", "max_order", "daily_limit"} else {"min": limits["min_order"], "max": limits["max_order"], "daily": limits["daily_limit"]}[kind]
-    await callback.message.edit_text(
-        f"📊 <b>{title}</b>\n\nالقيمة الحالية: <b>{current:g} USDT</b>\n\nأرسل القيمة الجديدة.",
-        parse_mode="HTML",
-    )
+    current = {"min": limits["min_order"], "max": limits["max_order"], "daily": limits["daily_limit"]}[kind]
+    await callback.message.edit_text(f"📊 <b>{title}</b>\n\nالقيمة الحالية: <b>{current:g} USDT</b>\n\nأرسل القيمة الجديدة.", parse_mode="HTML")
     await state.set_state(state_name)
 
 
