@@ -10,16 +10,34 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _parse_admin_ids() -> list[int]:
+    """Parse the deployment admin allowlist from the canonical environment setting."""
+    raw = os.getenv("ADMIN_IDS", "")
+    if not raw.strip():
+        raw = os.getenv("ADMIN_ID", "")
+    values: list[int] = []
+    for value in raw.replace(";", ",").split(","):
+        normalized = value.strip()
+        if not normalized:
+            continue
+        try:
+            values.append(int(normalized))
+        except ValueError:
+            raise RuntimeError("ADMIN_IDS must contain only numeric Telegram user IDs") from None
+    return list(dict.fromkeys(values))
+
+
 class Config:
     """Application configuration loaded from environment variables."""
 
     # Bot
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    ADMIN_IDS = [
-        int(value.strip())
-        for value in os.getenv("ADMIN_IDS", "").split(",")
-        if value.strip()
-    ]
+    ADMIN_IDS = _parse_admin_ids()
+
+    @classmethod
+    def is_admin(cls, user_id: int | None) -> bool:
+        """Return whether a Telegram user belongs to the configured admin allowlist."""
+        return user_id is not None and int(user_id) in cls.ADMIN_IDS
 
     # Database: fail closed instead of silently using fake localhost credentials.
     DATABASE_URL = os.getenv("DATABASE_URL")
@@ -54,13 +72,12 @@ class Config:
     # Payment
     PAYMENT_TIMEOUT = int(os.getenv("PAYMENT_TIMEOUT", "60"))
 
-    # Legacy/default ShamCash values. Runtime administration should use the
-    # database-backed SettingsService; these remain deployment fallbacks.
+    # Payment configuration fallback values. Runtime administration should use
+    # the database-backed settings/policy services.
     SHAMCASH_USD_ACCOUNT = os.getenv("SHAMCASH_USD_ACCOUNT", "")
     SHAMCASH_SYP_ACCOUNT = os.getenv("SHAMCASH_SYP_ACCOUNT", "")
     SHAMCASH_NAME = os.getenv("SHAMCASH_NAME", "")
 
-    # Legacy/default fees. Runtime administration should use SettingsService.
     SERVICE_FEE_PERCENT = float(os.getenv("SERVICE_FEE_PERCENT", "0"))
     SERVICE_FEE_FIXED = float(os.getenv("SERVICE_FEE_FIXED", "0"))
 
