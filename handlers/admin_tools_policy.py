@@ -296,12 +296,8 @@ async def backup_restore_confirm(callback: CallbackQuery, state: FSMContext):
         if shamcash_syp:
             Config.set_shamcash_syp(shamcash_syp)
 
-        from handlers.payment_methods import ensure_default_methods
-        async with pool.acquire() as conn:
-            await ensure_default_methods(conn)
-
         await callback.message.edit_text(
-            "✅ <b>تمت استعادة النسخة بنجاح.</b>\n\nتم تحديث قاعدة البيانات وذاكرة الإعدادات الحالية. تم أيضاً توحيد وسائل ShamCash إلى USD وNEW.SYP وإزالة المسارات القديمة.",
+            "✅ <b>تمت استعادة النسخة بنجاح.</b>\n\nتم تحديث قاعدة البيانات وذاكرة الإعدادات الحالية. تأكد من تهيئة وسائل الدفع المعتمدة قبل استقبال طلبات جديدة.",
             reply_markup=admin_menu_keyboard(),
             parse_mode="HTML",
         )
