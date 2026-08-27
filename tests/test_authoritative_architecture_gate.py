@@ -49,11 +49,45 @@ def test_retired_runtime_references_are_absent():
             assert token not in source, f"retired runtime reference {token!r} found in {path}"
 
 
+def test_no_runtime_import_references_deleted_handler_modules():
+    deleted_modules = {
+        "handlers.menu",
+        "handlers.admin",
+        "handlers.admin_settings_alias_policy",
+        "handlers.legacy_wallet_guard",
+        "handlers.wallet_qr_first_policy",
+        "handlers.order_wallet_qr_policy",
+        "handlers.verification",
+        "handlers.verification_pending_guard",
+        "handlers.payment_methods",
+        "handlers.payment_method_legacy_compat",
+        "handlers.my_orders",
+        "handlers.order",
+    }
+    for path in HANDLERS.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in deleted_modules:
+                raise AssertionError(f"retired module import {node.module!r} found in {path}")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in deleted_modules:
+                        raise AssertionError(f"retired module import {alias.name!r} found in {path}")
+
+
+def test_wallet_back_uses_canonical_customer_menu():
+    source = (HANDLERS / "wallets.py").read_text(encoding="utf-8")
+    assert "handlers.menu" not in source
+    assert "main_menu_inline" in source
+    assert "compact_reply_keyboard" in source
+    assert "locale_service.get(\"main_menu\"" in source
+
+
 def test_dispatcher_imports_only_existing_handler_modules():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported = set()
-    for node in tree.body[1].body if len(tree.body) > 1 and isinstance(tree.body[1], ast.FunctionDef) else []:
+    for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "handlers":
             imported.update(alias.name for alias in node.names)
     for module_name in imported:
@@ -83,8 +117,8 @@ def test_order_wallet_state_is_canonical():
 
 def test_customer_navigation_has_one_runtime_owner():
     bot = (ROOT / "bot.py").read_text(encoding="utf-8")
-    navigation = (HANDLERS / "customer_navigation_policy.py").read_text(encoding="utf-8")
-    legal_navigation = (HANDLERS / "legal_navigation_policy.py").read_text(encoding="utf-8")
+    navigation = (ROOT / "handlers/customer_navigation_policy.py").read_text(encoding="utf-8")
+    legal_navigation = (ROOT / "handlers/legal_navigation_policy.py").read_text(encoding="utf-8")
     assert "dp.include_router(customer_navigation_policy.router)" in bot
     assert "dp.include_router(legal_navigation_policy.router)" in bot
     for callback in (
