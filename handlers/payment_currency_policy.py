@@ -1,8 +1,10 @@
 """Authoritative payment-currency selection for the customer order flow."""
 import logging
-from aiogram import Router, F
+
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
+
 from database import get_pool
 from keyboards.inline import order_confirmation_keyboard
 from services.exchange_service import ExchangeService
@@ -27,22 +29,22 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
     rate_block = f"──── 💱 سعر الصرف ────\n🔄 <b>1 USD = {rate(calculation['exchange_rate'])} NEW.SYP</b>\n" if unit == "NEW.SYP" else ""
     return (
         "📋 <b>ملخص طلب الشراء</b>\n\n"
-        "──── 💳 معلومات USDT ────\n"
-        f"💰 الكمية: <b>{usdt(data['amount_usdt'])} USDT</b>\n"
+        "──── 💳 قيمة الطلب ────\n"
+        f"💰 المبلغ الذي حددته: <b>{usdt(calculation['requested_amount_usdt'])} USDT</b>\n"
+        f"💸 المبلغ الذي سيصلك: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n"
         f"🌐 الشبكة: {network_display}\n"
         f"📍 عنوان الاستلام: <code>{data['wallet']}</code>\n\n"
         f"{rate_block}"
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
-        "──── 💵 المبلغ الأساسي ────\n"
-        f"💵 <b>{money(calculation['base_amount'])} {unit}</b>\n\n"
-        "──── 💰 رسوم الخدمة ────\n"
-        f"📊 النسبة: <b>{percent(calculation['fee_percent'])}%</b>\n"
-        f"💵 قيمة الرسوم: <b>{money(calculation['fee_amount'])} {unit}</b>\n\n"
+        "──── 💵 الحساب ────\n"
+        f"💵 قيمة الطلب قبل الرسوم: <b>{money(calculation['base_amount'])} {unit}</b>\n"
+        f"📊 رسوم شبكة {calculation['network']} ({percent(calculation['fee_percent'])}%): <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"💰 صافي USDT بعد الرسوم: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>الإجمالي المستحق:</b>\n\n"
+        "💸 <b>المبلغ المطلوب دفعه:</b>\n\n"
         f"<b>💰 {money(calculation['total_amount'])} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "ℹ️ راجع تفاصيل الطلب جيداً. عند التأكيد سيُرسل الطلب إلى الإدارة للموافقة. بعد الموافقة ستصلك رسالة منفصلة تتضمن المبلغ المطلوب تحويله وحساب ShamCash ورمز QR الخاص بالدفع.\n\n"
+        "ℹ️ رسوم الخدمة تُخصم من المبلغ الذي حددته ولا تُضاف فوقه. راجع التفاصيل جيداً. عند التأكيد سيُرسل الطلب إلى الإدارة للموافقة. بعد الموافقة ستصلك بيانات الدفع الرسمية.\n\n"
         "⚠️ لا ترسل أي مبلغ قبل ظهور تعليمات الدفع الرسمية داخل البوت."
     )
 
@@ -53,22 +55,22 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
     rate_block = f"──── 💱 Exchange Rate ────\n🔄 <b>1 USD = {rate(calculation['exchange_rate'])} NEW.SYP</b>\n" if unit == "NEW.SYP" else ""
     return (
         "📋 <b>Purchase Order Summary</b>\n\n"
-        "──── 💳 USDT Details ────\n"
-        f"💰 Quantity: <b>{usdt(data['amount_usdt'])} USDT</b>\n"
+        "──── 💳 Order Value ────\n"
+        f"💰 Amount you entered: <b>{usdt(calculation['requested_amount_usdt'])} USDT</b>\n"
+        f"💸 You will receive: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n"
         f"🌐 Network: {network_display}\n"
         f"📍 Receiving address: <code>{data['wallet']}</code>\n\n"
         f"{rate_block}"
         f"💳 Payment currency: <b>{unit}</b>\n\n"
-        "──── 💵 Base Amount ────\n"
-        f"💵 <b>{money(calculation['base_amount'])} {unit}</b>\n\n"
-        "──── 💰 Service Fee ────\n"
-        f"📊 Rate: <b>{percent(calculation['fee_percent'])}%</b>\n"
-        f"💵 Fee: <b>{money(calculation['fee_amount'])} {unit}</b>\n\n"
+        "──── 💵 Calculation ────\n"
+        f"💵 Order value before fee: <b>{money(calculation['base_amount'])} {unit}</b>\n"
+        f"📊 {calculation['network']} network fee ({percent(calculation['fee_percent'])}%): <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"💰 Net USDT after fee: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 <b>Total Due:</b>\n\n"
+        "💸 <b>Amount to pay:</b>\n\n"
         f"<b>💰 {money(calculation['total_amount'])} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "ℹ️ Review the order carefully. When confirmed, the order will be sent to the administration for approval. After approval, you will receive a separate payment message with the amount to transfer, the ShamCash account, and its payment QR code.\n\n"
+        "ℹ️ The service fee is deducted from the amount you entered; it is not added on top. Review the details carefully. When confirmed, the order will be sent to administration for approval. Official payment details will be issued after approval.\n\n"
         "⚠️ Do not send any money until the official payment instructions appear inside the bot."
     )
 
@@ -138,9 +140,21 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
         if data.get("amount_usdt") is None:
             await state.update_data(amount_usdt=amount)
 
-        calculation = await ExchangeService(pool).calculate_order(amount, currency)
-        await state.update_data(payment_currency=calculation["payment_currency"], calculation=calculation)
-        network_display = {"TRC20": "🔷 TRC20 (TRX)", "BEP20": "🟡 BEP20 (BNB)"}.get(network, network)
+        calculation = await ExchangeService(pool).calculate_order(amount, currency, network=network)
+        await state.update_data(
+            payment_currency=calculation["payment_currency"],
+            calculation=calculation,
+            requested_amount_usdt=calculation["requested_amount_usdt"],
+            net_amount_usdt=calculation["net_amount_usdt"],
+        )
+        network_display = {
+            "TRC20": "🔷 TRC20 (TRON)",
+            "BEP20": "🟡 BEP20 (BNB Chain)",
+            "TON": "💎 TON",
+            "ARB": "🔵 ARB (Arbitrum)",
+            "SOLANA": "🟣 Solana",
+            "ETH": "🔷 Ethereum (ETH)",
+        }.get(network.upper(), network)
         summary_data = {"amount_usdt": amount, "wallet": wallet}
         summary = _build_arabic_summary(summary_data, calculation, network_display) if lang == "ar" else _build_english_summary(summary_data, calculation, network_display)
         await callback.message.edit_text(summary, reply_markup=order_confirmation_keyboard(lang), parse_mode="HTML")
