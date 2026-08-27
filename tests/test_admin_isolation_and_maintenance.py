@@ -11,6 +11,21 @@ def test_admin_maintenance_router_is_registered_in_authoritative_dispatcher():
     assert not (ROOT / "handlers/admin.py").exists()
 
 
+def test_admin_entry_precedes_customer_fsm_surfaces():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    admin_entry = source.index("dp.include_router(admin_entry.router)")
+    admin_maintenance = source.index("dp.include_router(admin_maintenance_policy.router)")
+    customer_settings = source.index("dp.include_router(customer_settings_policy.router)")
+    order_amount = source.index("dp.include_router(order_amount_policy.router)")
+    wallets = source.index("dp.include_router(wallets.router)")
+    assert admin_entry < customer_settings
+    assert admin_entry < order_amount
+    assert admin_entry < wallets
+    assert admin_maintenance < customer_settings
+    assert admin_maintenance < order_amount
+    assert admin_maintenance < wallets
+
+
 def test_maintenance_checks_canonical_admin_access_before_customer_policy():
     source = (ROOT / "middleware/maintenance.py").read_text(encoding="utf-8")
     admin_check = "if AdminAccessService.is_admin(user_id):\n            return await handler(event, data)"
