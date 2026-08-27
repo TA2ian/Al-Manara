@@ -11,39 +11,47 @@ load_dotenv()
 
 
 def _parse_admin_ids() -> list[int]:
-    """Parse the deployment admin allowlist from the canonical environment setting."""
-    raw = os.getenv("ADMIN_IDS", "")
-    if not raw.strip():
-        raw = os.getenv("ADMIN_ID", "")
+    """Parse the administrator allowlist from current and legacy env names."""
+    raw_values = [os.getenv("ADMIN_IDS", ""), os.getenv("ADMIN_ID", "")]
     values: list[int] = []
-    for value in raw.replace(";", ",").split(","):
-        normalized = value.strip()
-        if not normalized:
+    for raw in raw_values:
+        if not raw or not raw.strip():
             continue
-        try:
-            values.append(int(normalized))
-        except ValueError:
-            raise RuntimeError("ADMIN_IDS must contain only numeric Telegram user IDs") from None
+        for value in raw.replace(";", ",").replace("\n", ",").split(","):
+            normalized = value.strip()
+            if not normalized:
+                continue
+            try:
+                values.append(int(normalized))
+            except ValueError:
+                raise RuntimeError("ADMIN_IDS/ADMIN_ID must contain only numeric Telegram user IDs") from None
     return list(dict.fromkeys(values))
 
 
 class Config:
     """Application configuration loaded from environment variables."""
 
-    # Bot
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     ADMIN_IDS = _parse_admin_ids()
 
     @classmethod
     def is_admin(cls, user_id: int | None) -> bool:
         """Return whether a Telegram user belongs to the configured admin allowlist."""
-        return user_id is not None and int(user_id) in cls.ADMIN_IDS
+        if user_id is None:
+            return False
+        try:
+            return int(user_id) in cls.ADMIN_IDS
+        except (TypeError, ValueError):
+            return False
+
+    @classmethod
+    def admin_configuration_summary(cls) -> str:
+        """Return a non-sensitive startup summary of administrator configuration."""
+        return f"{len(cls.ADMIN_IDS)} administrator ID(s) configured"
 
     # Database: fail closed instead of silently using fake localhost credentials.
     DATABASE_URL = os.getenv("DATABASE_URL")
 
-    # Webhook. Render provides RENDER_EXTERNAL_URL automatically for web services;
-    # WEBHOOK_HOST remains an explicit override for custom domains/other hosts.
     WEBHOOK_HOST = (
         os.getenv("WEBHOOK_HOST", "").rstrip("/")
         or os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
@@ -51,29 +59,22 @@ class Config:
     WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
     WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
 
-    # Server
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", "8000"))
 
-    # Security
     SECRET_TOKEN = os.getenv("SECRET_TOKEN", "")
     ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 
-    # Rate limiting
     RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", "5"))
     RATE_LIMIT_HOURLY = int(os.getenv("RATE_LIMIT_HOURLY", "100"))
     RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", "500"))
 
-    # Order limits
     MIN_ORDER = float(os.getenv("MIN_ORDER", "10"))
     MAX_ORDER = float(os.getenv("MAX_ORDER", "5000"))
     DAILY_LIMIT = float(os.getenv("DAILY_LIMIT", "10000"))
 
-    # Payment
     PAYMENT_TIMEOUT = int(os.getenv("PAYMENT_TIMEOUT", "60"))
 
-    # Payment configuration fallback values. Runtime administration should use
-    # the database-backed settings/policy services.
     SHAMCASH_USD_ACCOUNT = os.getenv("SHAMCASH_USD_ACCOUNT", "")
     SHAMCASH_SYP_ACCOUNT = os.getenv("SHAMCASH_SYP_ACCOUNT", "")
     SHAMCASH_NAME = os.getenv("SHAMCASH_NAME", "")
@@ -81,10 +82,8 @@ class Config:
     SERVICE_FEE_PERCENT = float(os.getenv("SERVICE_FEE_PERCENT", "0"))
     SERVICE_FEE_FIXED = float(os.getenv("SERVICE_FEE_FIXED", "0"))
 
-    # Backup
     BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
 
-    # Maintenance — persisted in DB and cached here for synchronous middleware.
     _maintenance_override: bool | None = None
 
     @classmethod
@@ -98,7 +97,6 @@ class Config:
         """Update the in-memory cache; persistence is handled by SettingsService."""
         cls._maintenance_override = value
 
-    # Runtime ShamCash overrides populated by SettingsService.
     _shamcash_name_override: str | None = None
     _shamcash_usd_override: str | None = None
     _shamcash_syp_override: str | None = None
