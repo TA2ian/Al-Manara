@@ -19,13 +19,17 @@ async def _send_admin_menu(message: Message) -> None:
 
 
 async def _deny(event: Message | CallbackQuery) -> None:
-    """Reject unauthorized access and expose only the caller's own Telegram ID."""
-    user_id = event.from_user.id
+    """Reject unauthorized access using only the current Telegram event identity."""
+    user = event.from_user
+    if user is None:
+        return
+
+    user_id = int(user.id)
     message = (
         "⛔ <b>لا تملك صلاحية الإدارة.</b>\n\n"
-        f"🆔 معرف حسابك في Telegram: <code>{user_id}</code>\n\n"
-        "إذا كان هذا هو حساب المشرف، يجب أن يكون هذا المعرف مضافاً ضمن "
-        "قائمة <code>ADMIN_IDS</code> في بيئة تشغيل البوت، ثم إعادة تشغيل الخدمة."
+        f"🆔 معرف حساب Telegram الحالي: <code>{user_id}</code>\n\n"
+        "إذا كان هذا هو حساب المشرف، أضف هذا المعرّف إلى "
+        "<code>ADMIN_IDS</code> في بيئة تشغيل البوت ثم أعد تشغيل الخدمة."
     )
     if isinstance(event, CallbackQuery):
         await event.answer(message, show_alert=True)
@@ -35,7 +39,11 @@ async def _deny(event: Message | CallbackQuery) -> None:
 
 @router.message(Command("admin"))
 async def admin_command(message: Message):
-    if not AdminAccessService.is_admin(message.from_user.id):
+    """Handle /admin exclusively from the sender of the current Telegram update."""
+    user = message.from_user
+    if user is None:
+        return
+    if not AdminAccessService.is_admin(user.id):
         await _deny(message)
         return
     await _send_admin_menu(message)
@@ -43,14 +51,16 @@ async def admin_command(message: Message):
 
 @router.message(F.text.func(lambda text: isinstance(text, str) and "⚙" in text))
 async def open_admin_from_settings(message: Message):
-    if not AdminAccessService.is_admin(message.from_user.id):
+    user = message.from_user
+    if user is None or not AdminAccessService.is_admin(user.id):
         return
     await _send_admin_menu(message)
 
 
 @router.callback_query(F.data == "admin_menu")
 async def admin_menu_callback(callback: CallbackQuery, state: FSMContext):
-    if not AdminAccessService.is_admin(callback.from_user.id):
+    user = callback.from_user
+    if user is None or not AdminAccessService.is_admin(user.id):
         await _deny(callback)
         return
     await state.clear()
