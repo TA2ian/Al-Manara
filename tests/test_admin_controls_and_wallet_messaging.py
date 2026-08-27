@@ -3,6 +3,7 @@ import inspect
 
 from handlers import admin_rejection_policy, admin_user_management_policy, verification_admin_policy, wallets
 from keyboards.inline import order_admin_keyboard
+from keyboards.wallet import SUPPORTED_WALLET_NETWORKS, wallet_network_keyboard
 
 
 def _callbacks(keyboard):
@@ -29,7 +30,6 @@ def test_order_rejection_is_exposed_only_for_rejectable_order_views():
     for status in ("pending", "waiting_payment", "receipt_received"):
         callbacks = _callbacks(order_admin_keyboard(123, status))
         assert "admin_reject_123" in callbacks
-
     payment_confirmed_callbacks = _callbacks(order_admin_keyboard(123, "payment_confirmed"))
     assert "admin_reject_123" not in payment_confirmed_callbacks
     assert "admin_send_usdt_123" in payment_confirmed_callbacks
@@ -44,16 +44,17 @@ def test_order_rejection_uses_authoritative_transition_and_preserves_wallet_snap
     assert '"wallet_qr_photo_id": None' not in source
 
 
-def test_wallet_add_message_describes_all_supported_inputs_and_matching():
-    source = inspect.getsource(wallets.wallet_add)
+def test_wallet_registration_supports_all_networks_and_supported_inputs():
+    source = inspect.getsource(wallets._network_prompt)
     assert "عنوان المحفظة" in source
-    assert "صورة QR" in source
+    assert "صورة" in source
     assert "شارك المحفظة مباشرة" in source
     assert "العنوان مع QR" in source
-    assert "يطابق العنوان مع QR" in source
-    assert "BEP20" in source
-    assert "TRC20" in source
-    assert "لن يتم حفظ العنوان بمجرد إرساله" not in source
+    assert "الشبكة المختارة" in source or "اختر شبكة USDT" in source
+    assert set(SUPPORTED_WALLET_NETWORKS) == {"BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH"}
+    callbacks = _callbacks(wallet_network_keyboard("ar"))
+    for network in SUPPORTED_WALLET_NETWORKS:
+        assert f"wallet_network_{network}" in callbacks
 
 
 if __name__ == "__main__":
