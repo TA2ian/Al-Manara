@@ -11,20 +11,31 @@ load_dotenv()
 
 
 def _parse_admin_ids() -> list[int]:
-    """Parse the administrator allowlist from current and legacy env names."""
-    raw_values = [os.getenv("ADMIN_IDS", ""), os.getenv("ADMIN_ID", "")]
+    """Parse administrator IDs from supported deployment variable names."""
+    raw_values = [
+        os.getenv("ADMIN_IDS", ""),
+        os.getenv("ADMIN_ID", ""),
+        os.getenv("ADMIN_TELEGRAM_IDS", ""),
+        os.getenv("ADMIN_TELEGRAM_ID", ""),
+        os.getenv("TELEGRAM_ADMIN_IDS", ""),
+        os.getenv("TELEGRAM_ADMIN_ID", ""),
+        os.getenv("ADMIN_USER_ID", ""),
+    ]
     values: list[int] = []
     for raw in raw_values:
         if not raw or not raw.strip():
             continue
-        for value in raw.replace(";", ",").replace("\n", ",").split(","):
+        normalized_raw = raw.replace(";", ",").replace("\n", ",").replace(" ", ",")
+        for value in normalized_raw.split(","):
             normalized = value.strip()
             if not normalized:
                 continue
             try:
                 values.append(int(normalized))
             except ValueError:
-                raise RuntimeError("ADMIN_IDS/ADMIN_ID must contain only numeric Telegram user IDs") from None
+                raise RuntimeError(
+                    "Administrator ID environment variables must contain only numeric Telegram user IDs"
+                ) from None
     return list(dict.fromkeys(values))
 
 
