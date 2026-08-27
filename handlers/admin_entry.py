@@ -19,10 +19,12 @@ async def _send_admin_menu(message: Message) -> None:
 
 
 async def _deny(event: Message | CallbackQuery) -> None:
+    """Reject unauthorized access without exposing the configured allowlist."""
+    message = "⛔ لا تملك صلاحية الإدارة."
     if isinstance(event, CallbackQuery):
-        await event.answer("⛔ لا تملك صلاحية الإدارة.", show_alert=True)
+        await event.answer(message, show_alert=True)
     else:
-        await event.answer("⛔ لا تملك صلاحية الإدارة.")
+        await event.answer(message)
 
 
 @router.message(Command("admin"))
