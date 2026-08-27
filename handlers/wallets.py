@@ -127,7 +127,7 @@ async def show_wallets(callback: CallbackQuery, state: FSMContext):
         icon = "🟡" if row["network"] == "BEP20" else "🔷"
         star = " ⭐" if row["is_default"] else ""
         lines.append(f"{icon} <b>{label}</b>{star}\n{row['network']} · <code>{row['address']}</code>\n🟢 موثق\n")
-        buttons.append([InlineKeyboardButton(text=f"🗑 حذف {label}", callback_data=f"wallet_delete_{row['id']}")])
+        buttons.append([InlineKeyboardButton(text=f"🗑 حذف {label}", callback_data=f"wallet_delete_{row['id"]}")])
     buttons.extend(_menu(lang).inline_keyboard)
     await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
     await callback.answer()
@@ -375,5 +375,11 @@ async def wallet_delete(callback: CallbackQuery):
 @router.callback_query(F.data == "wallet_back")
 async def wallet_back(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    from handlers.menu import show_main_menu
-    await show_main_menu(callback)
+    from keyboards.inline import main_menu_inline
+    from keyboards.reply import compact_reply_keyboard
+    from services.locale_service import locale_service
+    user = await _user(callback.from_user.id)
+    lang = (user["language"] or "ar") if user else "ar"
+    await callback.message.edit_text(locale_service.get("main_menu", lang), reply_markup=main_menu_inline(lang))
+    await callback.message.answer("👇", reply_markup=compact_reply_keyboard(lang))
+    await callback.answer()
