@@ -4,17 +4,17 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
-from config import Config
-from database import get_pool
-from keyboards.inline import admin_menu_keyboard
+from keyboards.admin import enhanced_admin_menu_keyboard
 from keyboards.maintenance import maintenance_confirm_keyboard, maintenance_mode_keyboard
+from services.admin_access_service import AdminAccessService
 from services.maintenance_service import MaintenanceMode, MaintenanceService
+from database import get_pool
 
 router = Router()
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in Config.ADMIN_IDS
+def is_admin(user_id: int | None) -> bool:
+    return AdminAccessService.is_admin(user_id)
 
 
 async def _active_orders_count() -> int:
@@ -117,5 +117,5 @@ async def confirm_maintenance_mode(callback: CallbackQuery):
         f"❌ فشل نهائي: <b>{stats['failed']}</b>",
         parse_mode="HTML",
     )
-    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await callback.message.answer("⚙️ <b>لوحة التحكم</b>", reply_markup=enhanced_admin_menu_keyboard(), parse_mode="HTML")
     await callback.answer("تم تطبيق التغيير ووضع الإشعارات في الطابور")
