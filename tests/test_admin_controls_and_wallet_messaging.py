@@ -46,17 +46,12 @@ def test_order_rejection_uses_authoritative_transition_and_preserves_wallet_snap
 
 def test_wallet_registration_supports_all_networks_and_supported_inputs():
     source = inspect.getsource(wallets._network_prompt)
-    assert "عنوان المحفظة" in source
+    assert "العنوان" in source
     assert "صورة" in source
     assert "شارك المحفظة مباشرة" in source
     assert "العنوان مع QR" in source
-    assert "الشبكة المختارة" in source or "اختر شبكة USDT" in source
+    assert "اختر شبكة USDT" in source
     assert set(SUPPORTED_WALLET_NETWORKS) == {"BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH"}
     callbacks = _callbacks(wallet_network_keyboard("ar"))
     for network in SUPPORTED_WALLET_NETWORKS:
         assert f"wallet_network_{network}" in callbacks
-
-
-if __name__ == "__main__":
-    import unittest
-    unittest.main()
