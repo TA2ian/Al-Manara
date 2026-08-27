@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 
 ROOT = Path(__file__).resolve().parents[1]
 HANDLERS = ROOT / "handlers"
@@ -11,6 +12,14 @@ def test_retired_compatibility_modules_are_absent():
         "handlers/admin.py",
         "handlers/admin_settings_alias_policy.py",
         "handlers/legacy_wallet_guard.py",
+        "handlers/wallet_qr_first_policy.py",
+        "handlers/order_wallet_qr_policy.py",
+        "handlers/verification.py",
+        "handlers/verification_pending_guard.py",
+        "handlers/payment_methods.py",
+        "handlers/payment_method_legacy_compat.py",
+        "handlers/my_orders.py",
+        "handlers/order.py",
         "services/order_wallet_guard.py",
         "database_wallet_guards.py",
     ):
@@ -23,6 +32,10 @@ def test_retired_runtime_references_are_absent():
         "install_order_wallet_guard",
         "services.order_wallet_guard",
         "handlers.legacy_wallet_guard",
+        "wallet_qr_first_policy",
+        "order_wallet_qr_policy",
+        "verification_pending_guard",
+        "payment_method_legacy_compat",
     )
     files = []
     for root in RUNTIME_ROOTS:
@@ -34,6 +47,17 @@ def test_retired_runtime_references_are_absent():
         source = path.read_text(encoding="utf-8")
         for token in forbidden_tokens:
             assert token not in source, f"retired runtime reference {token!r} found in {path}"
+
+
+def test_dispatcher_imports_only_existing_handler_modules():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = set()
+    for node in tree.body[1].body if len(tree.body) > 1 and isinstance(tree.body[1], ast.FunctionDef) else []:
+        if isinstance(node, ast.ImportFrom) and node.module == "handlers":
+            imported.update(alias.name for alias in node.names)
+    for module_name in imported:
+        assert (HANDLERS / f"{module_name}.py").exists(), module_name
 
 
 def test_canonical_database_constraints_are_runtime_owned():
@@ -54,6 +78,7 @@ def test_order_wallet_state_is_canonical():
     assert "WalletStates.waiting_address" in order_wallet
     assert "verification_status = 'verified'" in order_wallet
     assert "qr_photo_id IS NOT NULL" in order_wallet
+    assert "waiting_fee_fixed" not in states
 
 
 def test_customer_navigation_has_one_runtime_owner():
