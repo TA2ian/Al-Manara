@@ -24,6 +24,7 @@ class OrderStates(StatesGroup):
 
 class WalletStates(StatesGroup):
     """Dedicated customer wallet registry flow."""
+    waiting_network = State()
     waiting_address = State()
     waiting_qr = State()
     waiting_label = State()
