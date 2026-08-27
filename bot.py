@@ -62,6 +62,10 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(start.router)
 
+    # The reply-keyboard admin shortcut must run before the generic admin
+    # entry router so its exact text cannot be consumed by a broader handler.
+    dp.include_router(admin_reply_shortcut.router)
+
     # Administrator entry points are intentionally registered before every
     # customer FSM/router surface. This guarantees that /admin and admin
     # callbacks remain reachable even when the administrator has stale state.
@@ -71,7 +75,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(customer_settings_policy.router)
     dp.include_router(payment_method_setup_policy.router)
 
-    dp.include_router(admin_reply_shortcut.router)
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
@@ -100,6 +103,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_order_list_policy.router)
     dp.include_router(admin_user_management_policy.router)
     dp.include_router(admin_utility_policy.router)
+    dp.include_router(admin_maintenance_policy.router)
     dp.include_router(admin_settings_policy.router)
 
     dp.include_router(verification_pending_policy.router)
