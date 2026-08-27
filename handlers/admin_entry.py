@@ -19,12 +19,18 @@ async def _send_admin_menu(message: Message) -> None:
 
 
 async def _deny(event: Message | CallbackQuery) -> None:
-    """Reject unauthorized access without exposing the configured allowlist."""
-    message = "⛔ لا تملك صلاحية الإدارة."
+    """Reject unauthorized access and expose only the caller's own Telegram ID."""
+    user_id = event.from_user.id
+    message = (
+        "⛔ <b>لا تملك صلاحية الإدارة.</b>\n\n"
+        f"🆔 معرف حسابك في Telegram: <code>{user_id}</code>\n\n"
+        "إذا كان هذا هو حساب المشرف، يجب أن يكون هذا المعرف مضافاً ضمن "
+        "قائمة <code>ADMIN_IDS</code> في بيئة تشغيل البوت، ثم إعادة تشغيل الخدمة."
+    )
     if isinstance(event, CallbackQuery):
         await event.answer(message, show_alert=True)
     else:
-        await event.answer(message)
+        await event.answer(message, parse_mode="HTML")
 
 
 @router.message(Command("admin"))
