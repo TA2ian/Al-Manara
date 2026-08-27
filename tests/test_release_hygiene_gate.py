@@ -24,14 +24,18 @@ def test_removed_runtime_compatibility_surfaces_stay_removed():
         "handlers/admin.py",
         "handlers/admin_settings_alias_policy.py",
         "handlers/legacy_wallet_guard.py",
-        "services/order_wallet_guard.py",
-        "handlers/order.py",
-        "handlers/menu.py",
-        "handlers/my_orders.py",
+        "handlers/wallet_qr_first_policy.py",
+        "handlers/order_wallet_qr_policy.py",
         "handlers/verification.py",
         "handlers/verification_pending_guard.py",
-        "database_wallet_guards.py",
+        "handlers/verification_keyboard_cleanup.py",
+        "handlers/payment_methods.py",
         "handlers/payment_method_legacy_compat.py",
+        "handlers/menu.py",
+        "handlers/my_orders.py",
+        "handlers/order.py",
+        "services/order_wallet_guard.py",
+        "database_wallet_guards.py",
         "tests/test_payment_method_legacy_compat.py",
     )
     for relative_path in forbidden_paths:
@@ -63,15 +67,27 @@ def test_canonical_order_constraint_surface_is_active():
     assert "order wallet QR does not match the verified saved wallet" in constraints
 
 
-def test_release_gate_covers_authoritative_services_and_removed_surface():
+def test_release_gate_tracks_only_live_router_modules():
     source = (ROOT / "tests/test_release_gate.py").read_text(encoding="utf-8")
     assert "handlers.admin_settings_policy" in source
     assert "handlers.verification_policy" in source
-    assert "handlers.verification_pending_guard" in source
-    assert "services.legal_policy" in source
-    assert "services.order_state_service" in source
-    assert "services.order_completion_service" in source
-    assert "services.receipt_service" in source
-    assert "handlers.legacy_wallet_guard" in source
-    assert "handlers.my_orders" in source
-    assert "handlers.admin" in source
+    assert "handlers.verification_pending_policy" in source
+    assert "handlers.legacy_wallet_guard" not in source
+    assert "handlers.my_orders" not in source
+    assert "handlers.admin" not in source
+
+
+def test_dispatcher_does_not_reference_retired_compatibility_routers():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    forbidden = (
+        "legacy_wallet_guard",
+        "wallet_qr_first_policy",
+        "order_wallet_qr_policy",
+        "verification_pending_guard",
+        "verification_keyboard_cleanup",
+        "payment_method_legacy_compat",
+        "admin_settings_alias_policy",
+        "handlers.admin",
+    )
+    for token in forbidden:
+        assert token not in source
