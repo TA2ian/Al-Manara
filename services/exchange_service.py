@@ -4,7 +4,6 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
 
-from config import Config
 from services.operational_policy_service import OperationalPolicyService
 
 logger = logging.getLogger(__name__)
@@ -81,7 +80,6 @@ class ExchangeService:
 
     @classmethod
     async def get_fee_percent(cls, network: str | None = None) -> Decimal:
-        """Compatibility facade to the single operational fee authority."""
         return await OperationalPolicyService.get_fee_percent(cls.normalize_network(network))
 
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
@@ -101,7 +99,7 @@ class ExchangeService:
         if rate is None or rate <= 0:
             raise ValueError("Exchange rate is unavailable")
         base_amount = amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_percent = await cls.get_fee_percent(normalized_network)
+        fee_percent = await self.get_fee_percent(normalized_network)
         fee_amount = (base_amount * fee_percent / Decimal("100")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         fee_usdt = fee_amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (fee_amount / rate).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
         net_amount_usdt = (amount - fee_usdt).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
