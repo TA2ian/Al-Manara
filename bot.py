@@ -61,6 +61,13 @@ def create_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(OwnershipMiddleware())
 
     dp.include_router(start.router)
+
+    # Administrator entry points are intentionally registered before every
+    # customer FSM/router surface. This guarantees that /admin and admin
+    # callbacks remain reachable even when the administrator has stale state.
+    dp.include_router(admin_entry.router)
+    dp.include_router(admin_maintenance_policy.router)
+
     dp.include_router(customer_settings_policy.router)
     dp.include_router(payment_method_setup_policy.router)
 
@@ -82,7 +89,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(customer_orders_policy.router)
     dp.include_router(feedback.router)
 
-    dp.include_router(admin_entry.router)
     dp.include_router(admin_broadcast_policy.router)
     dp.include_router(verification_admin_policy.router)
     dp.include_router(admin_rate_policy.router)
@@ -94,7 +100,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_order_list_policy.router)
     dp.include_router(admin_user_management_policy.router)
     dp.include_router(admin_utility_policy.router)
-    dp.include_router(admin_maintenance_policy.router)
     dp.include_router(admin_settings_policy.router)
 
     dp.include_router(verification_pending_policy.router)
