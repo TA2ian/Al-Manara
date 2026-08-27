@@ -7,6 +7,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message
 
 from database import get_pool
+from services.admin_access_service import AdminAccessService
 
 
 SENSITIVE_STATES = frozenset(
@@ -48,14 +49,14 @@ async def state_processing_lock(user_id: int, state_name: str):
 
 
 class StateProcessingLockMiddleware(BaseMiddleware):
-    """Prevent duplicate concurrent submissions for sensitive customer states."""
+    """Prevent duplicate concurrent submissions without trapping administrators."""
 
     async def __call__(self, handler, event, data):
         if not isinstance(event, Message):
             return await handler(event, data)
 
         user = event.from_user
-        if user is None:
+        if user is None or AdminAccessService.is_admin(user.id):
             return await handler(event, data)
 
         state = data.get("state")
