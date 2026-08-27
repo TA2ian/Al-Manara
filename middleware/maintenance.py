@@ -7,6 +7,13 @@ from services.maintenance_service import MaintenanceMode, MaintenanceService
 from states import ReceiptStates
 
 
+ADMIN_CALLBACK_PREFIXES = (
+    "admin_",
+    "verify_",
+    "setting_",
+)
+
+
 class MaintenanceMiddleware(BaseMiddleware):
     """Block customer operations while keeping the complete admin surface available."""
 
@@ -21,13 +28,28 @@ class MaintenanceMiddleware(BaseMiddleware):
             return (event.data or "").startswith("upload_receipt_")
         return False
 
+    @staticmethod
+    def _is_admin_entry_attempt(event) -> bool:
+        if isinstance(event, Message):
+            text = (event.text or "").strip()
+            return text == "/admin" or text.startswith("/admin@")
+        if isinstance(event, CallbackQuery):
+            data = event.data or ""
+            return data == "admin_menu" or data.startswith(ADMIN_CALLBACK_PREFIXES)
+        return False
+
     async def __call__(self, handler, event, data):
         user_id = event.from_user.id if isinstance(event, (Message, CallbackQuery)) else None
 
-        # Resolve privileged access before evaluating the customer maintenance
-        # policy. This makes the administrator escape hatch independent from
-        # the active maintenance mode and from customer-only lifecycle rules.
         if AdminAccessService.is_admin(user_id):
+            return await handler(event, data)
+
+        # Never hide an administrative authorization failure behind the
+        # customer maintenance notice. Let the authoritative admin handler
+        # answer with Access denied; this also makes a bad deployment
+        # ADMIN_IDS configuration immediately diagnosable instead of looking
+        # like a frozen bot.
+        if self._is_admin_entry_attempt(event):
             return await handler(event, data)
 
         mode = await MaintenanceService.get_mode()
