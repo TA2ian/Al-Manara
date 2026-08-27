@@ -38,3 +38,39 @@ def test_admin_dashboard_and_payment_methods_have_single_owners():
     assert '@router.callback_query(F.data == "admin_menu")' in entry_source
     assert '@router.callback_query(F.data == "admin_payment_methods")' in payment_source
     assert '@router.callback_query(F.data == "admin_menu")' not in payment_source
+
+
+def test_every_admin_dashboard_callback_has_an_authoritative_runtime_owner():
+    callback_owners = {
+        "admin_pending_orders": "admin_order_list_policy.py",
+        "admin_active_orders": "admin_order_list_policy.py",
+        "admin_search_order": "admin_navigation_policy.py",
+        "admin_dashboard": "admin_navigation_policy.py",
+        "admin_analytics": "admin_navigation_policy.py",
+        "admin_list_users": "admin_user_management_policy.py",
+        "admin_settings": "admin_settings_policy.py",
+        "admin_update_rate": "admin_rate_policy.py",
+        "admin_broadcast": "admin_broadcast_policy.py",
+        "admin_search_user": "admin_search_policy.py",
+        "admin_logs": "admin_utility_policy.py",
+        "admin_backups": "admin_tools_policy.py",
+        "admin_auto_approve": "admin_utility_policy.py",
+        "admin_maintenance": "admin_maintenance_policy.py",
+        "admin_payment_methods": "payment_method_setup_policy.py",
+    }
+    keyboard_source = (ROOT / "keyboards" / "inline.py").read_text(encoding="utf-8")
+    enhanced_source = (ROOT / "keyboards" / "admin.py").read_text(encoding="utf-8")
+    combined_keyboard_source = keyboard_source + "\n" + enhanced_source
+
+    for callback_data, owner in callback_owners.items():
+        assert callback_data in combined_keyboard_source, callback_data
+        owner_source = (ROOT / "handlers" / owner).read_text(encoding="utf-8")
+        assert callback_data in owner_source, f"{callback_data} -> {owner}"
+
+
+def test_admin_settings_buttons_have_authoritative_handlers():
+    keyboard_source = (ROOT / "keyboards" / "inline.py").read_text(encoding="utf-8")
+    settings_source = (ROOT / "handlers" / "admin_settings_policy.py").read_text(encoding="utf-8")
+    for callback_data in ("setting_fees", "setting_timeout", "setting_limits", "admin_settings"):
+        assert callback_data in keyboard_source
+        assert callback_data in settings_source
