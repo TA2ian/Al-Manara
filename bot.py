@@ -3,7 +3,7 @@ from aiogram import Dispatcher
 
 
 def create_dispatcher() -> Dispatcher:
-    """Create dispatcher from the single authoritative router graph."""
+    """Create the dispatcher from the single authoritative router graph."""
     from handlers import (
         start,
         saved_wallets,
@@ -62,24 +62,34 @@ def create_dispatcher() -> Dispatcher:
 
     dp.include_router(start.router)
 
-    # The reply-keyboard admin shortcut must run before the generic admin
-    # entry router so its exact text cannot be consumed by a broader handler.
+    # Admin entry points are registered before customer FSM surfaces so an
+    # administrator cannot be trapped by a stale customer state.
     dp.include_router(admin_reply_shortcut.router)
-
-    # Administrator entry points are intentionally registered before every
-    # customer FSM/router surface. This guarantees that /admin and admin
-    # callbacks remain reachable even when the administrator has stale state.
     dp.include_router(admin_entry.router)
+
+    # Administrative controls are split by responsibility. Each callback has
+    # one runtime owner; no retired compatibility facade is registered.
     dp.include_router(admin_maintenance_policy.router)
-
-    dp.include_router(customer_settings_policy.router)
+    dp.include_router(admin_broadcast_policy.router)
+    dp.include_router(verification_admin_policy.router)
+    dp.include_router(admin_rate_policy.router)
+    dp.include_router(admin_navigation_policy.router)
+    dp.include_router(admin_approval_policy.router)
+    dp.include_router(admin_rejection_policy.router)
+    dp.include_router(admin_payment_confirmation_policy.router)
+    dp.include_router(admin_transfer_policy.router)
+    dp.include_router(admin_order_list_policy.router)
+    dp.include_router(admin_user_management_policy.router)
+    dp.include_router(admin_utility_policy.router)
+    dp.include_router(admin_settings_policy.router)
     dp.include_router(payment_method_setup_policy.router)
-
     dp.include_router(admin_note_policy.router)
     dp.include_router(admin_tools_policy.router)
     dp.include_router(admin_search_policy.router)
-    dp.include_router(order_amount_policy.router)
 
+    # Customer order flow: dedicated gates precede broad handlers.
+    dp.include_router(customer_settings_policy.router)
+    dp.include_router(order_amount_policy.router)
     dp.include_router(saved_wallets.router)
     dp.include_router(order_wallet_policy.router)
     dp.include_router(payment_currency_policy.router)
@@ -92,22 +102,12 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(customer_orders_policy.router)
     dp.include_router(feedback.router)
 
-    dp.include_router(admin_broadcast_policy.router)
-    dp.include_router(verification_admin_policy.router)
-    dp.include_router(admin_rate_policy.router)
-    dp.include_router(admin_navigation_policy.router)
-    dp.include_router(admin_approval_policy.router)
-    dp.include_router(admin_rejection_policy.router)
-    dp.include_router(admin_payment_confirmation_policy.router)
-    dp.include_router(admin_transfer_policy.router)
-    dp.include_router(admin_order_list_policy.router)
-    dp.include_router(admin_user_management_policy.router)
-    dp.include_router(admin_utility_policy.router)
-    dp.include_router(admin_maintenance_policy.router)
-    dp.include_router(admin_settings_policy.router)
-
+    # Verification has one canonical customer flow and one pending guard.
     dp.include_router(verification_pending_policy.router)
     dp.include_router(verification_policy.router)
+
+    # Customer navigation owns customer-facing callbacks; legal navigation owns
+    # the disclaimer and section navigation exclusively.
     dp.include_router(language_policy.router)
     dp.include_router(legal_navigation_policy.router)
     dp.include_router(customer_navigation_policy.router)
