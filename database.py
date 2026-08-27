@@ -31,7 +31,7 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id SERIAL PRIMARY KEY, order_number TEXT UNIQUE NOT NULL, user_id INTEGER REFERENCES users(id),
-                network TEXT NOT NULL, amount_usdt NUMERIC(24,8) NOT NULL, exchange_rate NUMERIC(24,8) NOT NULL,
+                network TEXT NOT NULL, requested_amount_usdt NUMERIC(24,8), amount_usdt NUMERIC(24,8) NOT NULL, exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL, base_amount NUMERIC(24,8) NOT NULL,
                 fee_percent NUMERIC(12,6) DEFAULT 0, fee_amount NUMERIC(24,8) DEFAULT 0,
                 total_amount NUMERIC(24,8) NOT NULL, wallet_address TEXT NOT NULL, wallet_qr_photo_id TEXT,
@@ -112,6 +112,7 @@ async def init_db():
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'pending'")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP")
         await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS requested_amount_usdt NUMERIC(24,8)")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method_code TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
@@ -121,6 +122,7 @@ async def init_db():
         await conn.execute("ALTER TABLE feedback_messages ADD COLUMN IF NOT EXISTS attachment_file_id TEXT")
 
         await conn.execute("ALTER TABLE orders ALTER COLUMN amount_usdt TYPE NUMERIC(24,8) USING amount_usdt::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN requested_amount_usdt TYPE NUMERIC(24,8) USING requested_amount_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
@@ -190,6 +192,14 @@ async def init_db():
         count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
         if count == 0:
             await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", "150.00", 0)
+
+        fee_seed = str(Config.SERVICE_FEE_PERCENT)
+        for network in ("bep20", "trc20", "ton", "arb", "solana", "eth"):
+            await conn.execute(
+                "INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
+                f"service_fee_percent_{network}",
+                fee_seed,
+            )
 
 
 async def get_pool():
