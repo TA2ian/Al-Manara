@@ -101,6 +101,7 @@ async def maintenance_notification_worker(bot: Bot):
 
 async def on_startup(bot: Bot):
     logger.info("Starting bot...")
+    logger.info("Administrator access: %s", Config.admin_configuration_summary())
     await init_db()
     pool = await get_pool()
     async with pool.acquire() as conn:
