@@ -18,10 +18,7 @@ router = Router()
 async def _lang(telegram_id: int) -> str:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT language FROM users WHERE telegram_id = $1",
-            telegram_id,
-        )
+        row = await conn.fetchrow("SELECT language FROM users WHERE telegram_id = $1", telegram_id)
     return row["language"] if row and row["language"] in ("ar", "en") else "ar"
 
 
@@ -51,28 +48,24 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
         await callback.answer("الطلب غير موجود" if lang == "ar" else "Order not found", show_alert=True)
         return
     if order["status"] != "waiting_payment":
-        await callback.answer(
-            "لا يمكن رفع إثبات لهذا الطلب حالياً" if lang == "ar" else "This order is not awaiting payment proof",
-            show_alert=True,
-        )
+        await callback.answer("لا يمكن رفع إثبات لهذا الطلب حالياً" if lang == "ar" else "This order is not awaiting payment proof", show_alert=True)
         return
     if int(order["receipt_upload_count"] or 0) >= MAX_RECEIPT_ATTEMPTS:
-        await callback.answer(
-            "❌ استنفدت محاولات رفع الإثبات" if lang == "ar" else "❌ Receipt attempts exhausted",
-            show_alert=True,
-        )
+        await callback.answer("❌ استنفدت محاولات رفع الإثبات" if lang == "ar" else "❌ Receipt attempts exhausted", show_alert=True)
         return
 
     await state.update_data(receipt_order_id=order_id)
     prompt = (
         f"📎 <b>إرسال إثبات الدفع — الطلب #{order['order_number']}</b>\n\n"
-        "أرسل صورة JPG/PNG/WebP أو ملف PDF مُصدّراً من ShamCash. سيتم التحقق من نوع الملف وقراءته آلياً عبر OCR قبل إرساله للمراجعة.\n\n"
-        "⚠️ الحد الأقصى 12 MB، وPDF يجب ألا يتجاوز 3 صفحات."
+        "أرسل لقطة شاشة واضحة لإيصال الدفع بصيغة JPG أو PNG أو WebP. سيتم ضغط نسخة مخصصة للتحليل قبل OCR، بينما يبقى الإثبات الأصلي كما أرسلته للمراجعة.\n\n"
+        "📄 إذا كان لديك PDF من ShamCash: افتحه، اعرض إيصال الدفع بوضوح، التقط Screenshot وأرسل الصورة بدلاً من ملف PDF. لا يتم تحليل محتوى PDF آلياً.\n\n"
+        "⚠️ الحد الأقصى لحجم الملف 12 MB."
         if lang == "ar"
         else
         f"📎 <b>Payment proof — order #{order['order_number']}</b>\n\n"
-        "Send a JPG/PNG/WebP image or a PDF exported from ShamCash. The file type will be validated and its contents checked with OCR before review.\n\n"
-        "⚠️ Maximum 12 MB; PDFs may contain up to 3 pages."
+        "Send a clear JPG, PNG, or WebP screenshot of the payment receipt. A compressed OCR working copy will be created for analysis while your original proof remains available for review.\n\n"
+        "📄 If you have a ShamCash PDF, open it, display the receipt clearly, take a screenshot, and send the image instead. PDF contents are not processed automatically.\n\n"
+        "⚠️ Maximum file size: 12 MB."
     )
     await callback.message.answer(prompt, parse_mode="HTML")
     await state.set_state(ReceiptStates.waiting_receipt)
@@ -92,9 +85,7 @@ async def request_manual_review(callback: CallbackQuery, state: FSMContext):
     if success:
         await state.clear()
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(
-            text if lang == "ar" else "📨 The receipt was sent to administration for manual review. You will be notified when a decision is made."
-        )
+        await callback.message.answer(text if lang == "ar" else "📨 The receipt was sent to administration for manual review. You will be notified when a decision is made.")
         await callback.answer("تم الإرسال" if lang == "ar" else "Sent")
         return
     await callback.answer(text if lang == "ar" else "Manual review request could not be completed.", show_alert=True)
@@ -109,8 +100,8 @@ async def handle_receipt_document(message: Message, state: FSMContext):
 async def reject_unsupported_receipt(message: Message):
     lang = await _lang(message.from_user.id)
     await message.answer(
-        "❌ صيغة الإثبات غير مدعومة. أرسل JPG أو PNG أو WebP أو PDF صالحاً من ShamCash."
+        "❌ أرسل صورة واضحة للإيصال بصيغة JPG أو PNG أو WebP. إذا كان الإثبات PDF، افتحه والتقط Screenshot للصفحة التي تحتوي على الإيصال ثم أرسل الصورة."
         if lang == "ar"
         else
-        "❌ Unsupported proof format. Send a valid ShamCash JPG, PNG, WebP, or PDF."
+        "❌ Send a clear JPG, PNG, or WebP image of the receipt. If the proof is a PDF, open it, screenshot the page containing the receipt, and send the image instead."
     )
