@@ -17,8 +17,15 @@ class ExchangeService:
     """Manage payment rates and immutable order quotes."""
 
     SUPPORTED_PAYMENT_CURRENCIES = {"USD", "NEW.SYP"}
-    SUPPORTED_NETWORKS = {"BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH"}
-    NETWORK_ALIASES = {"SYP": "NEW.SYP", "ERC20": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA"}
+    SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
+    NETWORK_ALIASES = {
+        "SYP": "NEW.SYP",
+        "ERC20": "ETH",
+        "ARBITRUM": "ARB",
+        "SOL": "SOLANA",
+        "MATIC": "POLYGON",
+        "POL": "POLYGON",
+    }
 
     def __init__(self, db_pool):
         self._db = db_pool
