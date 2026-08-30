@@ -55,7 +55,7 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     fees = await OperationalPolicyService.get_all_fee_percents()
-    labels = {"BEP20": "🟡 BEP20", "TRC20": "🔷 TRC20", "TON": "💎 TON", "ARB": "🔵 ARB", "SOLANA": "🟣 Solana", "ETH": "⚪ Ethereum"}
+    labels = {"BEP20": "🟡 BEP20", "TRC20": "🔷 TRC20", "ARB": "🔵 ARB", "SOLANA": "🟣 Solana", "ETH": "⚪ Ethereum", "POLYGON": "🟪 Polygon"}
     buttons = [[InlineKeyboardButton(text=f"{labels[n]} · {fees[n]:g}%", callback_data=f"setting_fee_network_{n}")] for n in SUPPORTED_FEE_NETWORKS]
     buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")])
     await state.clear()
