@@ -7,7 +7,7 @@ from services.settings_service import SettingsService
 
 MONEY_QUANT = Decimal("0.01")
 FEE_QUANT = Decimal("0.000001")
-SUPPORTED_FEE_NETWORKS = ("BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH")
+SUPPORTED_FEE_NETWORKS = ("BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON")
 
 
 class OperationalPolicyError(ValueError):
@@ -26,15 +26,15 @@ class OperationalPolicyService:
         return parsed
 
     @classmethod
+    def _normalize_network(cls, network: str | None) -> str:
+        value = (network or "").strip().upper()
+        aliases = {"ERC20": "ETH", "ETHEREUM": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA", "MATIC": "POLYGON", "POL": "POLYGON"}
+        return aliases.get(value, value)
+
+    @classmethod
     async def get_fee_percent(cls, network: str | None = None) -> Decimal:
         fallback = cls._decimal(Config.SERVICE_FEE_PERCENT, Decimal("0"))
-        normalized = (network or "").strip().upper()
-        if normalized == "ERC20":
-            normalized = "ETH"
-        elif normalized == "ARBITRUM":
-            normalized = "ARB"
-        elif normalized == "SOL":
-            normalized = "SOLANA"
+        normalized = cls._normalize_network(network)
         key = f"service_fee_percent_{normalized.lower()}" if normalized in SUPPORTED_FEE_NETWORKS else "service_fee_percent"
         value = cls._decimal(await SettingsService.get(key, str(fallback)), fallback)
         return max(Decimal("0"), min(value, Decimal("100")))
@@ -49,13 +49,7 @@ class OperationalPolicyService:
         if fee < 0 or fee > 100:
             raise OperationalPolicyError("Fee percent must be between 0 and 100")
         fee = fee.quantize(FEE_QUANT, rounding=ROUND_HALF_UP)
-        normalized = (network or "").strip().upper()
-        if normalized == "ERC20":
-            normalized = "ETH"
-        elif normalized == "ARBITRUM":
-            normalized = "ARB"
-        elif normalized == "SOL":
-            normalized = "SOLANA"
+        normalized = cls._normalize_network(network)
         if normalized and normalized not in SUPPORTED_FEE_NETWORKS:
             raise OperationalPolicyError("Unknown fee network")
         key = f"service_fee_percent_{normalized.lower()}" if normalized else "service_fee_percent"
