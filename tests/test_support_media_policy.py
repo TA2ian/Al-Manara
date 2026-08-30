@@ -19,12 +19,14 @@ def test_feedback_has_explicit_text_photo_pdf_and_rejection_handlers():
     assert "reject_unsupported_feedback_input" in names
 
 
-def test_feedback_has_strict_text_limit_and_pdf_boundary():
+def test_feedback_has_strict_text_limit_and_metadata_only_pdf_boundary():
     source = FEEDBACK.read_text(encoding="utf-8")
     assert "MAX_TEXT_LENGTH = 200" in source
     assert "application/pdf" in source
+    assert "MAX_UPLOAD_BYTES" in source
     assert "validate_image_payload" in source
-    assert "validate_pdf_payload" in source
+    assert "validate_pdf_payload" not in source
+    assert "message.document.file_size" in source
 
 
 def test_feedback_does_not_use_unchecked_message_text_length():
