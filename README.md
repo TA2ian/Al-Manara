@@ -16,6 +16,21 @@ Telegram bot for Al-Manara USDT purchase and top-up services.
 - Audit logging
 - PostgreSQL persistence
 
+## Supported USDT networks
+
+The active customer network list is:
+
+- `BEP20` — BNB Chain
+- `TRC20` — TRON
+- `ARB` — Arbitrum
+- `SOLANA` — Solana
+- `ETH` — Ethereum
+- `POLYGON` — Polygon PoS
+
+`TON` is intentionally excluded from the active supported-network list. Existing historical records must not be rewritten solely because the network is no longer offered.
+
+EVM networks (`BEP20`, `ARB`, `ETH`, and `POLYGON`) use the same `0x...` address shape, but the selected network remains part of the order and wallet snapshot so that the address is never interpreted as belonging to a different chain implicitly. `MATIC` and `POL` are accepted as Polygon input aliases and normalized to `POLYGON`.
+
 ## Local development
 
 ```bash
@@ -85,7 +100,13 @@ Administrative authorization currently uses the configured `Config.ADMIN_IDS` al
 
 The payment lifecycle separates customer submission, automated verification assistance and administrator decisions. Receipt OCR can extract and compare date, sender/recipient identity or account information and amount, but receipt analysis does not by itself complete the payment. Administrative actions remain the authoritative decision point for approval, rejection and related order transitions.
 
-Supported payment networks currently include `BEP20`, `TRC20`, `TON`, `ARB`, `SOLANA` and `ETH`, with compatibility aliases normalized by the exchange service. TXID handling must remain network-aware and must not introduce an unrelated global restriction that blocks valid `TRC20` or other supported transaction formats.
+PDF payment proofs are format-detected only. The bot does not render, parse or OCR PDF contents. Customers are instructed to open the PDF, display the receipt and submit a screenshot as an image. Image submissions are validated and converted into a bounded compressed working copy for OCR while the original Telegram file remains the evidence used for administrative review.
+
+TXID handling must remain network-aware and must not introduce an unrelated global restriction that blocks valid `TRC20` or other supported transaction formats.
+
+## Time and timezone model
+
+Business timestamps use UTC as the authoritative server/database clock. Order deadlines are calculated from configured durations, not from the customer's device clock, GPS location or claimed local time. A customer's timezone may be used only for presentation when a localized timestamp is explicitly useful; it must never become a security boundary or alter the stored processing duration.
 
 ## Data and infrastructure
 
@@ -118,9 +139,3 @@ The project follows a strict cleanup rule for legacy logic:
 4. New functionality must depend on the current domain contracts rather than resurrecting first-version behavior.
 
 This is particularly important while the bot is still in its initial development stage: future features must be able to extend the current architecture without old, inactive paths silently intercepting or overriding them.
-
-## Release verification
-
-The project is not considered release-ready until the full CI/release verification suite passes, including router integrity, wallet and order lifecycle guards, payment/receipt transitions, currency/rate flows, policy controls, TXID/network handling, and functional regression tests.
-
-A green CI run validates the current test suite; it does not replace end-to-end testing inside the Telegram bot for critical customer/admin flows.
