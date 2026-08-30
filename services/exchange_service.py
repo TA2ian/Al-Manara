@@ -1,6 +1,6 @@
 """Exchange-rate and exact financial calculation service."""
 import logging
-from datetime import datetime
+import time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
 
@@ -23,7 +23,7 @@ class ExchangeService:
     def __init__(self, db_pool):
         self._db = db_pool
         self._cache = {}
-        self._cache_time = None
+        self._cache_monotonic = None
 
     @staticmethod
     def to_decimal(value, default: str = "0") -> Decimal:
@@ -40,7 +40,8 @@ class ExchangeService:
         return cls.NETWORK_ALIASES.get(value, value)
 
     async def get_current_rate(self) -> Optional[Decimal]:
-        if self._cache_time and (datetime.now() - self._cache_time).total_seconds() < 3600:
+        now = time.monotonic()
+        if self._cache_monotonic is not None and now - self._cache_monotonic < 3600:
             return self._cache.get("rate")
         async with self._db.acquire() as conn:
             row = await conn.fetchrow("SELECT rate, COALESCE(rate_currency, 'NEW.SYP') AS rate_currency FROM exchange_rates ORDER BY updated_at DESC LIMIT 1")
@@ -56,7 +57,7 @@ class ExchangeService:
             if rate <= 0:
                 return None
             self._cache["rate"] = rate
-            self._cache_time = datetime.now()
+            self._cache_monotonic = now
             return rate
 
     async def update_rate(self, rate, admin_id: int) -> bool:
@@ -68,7 +69,7 @@ class ExchangeService:
             async with self._db.acquire() as conn:
                 await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", value, admin_id)
             self._cache = {}
-            self._cache_time = None
+            self._cache_monotonic = None
             return True
         except Exception as exc:
             logger.error("Rate update failed: %s", exc)
