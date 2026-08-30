@@ -70,7 +70,6 @@ async def install_order_constraints(conn):
             IF NEW.user_id IS NULL THEN
                 RAISE EXCEPTION 'order customer is required' USING ERRCODE='23514';
             END IF;
-
             SELECT u.is_verified, u.phone_verified, u.phone_number, u.terms_accepted,
                    u.telegram_id, to_jsonb(u)->>'full_name',
                    to_jsonb(u)->>'username', to_jsonb(u)->>'shamcash_account'
@@ -82,12 +81,10 @@ async def install_order_constraints(conn):
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'order customer does not exist' USING ERRCODE='23514';
             END IF;
-
             customer_full_name := NULLIF(BTRIM(customer_full_name), '');
             customer_username := NULLIF(BTRIM(customer_username), '');
             customer_shamcash_account := NULLIF(BTRIM(customer_shamcash_account), '');
             customer_phone_number := NULLIF(BTRIM(customer_phone_number), '');
-
             IF customer_terms_accepted IS NOT TRUE THEN
                 RAISE EXCEPTION 'order customer must accept terms' USING ERRCODE='23514';
             END IF;
@@ -97,19 +94,12 @@ async def install_order_constraints(conn):
             IF customer_phone_verified IS NOT TRUE OR customer_phone_number IS NULL THEN
                 RAISE EXCEPTION 'order customer phone is not verified' USING ERRCODE='23514';
             END IF;
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                 WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'full_name'
-            ) AND customer_full_name IS NULL THEN
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'full_name') AND customer_full_name IS NULL THEN
                 RAISE EXCEPTION 'order customer full name is missing' USING ERRCODE='23514';
             END IF;
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                 WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'shamcash_account'
-            ) AND customer_shamcash_account IS NULL THEN
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'shamcash_account') AND customer_shamcash_account IS NULL THEN
                 RAISE EXCEPTION 'order customer ShamCash account is missing' USING ERRCODE='23514';
             END IF;
-
             IF TG_OP = 'INSERT' THEN
                 NEW.customer_full_name_snapshot := customer_full_name;
                 NEW.customer_telegram_id_snapshot := customer_telegram_id;
@@ -256,3 +246,17 @@ async def install_order_constraints(conn):
     await conn.execute("""CREATE TRIGGER trg_prevent_active_order_deletion
         BEFORE DELETE ON orders
         FOR EACH ROW EXECUTE FUNCTION prevent_active_order_deletion()""")
+
+    await conn.execute("""
+        DELETE FROM saved_addresses
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY is_default DESC, created_at ASC, id ASC) AS rn
+                FROM saved_addresses
+                WHERE deleted_at IS NULL AND is_default = TRUE
+            ) ranked
+            WHERE ranked.rn > 1
+        )
+    """)
+    await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_addresses_one_default ON saved_addresses (user_id) WHERE deleted_at IS NULL AND is_default = TRUE")
