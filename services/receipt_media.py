@@ -1,21 +1,20 @@
-"""Receipt media validation and OCR preprocessing."""
+"""Receipt image validation and OCR preprocessing."""
 from __future__ import annotations
 
 import io
 
 from PIL import Image, ImageOps
 
-from services.media_security import validate_image_payload, validate_pdf_payload
+from services.media_security import MAX_UPLOAD_BYTES, validate_image_payload
 
 OCR_MAX_DIMENSION = 1600
 OCR_JPEG_QUALITY = 82
-ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
-ALLOWED_DOCUMENT_MIMES = ALLOWED_IMAGE_MIMES | {"application/pdf"}
-MAX_RECEIPT_BYTES = 12 * 1024 * 1024
+ALLOWED_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
+MAX_RECEIPT_BYTES = MAX_UPLOAD_BYTES
 
 
 def detect_receipt_media_type(mime_type: str | None, file_name: str | None) -> str:
-    """Classify a submission without decoding or rendering its contents."""
+    """Classify a receipt submission using advisory Telegram metadata only."""
     mime = (mime_type or "").split(";", 1)[0].strip().lower()
     name = (file_name or "").lower()
     suffix = name.rsplit(".", 1)[-1] if "." in name else ""
@@ -26,21 +25,23 @@ def detect_receipt_media_type(mime_type: str | None, file_name: str | None) -> s
     return "unsupported"
 
 
-def normalize_receipt_media(payload: bytes, mime_type: str | None, file_name: str | None) -> tuple[bytes, str]:
-    """Validate an image and create a compressed OCR-only copy.
+def normalize_receipt_media(
+    payload: bytes,
+    mime_type: str | None,
+    file_name: str | None,
+) -> tuple[bytes, str]:
+    """Validate a receipt image and create a compressed OCR-only copy.
 
-    PDFs are validated only as documents and are deliberately never rendered,
-    converted, or passed to OCR. The caller must instruct the customer to open
-    the PDF and submit a screenshot instead.
+    PDFs are rejected by classification alone. Their contents are never
+    parsed, rendered, converted, or passed to OCR.
     """
     if not payload:
         raise ValueError("receipt file is empty")
     if len(payload) > MAX_RECEIPT_BYTES:
-        raise ValueError("receipt file exceeds the 12 MB limit")
+        raise ValueError("receipt file exceeds the 2 MB limit")
 
     media_type = detect_receipt_media_type(mime_type, file_name)
     if media_type == "pdf":
-        validate_pdf_payload(payload, mime_type=mime_type, file_name=file_name)
         raise ValueError(
             "PDF receipt detected. Open the PDF, display the payment receipt, take a screenshot, and send the screenshot instead."
         )
