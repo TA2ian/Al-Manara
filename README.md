@@ -27,8 +27,6 @@ The active customer network list is:
 - `ETH` — Ethereum
 - `POLYGON` — Polygon PoS
 
-`TON` is intentionally excluded from the active supported-network list. Existing historical records must not be rewritten solely because the network is no longer offered.
-
 EVM networks (`BEP20`, `ARB`, `ETH`, and `POLYGON`) use the same `0x...` address shape, but the selected network remains part of the order and wallet snapshot so that the address is never interpreted as belonging to a different chain implicitly. `MATIC` and `POL` are accepted as Polygon input aliases and normalized to `POLYGON`.
 
 ## Local development
