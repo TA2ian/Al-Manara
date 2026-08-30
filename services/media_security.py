@@ -1,12 +1,12 @@
-"""Centralized security boundary for user-supplied media.
+"""Centralized security boundary for user-supplied image media.
 
-This module deliberately performs cheap checks before any expensive parser,
-OCR engine, QR decoder, or PDF renderer is invoked. Telegram metadata is
-considered advisory; the payload itself is validated as the final boundary.
+This module deliberately performs cheap checks before any expensive OCR
+engine or QR decoder is invoked. Telegram metadata is considered advisory;
+the payload itself is validated as the final boundary.
 
-PDF handling at this boundary is intentionally limited to format detection.
-Structural parsing, rendering, and text extraction belong to downstream
-processing and must not be required merely to classify an upload as PDF.
+PDF files are intentionally outside this validation boundary. Receipt
+handlers detect PDF submissions from Telegram metadata and reject them before
+download, decoding, OCR, or any document parser is invoked.
 """
 from __future__ import annotations
 
@@ -22,13 +22,11 @@ MAX_IMAGE_PIXELS = 40_000_000
 
 ALLOWED_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
 ALLOWED_IMAGE_SUFFIXES = frozenset({"jpg", "jpeg", "png", "webp"})
-ALLOWED_DOCUMENT_MIMES = frozenset({"application/pdf"})
-ALLOWED_DOCUMENT_SUFFIXES = frozenset({"pdf"})
 
 
 @dataclass(frozen=True)
 class MediaDescriptor:
-    """Validated media metadata used by downstream handlers."""
+    """Validated image metadata used by downstream handlers."""
 
     kind: str
     mime_type: str
@@ -52,7 +50,12 @@ def validate_upload_size(payload: bytes) -> None:
         raise ValueError("uploaded file exceeds the 2 MB limit")
 
 
-def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file_name: str | None = None) -> MediaDescriptor:
+def validate_image_payload(
+    payload: bytes,
+    *,
+    mime_type: str | None = None,
+    file_name: str | None = None,
+) -> MediaDescriptor:
     """Validate actual image structure and resource limits before decoding further."""
     validate_upload_size(payload)
     mime = _normalized_mime(mime_type)
@@ -103,31 +106,3 @@ def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file
             raise ValueError("image content does not match its file extension")
 
     return MediaDescriptor("image", actual_mime, len(payload), file_name or "upload")
-
-
-def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_name: str | None = None) -> MediaDescriptor:
-    """Validate PDF format identity without parsing or rendering the document."""
-    validate_upload_size(payload)
-    mime = _normalized_mime(mime_type)
-    suffix = _suffix(file_name)
-    if mime and mime not in ALLOWED_DOCUMENT_MIMES and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
-        raise ValueError("unsupported PDF type")
-    if suffix and suffix not in ALLOWED_DOCUMENT_SUFFIXES and mime not in ALLOWED_DOCUMENT_MIMES:
-        raise ValueError("unsupported PDF type")
-    if not payload.startswith(b"%PDF-"):
-        raise ValueError("uploaded file is not a valid PDF")
-    if mime and mime not in ALLOWED_DOCUMENT_MIMES:
-        raise ValueError("PDF content does not match its declared type")
-    if suffix and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
-        raise ValueError("PDF content does not match its file extension")
-
-    return MediaDescriptor("pdf", "application/pdf", len(payload), file_name or "upload.pdf")
-
-
-def validate_receipt_payload(payload: bytes, *, mime_type: str | None, file_name: str | None) -> MediaDescriptor:
-    """Validate a receipt as either a supported image or a PDF format signature."""
-    mime = _normalized_mime(mime_type)
-    suffix = _suffix(file_name)
-    if mime == "application/pdf" or suffix == "pdf":
-        return validate_pdf_payload(payload, mime_type=mime_type, file_name=file_name)
-    return validate_image_payload(payload, mime_type=mime_type, file_name=file_name)
