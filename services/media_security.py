@@ -3,22 +3,22 @@
 This module deliberately performs cheap checks before any expensive parser,
 OCR engine, QR decoder, or PDF renderer is invoked. Telegram metadata is
 considered advisory; the payload itself is validated as the final boundary.
+
+PDF handling at this boundary is intentionally limited to format detection.
+Structural parsing, rendering, and text extraction belong to downstream
+processing and must not be required merely to classify an upload as PDF.
 """
 from __future__ import annotations
 
 import io
 from dataclasses import dataclass
 
-import fitz
 from PIL import Image, UnidentifiedImageError
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_WIDTH = 8000
 MAX_IMAGE_HEIGHT = 8000
 MAX_IMAGE_PIXELS = 40_000_000
-MAX_PDF_PAGES = 1
-MAX_PDF_PAGE_WIDTH = 5000.0
-MAX_PDF_PAGE_HEIGHT = 5000.0
 
 ALLOWED_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
 ALLOWED_IMAGE_SUFFIXES = frozenset({"jpg", "jpeg", "png", "webp"})
@@ -106,7 +106,7 @@ def validate_image_payload(payload: bytes, *, mime_type: str | None = None, file
 
 
 def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_name: str | None = None) -> MediaDescriptor:
-    """Validate a single-page PDF before rendering or text extraction."""
+    """Validate PDF format identity without parsing or rendering the document."""
     validate_upload_size(payload)
     mime = _normalized_mime(mime_type)
     suffix = _suffix(file_name)
@@ -121,28 +121,11 @@ def validate_pdf_payload(payload: bytes, *, mime_type: str | None = None, file_n
     if suffix and suffix not in ALLOWED_DOCUMENT_SUFFIXES:
         raise ValueError("PDF content does not match its file extension")
 
-    try:
-        document = fitz.open(stream=payload, filetype="pdf")
-    except Exception as exc:
-        raise ValueError("uploaded PDF is invalid or unreadable") from exc
-
-    try:
-        if document.page_count != MAX_PDF_PAGES:
-            raise ValueError("PDF must contain exactly one page")
-        page = document.load_page(0)
-        rect = page.rect
-        if rect.width <= 0 or rect.height <= 0:
-            raise ValueError("PDF contains an invalid page")
-        if rect.width > MAX_PDF_PAGE_WIDTH or rect.height > MAX_PDF_PAGE_HEIGHT:
-            raise ValueError("PDF page dimensions exceed the safety limit")
-    finally:
-        document.close()
-
     return MediaDescriptor("pdf", "application/pdf", len(payload), file_name or "upload.pdf")
 
 
 def validate_receipt_payload(payload: bytes, *, mime_type: str | None, file_name: str | None) -> MediaDescriptor:
-    """Validate a receipt as either a supported image or a bounded PDF."""
+    """Validate a receipt as either a supported image or a PDF format signature."""
     mime = _normalized_mime(mime_type)
     suffix = _suffix(file_name)
     if mime == "application/pdf" or suffix == "pdf":
