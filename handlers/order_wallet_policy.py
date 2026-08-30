@@ -70,7 +70,7 @@ async def back_to_wallet_selection(callback: CallbackQuery, state: FSMContext):
         if draft.get("amount_usdt") is not None:
             await state.update_data(amount_usdt=draft["amount_usdt"], order_amount_usdt=draft.get("order_amount_usdt", draft["amount_usdt"]))
         buttons = []
-        icons = {"BEP20": "🟡", "TRC20": "🔷", "TON": "💎", "ARB": "🔵", "SOLANA": "🟣", "ETH": "⚪"}
+        icons = {"BEP20": "🟡", "TRC20": "🔷", "ARB": "🔵", "SOLANA": "🟣", "ETH": "⚪", "POLYGON": "🟪"}
         for row in rows:
             label = row["label"] or ("بدون اسم" if lang == "ar" else "Unnamed")
             buttons.append([InlineKeyboardButton(text=f"{icons.get(row['network'], '🌐')} {label} · {row['address'][:6]}...{row['address'][-4:]}", callback_data=f"order_use_saved_{row['id']}")])
