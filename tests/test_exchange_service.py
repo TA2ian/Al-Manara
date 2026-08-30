@@ -40,10 +40,10 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         SettingsService._cache = {
             "service_fee_percent_bep20": "10",
             "service_fee_percent_trc20": "5",
-            "service_fee_percent_ton": "7",
             "service_fee_percent_arb": "8",
             "service_fee_percent_solana": "6",
             "service_fee_percent_eth": "9",
+            "service_fee_percent_polygon": "7",
         }
         SettingsService._initialized = True
 
@@ -58,12 +58,17 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_network_fee_is_independent(self):
         service = ExchangeService(FakePool(Decimal("150")))
-        ton = await service.calculate_order(Decimal("100"), "USD", "TON")
+        polygon = await service.calculate_order(Decimal("100"), "USD", "POLYGON")
         eth = await service.calculate_order(Decimal("100"), "USD", "ETH")
-        self.assertEqual(ton["fee_percent"], Decimal("7"))
-        self.assertEqual(ton["net_amount_usdt"], Decimal("93.00000000"))
+        self.assertEqual(polygon["fee_percent"], Decimal("7"))
+        self.assertEqual(polygon["net_amount_usdt"], Decimal("93.00000000"))
         self.assertEqual(eth["fee_percent"], Decimal("9"))
         self.assertEqual(eth["net_amount_usdt"], Decimal("91.00000000"))
+
+    async def test_removed_ton_network_blocks_quote(self):
+        service = ExchangeService(FakePool(Decimal("150")))
+        with self.assertRaisesRegex(ValueError, "Unsupported network"):
+            await service.calculate_order(Decimal("100"), "USD", "TON")
 
     async def test_new_syp_fee_is_deducted_from_gross_usdt_value(self):
         service = ExchangeService(FakePool(Decimal("150")))
