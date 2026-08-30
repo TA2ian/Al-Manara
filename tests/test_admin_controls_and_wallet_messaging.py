@@ -48,7 +48,7 @@ def test_wallet_registration_supports_all_networks_and_supported_inputs():
     source = inspect.getsource(wallets._network_prompt)
     assert "العنوان" in source
     assert "صورة" in source
-    assert "شارك المحفظة مباشرة" in source
+    assert "مشاركة المحفظة مباشرة" in source
     assert "العنوان مع QR" in source
     assert "اختر شبكة USDT" in source
     assert set(SUPPORTED_WALLET_NETWORKS) == {"BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH"}
