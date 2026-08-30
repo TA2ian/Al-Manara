@@ -14,8 +14,20 @@ ALLOWED_DOCUMENT_MIMES = ALLOWED_IMAGE_MIMES | {"application/pdf"}
 MAX_RECEIPT_BYTES = 12 * 1024 * 1024
 
 
+def detect_receipt_media_type(mime_type: str | None, file_name: str | None) -> str:
+    """Classify a submission without decoding or rendering its contents."""
+    mime = (mime_type or "").split(";", 1)[0].strip().lower()
+    name = (file_name or "").lower()
+    suffix = name.rsplit(".", 1)[-1] if "." in name else ""
+    if mime == "application/pdf" or suffix == "pdf":
+        return "pdf"
+    if mime in ALLOWED_IMAGE_MIMES or suffix in {"jpg", "jpeg", "png", "webp"}:
+        return "image"
+    return "unsupported"
+
+
 def normalize_receipt_media(payload: bytes, mime_type: str | None, file_name: str | None) -> tuple[bytes, str]:
-    """Validate an uploaded image and create a compressed OCR-only copy.
+    """Validate an image and create a compressed OCR-only copy.
 
     PDFs are validated only as documents and are deliberately never rendered,
     converted, or passed to OCR. The caller must instruct the customer to open
@@ -26,14 +38,14 @@ def normalize_receipt_media(payload: bytes, mime_type: str | None, file_name: st
     if len(payload) > MAX_RECEIPT_BYTES:
         raise ValueError("receipt file exceeds the 12 MB limit")
 
-    mime = (mime_type or "").split(";", 1)[0].strip().lower()
-    suffix = (file_name or "").lower().rsplit(".", 1)[-1] if "." in (file_name or "") else ""
-
-    if mime == "application/pdf" or suffix == "pdf":
+    media_type = detect_receipt_media_type(mime_type, file_name)
+    if media_type == "pdf":
         validate_pdf_payload(payload, mime_type=mime_type, file_name=file_name)
         raise ValueError(
             "PDF receipt detected. Open the PDF, display the payment receipt, take a screenshot, and send the screenshot instead."
         )
+    if media_type != "image":
+        raise ValueError("unsupported receipt format; send JPG, PNG, or WebP")
 
     validate_image_payload(payload, mime_type=mime_type, file_name=file_name)
     try:
