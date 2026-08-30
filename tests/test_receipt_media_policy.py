@@ -3,33 +3,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_receipt_document_policy_accepts_pdf_and_image_formats():
+def test_receipt_document_policy_rejects_pdf_and_routes_images_to_canonical_service():
     document_source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
     service_source = (ROOT / "services/receipt_service.py").read_text(encoding="utf-8")
     media_source = (ROOT / "services/receipt_media.py").read_text(encoding="utf-8")
     verifier_source = (ROOT / "services/receipt_verifier.py").read_text(encoding="utf-8")
     assert "application/pdf" in media_source
-    assert "JPG/PNG/WebP" in document_source
+    assert "PDF detected" in document_source
+    assert "PDF contents are not processed automatically" in document_source
     assert "handle_receipt_upload" in document_source
     assert "normalize_receipt_media" in service_source
     assert "verify_shamcash_receipt" in service_source
     assert "verify_shamcash_receipt" in verifier_source
 
 
-def test_receipt_media_enforces_2mb_size_and_one_page_pdf_limit():
+def test_receipt_media_uses_central_2mb_limit_and_does_not_parse_pdf():
     source = (ROOT / "services/receipt_media.py").read_text(encoding="utf-8")
-    assert "MAX_RECEIPT_BYTES = 2 * 1024 * 1024" in source
-    assert "MAX_RECEIPT_PDF_PAGES = 1" in source
-    assert "document.page_count != MAX_RECEIPT_PDF_PAGES" in source
-    assert "OCR_MAX_DIMENSION = 1400" in source
+    security_source = (ROOT / "services/media_security.py").read_text(encoding="utf-8")
+    assert "MAX_RECEIPT_BYTES = MAX_UPLOAD_BYTES" in source
+    assert "OCR_MAX_DIMENSION = 1600" in source
     assert "application/pdf" in source
-    assert "validate_pdf_payload" in source
+    assert "validate_pdf_payload" not in source
+    assert "validate_pdf_payload" not in security_source
 
 
 def test_unsupported_receipt_files_are_explicitly_rejected():
-    source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
-    assert "Unsupported proof format" in source
-    assert "صيغة الإثبات غير مدعومة" in source
+    source = (ROOT / "services/receipt_media.py").read_text(encoding="utf-8")
+    handler_source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
+    assert "unsupported receipt format; send JPG, PNG, or WebP" in source
+    assert "JPG أو PNG أو WebP" in handler_source
 
 
 def test_photo_receipts_are_normalized_before_ocr():
