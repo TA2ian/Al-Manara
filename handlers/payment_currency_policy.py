@@ -150,10 +150,10 @@ async def select_payment_currency(callback: CallbackQuery, state: FSMContext):
         network_display = {
             "TRC20": "🔷 TRC20 (TRON)",
             "BEP20": "🟡 BEP20 (BNB Chain)",
-            "TON": "💎 TON",
             "ARB": "🔵 ARB (Arbitrum)",
             "SOLANA": "🟣 Solana",
             "ETH": "🔷 Ethereum (ETH)",
+            "POLYGON": "🟪 Polygon (POL)",
         }.get(network.upper(), network)
         summary_data = {"amount_usdt": amount, "wallet": wallet}
         summary = _build_arabic_summary(summary_data, calculation, network_display) if lang == "ar" else _build_english_summary(summary_data, calculation, network_display)
