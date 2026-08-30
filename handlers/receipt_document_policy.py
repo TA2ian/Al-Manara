@@ -60,13 +60,13 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
         f"📎 <b>إرسال إثبات الدفع — الطلب #{order['order_number']}</b>\n\n"
         "أرسل لقطة شاشة واضحة لإيصال الدفع بصيغة JPG أو PNG أو WebP. سيتم ضغط نسخة مخصصة للتحليل قبل OCR، بينما يبقى الإثبات الأصلي كما أرسلته للمراجعة.\n\n"
         "📄 إذا كان لديك PDF من ShamCash: افتحه، اعرض إيصال الدفع بوضوح، التقط Screenshot وأرسل الصورة بدلاً من ملف PDF. لا يتم تحليل محتوى PDF آلياً.\n\n"
-        "⚠️ الحد الأقصى لحجم الملف 12 MB."
+        "⚠️ الحد الأقصى لحجم الملف 2 MB."
         if lang == "ar"
         else
         f"📎 <b>Payment proof — order #{order['order_number']}</b>\n\n"
         "Send a clear JPG, PNG, or WebP screenshot of the payment receipt. A compressed OCR working copy will be created for analysis while your original proof remains available for review.\n\n"
         "📄 If you have a ShamCash PDF, open it, display the receipt clearly, take a screenshot, and send the image instead. PDF contents are not processed automatically.\n\n"
-        "⚠️ Maximum file size: 12 MB."
+        "⚠️ Maximum file size: 2 MB."
     )
     await callback.message.answer(prompt, parse_mode="HTML")
     await state.set_state(ReceiptStates.waiting_receipt)
