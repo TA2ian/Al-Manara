@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from database import get_pool
+from services.receipt_media import detect_receipt_media_type
 from services.receipt_service import (
     MAX_RECEIPT_ATTEMPTS,
     handle_receipt_upload,
@@ -93,6 +94,18 @@ async def request_manual_review(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ReceiptStates.waiting_receipt, F.document)
 async def handle_receipt_document(message: Message, state: FSMContext):
+    mime_type = message.document.mime_type or ""
+    file_name = message.document.file_name or ""
+    if detect_receipt_media_type(mime_type, file_name) == "pdf":
+        lang = await _lang(message.from_user.id)
+        await message.answer(
+            "📄 <b>تم اكتشاف ملف PDF.</b>\n\nلا يتم تحليل محتوى PDF عبر OCR. افتح الملف، اعرض صفحة إيصال الدفع بوضوح، التقط Screenshot وأرسل الصورة هنا بدلاً من الملف."
+            if lang == "ar"
+            else
+            "📄 <b>PDF detected.</b>\n\nPDF contents are not processed by OCR. Open the file, display the payment receipt clearly, take a screenshot, and send the image here instead.",
+            parse_mode="HTML",
+        )
+        return
     await handle_receipt_upload(message, state)
 
 
