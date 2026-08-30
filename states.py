@@ -16,8 +16,6 @@ class OrderStates(StatesGroup):
     waiting_network = State()
     waiting_amount = State()
     waiting_wallet = State()
-    waiting_save_address = State()
-    waiting_address_label = State()
     waiting_currency = State()
     waiting_confirmation = State()
 
