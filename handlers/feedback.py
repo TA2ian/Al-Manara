@@ -13,7 +13,7 @@ from database import get_pool
 from keyboards.inline import cancel_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.locale_service import locale_service
-from services.media_security import validate_image_payload, validate_pdf_payload
+from services.media_security import MAX_UPLOAD_BYTES, validate_image_payload
 from services.notification_service import NotificationService
 from states import FeedbackStates
 
@@ -32,14 +32,6 @@ async def _get_user_lang(telegram_id: int) -> str:
     except Exception:
         logger.exception("Failed to fetch feedback language")
     return "ar"
-
-
-@router.callback_query(F.data == "menu_feedback")
-async def start_feedback(callback: CallbackQuery, state: FSMContext):
-    lang = await _get_user_lang(callback.from_user.id)
-    await callback.message.edit_text(locale_service.get("feedback_prompt", lang), reply_markup=cancel_keyboard(lang))
-    await state.set_state(FeedbackStates.waiting_message)
-    await callback.answer()
 
 
 async def _store_feedback(message: Message, text: str, attachment_type: str | None, attachment_file_id: str | None):
@@ -132,20 +124,15 @@ async def process_feedback_document(message: Message, state: FSMContext):
         await message.answer(locale_service.get("feedback_too_long", lang, length=len(caption)), reply_markup=cancel_keyboard(lang))
         return
 
-    if (message.document.mime_type or "").lower() != "application/pdf":
+    mime_type = (message.document.mime_type or "").split(";", 1)[0].strip().lower()
+    file_name = (message.document.file_name or "").lower()
+    suffix = file_name.rsplit(".", 1)[-1] if "." in file_name else ""
+    if mime_type != "application/pdf" and suffix != "pdf":
         await message.answer("❌ الدعم يقبل الصور وPDF فقط." if lang == "ar" else "❌ Support accepts images and PDF only.", reply_markup=cancel_keyboard(lang))
         return
 
-    buffer = BytesIO()
-    try:
-        await message.bot.download(file=message.document.file_id, destination=buffer)
-        validate_pdf_payload(buffer.getvalue(), mime_type=message.document.mime_type, file_name=message.document.file_name)
-    except ValueError:
-        await message.answer("❌ ملف PDF غير صالح أو يتجاوز الحدود المسموحة." if lang == "ar" else "❌ This PDF is invalid or exceeds the allowed limits.", reply_markup=cancel_keyboard(lang))
-        return
-    except Exception:
-        logger.exception("Failed to validate feedback PDF")
-        await message.answer("❌ تعذر فحص ملف PDF." if lang == "ar" else "❌ The PDF could not be validated.", reply_markup=cancel_keyboard(lang))
+    if message.document.file_size is not None and message.document.file_size > MAX_UPLOAD_BYTES:
+        await message.answer("❌ ملف PDF يتجاوز الحد الأقصى المسموح به 2 MB." if lang == "ar" else "❌ This PDF exceeds the 2 MB upload limit.", reply_markup=cancel_keyboard(lang))
         return
 
     user = await _store_feedback(message, caption, "pdf", message.document.file_id)
