@@ -194,7 +194,7 @@ async def init_db():
             await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", "150.00", 0)
 
         fee_seed = str(Config.SERVICE_FEE_PERCENT)
-        for network in ("bep20", "trc20", "ton", "arb", "solana", "eth"):
+        for network in ("bep20", "trc20", "arb", "solana", "eth", "polygon"):
             await conn.execute(
                 "INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
                 f"service_fee_percent_{network}",
