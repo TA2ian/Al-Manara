@@ -32,7 +32,7 @@ async def _active_order(user_id: int):
 
 def _wallet_choice_keyboard(rows, lang: str) -> InlineKeyboardMarkup:
     buttons = []
-    icons = {"BEP20": "🟡", "TRC20": "🔷", "TON": "💎", "ARB": "🔵", "SOLANA": "🟣", "ETH": "⚪"}
+    icons = {"BEP20": "🟡", "TRC20": "🔷", "ARB": "🔵", "SOLANA": "🟣", "ETH": "⚪", "POLYGON": "🟪"}
     for row in rows:
         label = row["label"] or ("بدون اسم" if lang == "ar" else "Unnamed")
         buttons.append([InlineKeyboardButton(text=f"{icons.get(row['network'], '🌐')} {label} · {row['address'][:6]}...{row['address'][-4:]}", callback_data=f"order_use_saved_{row['id']}")])
