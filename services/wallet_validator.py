@@ -11,17 +11,17 @@ class WalletValidator:
     BEP20_PATTERN = re.compile(r"^0x[a-fA-F0-9]{40}$")
     TRC20_PATTERN = re.compile(r"^T[1-9A-HJ-NP-Za-km-z]{33}$")
     EVM_PATTERN = BEP20_PATTERN
-    TON_FRIENDLY_PATTERN = re.compile(r"^[EU][Qq][A-Za-z0-9_-]{46}$")
-    TON_RAW_PATTERN = re.compile(r"^(?:0|-1):[0-9a-fA-F]{64}$")
     SOLANA_PATTERN = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
-    SUPPORTED_NETWORKS = {"BEP20", "TRC20", "TON", "ARB", "SOLANA", "ETH"}
+    SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
     NETWORK_ALIASES = {
         "ERC20": "ETH",
         "ETHEREUM": "ETH",
         "ARBITRUM": "ARB",
         "SOL": "SOLANA",
-        "SOLANA": "SOLANA",
+        "MATIC": "POLYGON",
+        "POL": "POLYGON",
+        "POLYGON": "POLYGON",
     }
 
     BURN_ADDRESSES = {
@@ -40,29 +40,13 @@ class WalletValidator:
         """Validate a wallet address against an explicitly selected network."""
         address = (address or "").strip()
         normalized_network = cls.normalize_network(network)
-        if normalized_network == "BEP20":
-            return cls._validate_bep20(address)
+        if normalized_network in {"BEP20", "ETH", "ARB", "POLYGON"}:
+            return cls._validate_evm(address, normalized_network)
         if normalized_network == "TRC20":
             return cls._validate_trc20(address)
-        if normalized_network in {"ETH", "ARB"}:
-            return cls._validate_evm(address, normalized_network)
-        if normalized_network == "TON":
-            return cls._validate_ton(address)
         if normalized_network == "SOLANA":
             return cls._validate_solana(address)
         return {"valid": False, "network": normalized_network, "address": address, "error": "Unknown network", "warnings": []}
-
-    @classmethod
-    def _validate_bep20(cls, address: str) -> dict:
-        result = {"valid": False, "network": "BEP20", "address": address, "warnings": []}
-        if not cls.BEP20_PATTERN.fullmatch(address):
-            result["error"] = "Invalid BEP20 address format"
-            return result
-        if address.lower() in cls.BURN_ADDRESSES:
-            result["error"] = "Burn address not allowed"
-            return result
-        result["valid"] = True
-        return result
 
     @classmethod
     def _validate_evm(cls, address: str, network: str) -> dict:
@@ -77,19 +61,14 @@ class WalletValidator:
         return result
 
     @classmethod
+    def _validate_bep20(cls, address: str) -> dict:
+        return cls._validate_evm(address, "BEP20")
+
+    @classmethod
     def _validate_trc20(cls, address: str) -> dict:
         result = {"valid": False, "network": "TRC20", "address": address, "warnings": []}
         if not cls.TRC20_PATTERN.fullmatch(address):
             result["error"] = "Invalid TRC20 address format"
-            return result
-        result["valid"] = True
-        return result
-
-    @classmethod
-    def _validate_ton(cls, address: str) -> dict:
-        result = {"valid": False, "network": "TON", "address": address, "warnings": []}
-        if not (cls.TON_FRIENDLY_PATTERN.fullmatch(address) or cls.TON_RAW_PATTERN.fullmatch(address)):
-            result["error"] = "Invalid TON address format"
             return result
         result["valid"] = True
         return result
@@ -112,8 +91,6 @@ class WalletValidator:
             return preferred if cls.validate(address, preferred).get("valid") else None
         if cls.TRC20_PATTERN.fullmatch(address):
             return "TRC20"
-        if cls.TON_FRIENDLY_PATTERN.fullmatch(address) or cls.TON_RAW_PATTERN.fullmatch(address):
-            return "TON"
         if cls.SOLANA_PATTERN.fullmatch(address):
             return "SOLANA"
         if cls.BEP20_PATTERN.fullmatch(address):
