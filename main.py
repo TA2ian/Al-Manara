@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiohttp import web
 from aiogram import Bot
@@ -40,7 +40,7 @@ async def send_expiry_reminders(bot: Bot):
                 async with pool.acquire() as conn:
                     soon_expiring = await conn.fetch("SELECT o.*, u.telegram_id, u.language FROM orders o JOIN users u ON o.user_id = u.id WHERE o.status = 'waiting_payment' AND COALESCE(o.receipt_upload_count, 0) < 3 AND o.payment_deadline BETWEEN NOW() + INTERVAL '9 minutes' AND NOW() + INTERVAL '12 minutes'")
                     for order in soon_expiring:
-                        remaining = int((order['payment_deadline'] - datetime.now()).total_seconds() / 60)
+                        remaining = int((order['payment_deadline'] - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds() / 60)
                         lang = order['language'] or 'ar'
                         amount_usdt = usdt(order['amount_usdt'])
                         msg = (f"⏰ <b>تنبيه: المهلة على وشك الانتهاء!</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {amount_usdt} USDT\n⏱ الوقت المتبقي: <b>{remaining} دقائق</b>\n\n⚠️ يرجى إرسال إيصال الدفع قبل انتهاء المهلة.") if lang == 'ar' else (f"⏰ <b>Warning: Payment deadline approaching!</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {amount_usdt} USDT\n⏱ Time remaining: <b>{remaining} minutes</b>\n\n⚠️ Please upload your payment receipt before the deadline.")
