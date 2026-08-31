@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from services.formatters import money, percent, rate, usdt
+from services.exchange_service import FIXED_SERVICE_FEE_USDT
+from services.formatters import money, rate, usdt
 
 
-def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amount_usdt_value, network: str, wallet: str, currency: str, exchange_rate_value, base_amount_value, fee_percent_value, fee_amount_value, total_value, payment_deadline: datetime | None = None, lang: str = "ar") -> str:
+def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amount_usdt_value, network: str, wallet: str, currency: str, exchange_rate_value, base_amount_value, fee_percent_value=None, fee_amount_value, total_value, payment_deadline: datetime | None = None, lang: str = "ar") -> str:
+    fee_usdt = FIXED_SERVICE_FEE_USDT
     if lang == "en":
         deadline = payment_deadline.strftime("%Y-%m-%d %H:%M") if payment_deadline else "After order approval"
         return (
@@ -20,9 +22,10 @@ def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amou
             f"• Currency: <b>{currency}</b>\n"
             f"• Exchange rate: <b>{rate(exchange_rate_value)}</b>\n"
             f"• Order value: <b>{money(base_amount_value)} {currency}</b>\n"
-            f"• Service fee ({percent(fee_percent_value)}%): <b>{money(fee_amount_value)} {currency}</b>\n"
+            f"• Service fee: <b>{usdt(fee_usdt)} USDT</b>\n"
+            f"• Service fee in payment currency: <b>{money(fee_amount_value)} {currency}</b>\n"
             f"• Amount to pay: <b>{money(total_value)} {currency}</b>\n\n"
-            "The service fee is deducted from the amount you entered; it is not added on top.\n\n"
+            "The service fee is fixed at 0.04 USDT and is deducted from the amount you entered; it is not added on top.\n\n"
             "<b>What happens next?</b>\n"
             "Your request is reviewed before official payment details are issued. Do not transfer funds before approval.\n"
             f"• Payment deadline: <b>{deadline}</b>\n\n"
@@ -41,9 +44,10 @@ def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amou
         f"• عملة الدفع: <b>{currency}</b>\n"
         f"• سعر الصرف: <b>{rate(exchange_rate_value)}</b>\n"
         f"• قيمة الطلب قبل الرسوم: <b>{money(base_amount_value)} {currency}</b>\n"
-        f"• رسوم الخدمة ({percent(fee_percent_value)}%): <b>{money(fee_amount_value)} {currency}</b>\n"
+        f"• رسوم الخدمة: <b>{usdt(fee_usdt)} USDT</b>\n"
+        f"• رسوم الخدمة بعملة الدفع: <b>{money(fee_amount_value)} {currency}</b>\n"
         f"• المبلغ المطلوب دفعه: <b>{money(total_value)} {currency}</b>\n\n"
-        "ℹ️ رسوم الخدمة تُخصم من المبلغ الذي حددته ولا تُضاف فوقه.\n\n"
+        "ℹ️ رسوم الخدمة ثابتة بقيمة 0.04 USDT وتُخصم من المبلغ الذي حددته ولا تُضاف فوقه.\n\n"
         "<b>ماذا يحدث بعد ذلك؟</b>\n"
         "يراجع الطلب أولاً، وبعد اعتماده ستصلك بيانات الدفع الرسمية. <b>لا ترسل أي مبلغ قبل الاعتماد.</b>\n"
         f"• مهلة الدفع: <b>{deadline}</b>\n\n"
