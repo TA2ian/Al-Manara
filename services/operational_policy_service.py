@@ -3,11 +3,10 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from config import Config
 from database import get_pool
+from services.network_fee_policy import SUPPORTED_NETWORKS, NetworkFeePolicy, parse_non_negative_decimal
 from services.settings_service import SettingsService
 
 MONEY_QUANT = Decimal("0.01")
-SUPPORTED_FEE_NETWORKS = ("BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON")
-FIXED_SERVICE_FEE_USDT = Decimal("0.04")
 
 
 class OperationalPolicyError(ValueError):
@@ -15,7 +14,7 @@ class OperationalPolicyError(ValueError):
 
 
 class OperationalPolicyService:
-    """Single runtime authority for fixed fees, deadlines and order limits."""
+    """Single runtime authority for network-specific fees and operational limits."""
 
     @staticmethod
     def _decimal(value: object, default: Decimal) -> Decimal:
@@ -25,33 +24,60 @@ class OperationalPolicyService:
             return default
         return parsed
 
-    @classmethod
-    def _normalize_network(cls, network: str | None) -> str:
+    @staticmethod
+    def _normalize_network(network: str | None) -> str:
         value = (network or "").strip().upper()
         aliases = {"ERC20": "ETH", "ETHEREUM": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA", "MATIC": "POLYGON", "POL": "POLYGON"}
         return aliases.get(value, value)
 
     @classmethod
-    async def get_fixed_fee_usdt(cls, network: str | None = None) -> Decimal:
-        """Return the single fixed service fee; network is accepted for API compatibility."""
-        if network is not None and cls._normalize_network(network) not in SUPPORTED_FEE_NETWORKS:
+    async def get_network_fee_policy(cls, network: str) -> NetworkFeePolicy:
+        normalized = cls._normalize_network(network)
+        if normalized not in SUPPORTED_NETWORKS:
             raise OperationalPolicyError("Unknown fee network")
-        return FIXED_SERVICE_FEE_USDT
+        service_raw = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", "0")
+        fixed_raw = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", "0")
+        service = parse_non_negative_decimal(service_raw, "service_fee_percent")
+        fixed = parse_non_negative_decimal(fixed_raw, "fixed_network_fee_usdt")
+        return NetworkFeePolicy(normalized, service, fixed)
 
     @classmethod
     async def get_fee_percent(cls, network: str | None = None) -> Decimal:
-        """Return zero for legacy callers; percentage fees are no longer part of the policy."""
-        if network is not None and cls._normalize_network(network) not in SUPPORTED_FEE_NETWORKS:
-            raise OperationalPolicyError("Unknown fee network")
-        return Decimal("0")
+        if network is None:
+            return Decimal("0")
+        return (await cls.get_network_fee_policy(network)).service_fee_percent
+
+    @classmethod
+    async def get_fixed_fee_usdt(cls, network: str | None = None) -> Decimal:
+        if network is None:
+            return Decimal("0")
+        return (await cls.get_network_fee_policy(network)).fixed_network_fee_usdt
 
     @classmethod
     async def get_all_fee_percents(cls) -> dict[str, Decimal]:
-        return {network: Decimal("0") for network in SUPPORTED_FEE_NETWORKS}
+        return {network: (await cls.get_network_fee_policy(network)).service_fee_percent for network in SUPPORTED_NETWORKS}
 
     @classmethod
     async def set_fee_percent(cls, value: object, admin_id: int, network: str | None = None) -> Decimal:
-        raise OperationalPolicyError("Percentage service fees are disabled; the fee is fixed at 0.04 USDT")
+        normalized = cls._normalize_network(network)
+        if normalized not in SUPPORTED_NETWORKS:
+            raise OperationalPolicyError("Unknown fee network")
+        parsed = parse_non_negative_decimal(value, "service_fee_percent")
+        previous = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", "0")
+        await SettingsService.set(f"service_fee_percent_{normalized.lower()}", str(parsed))
+        await cls._audit(admin_id, "setting_update", "service_fee_percent", previous, str(parsed), f"Updated service fee [{normalized}]")
+        return parsed
+
+    @classmethod
+    async def set_fixed_fee_usdt(cls, value: object, admin_id: int, network: str) -> Decimal:
+        normalized = cls._normalize_network(network)
+        if normalized not in SUPPORTED_NETWORKS:
+            raise OperationalPolicyError("Unknown fee network")
+        parsed = parse_non_negative_decimal(value, "fixed_network_fee_usdt").quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        previous = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", "0")
+        await SettingsService.set(f"fixed_network_fee_usdt_{normalized.lower()}", str(parsed))
+        await cls._audit(admin_id, "setting_update", "fixed_network_fee_usdt", previous, str(parsed), f"Updated fixed network fee [{normalized}]")
+        return parsed
 
     @classmethod
     async def get_payment_timeout_minutes(cls) -> int:
@@ -82,8 +108,8 @@ class OperationalPolicyService:
     async def set_payment_timeout(cls, value: object, admin_id: int) -> int:
         try:
             timeout = int(str(value).strip())
-        except (TypeError, ValueError):
-            raise OperationalPolicyError("Payment timeout must be an integer")
+        except (TypeError, ValueError) as exc:
+            raise OperationalPolicyError("Payment timeout must be an integer") from exc
         if timeout < 1 or timeout > 1440:
             raise OperationalPolicyError("Payment timeout must be between 1 and 1440 minutes")
         previous = await SettingsService.get("payment_timeout_minutes", str(Config.PAYMENT_TIMEOUT))
@@ -97,8 +123,8 @@ class OperationalPolicyService:
             raise OperationalPolicyError("Unknown limit key")
         try:
             parsed = Decimal(str(value).strip().replace(",", ""))
-        except (InvalidOperation, TypeError, ValueError):
-            raise OperationalPolicyError("Limit must be a valid number")
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise OperationalPolicyError("Limit must be a valid number") from exc
         current = await cls.get_limits()
         candidate = dict(current)
         candidate[key] = parsed
