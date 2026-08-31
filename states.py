@@ -48,6 +48,7 @@ class AdminStates(StatesGroup):
     waiting_max_order = State()
     waiting_daily_limit = State()
     waiting_fee_percent = State()
+    waiting_fixed_network_fee = State()
     waiting_search = State()
     waiting_timeout = State()
     waiting_note_text = State()
