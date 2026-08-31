@@ -12,6 +12,7 @@ from config import Config
 from database import get_pool
 from keyboards.inline import main_menu_inline, order_admin_keyboard, receipt_upload_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
+from services.exchange_service import FIXED_SERVICE_FEE_USDT
 from services.formatters import money, usdt
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
@@ -113,7 +114,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 payment_method_code, payment_account_snapshot, payment_qr_photo_id, payment_recipient_name_snapshot, status)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending') RETURNING id""",
                 order_number, user["id"], wallet["network"], requested_amount, net_amount, calculation["exchange_rate"], currency,
-                calculation["base_amount"], calculation["fee_percent"], calculation["fee_amount"], calculation["total_amount"],
+                calculation["base_amount"], Decimal("0"), calculation["fee_amount"], calculation["total_amount"],
                 wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
             completed_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'", user["id"])
@@ -156,7 +157,7 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"💰 المبلغ المحدد: {_html(usdt(requested_amount))} USDT\n💸 المبلغ المستحق للعميل: {_html(usdt(net_amount))} USDT\n"
             f"🌐 الشبكة: {_html(wallet['network'])}\n💱 عملة الدفع: {_html(currency)}\n"
             f"💵 المبلغ المدفوع: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
-            f"💰 رسوم الشبكة: {_html(money(calculation['fee_amount']))} {_html(currency)} ({_html(calculation['fee_percent'])}%)\n"
+            f"💰 رسوم الخدمة الثابتة: {_html(usdt(FIXED_SERVICE_FEE_USDT))} USDT ({_html(money(calculation['fee_amount']))} {_html(currency)})\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{_html(wallet['address'])}</code>\n\n"
             + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
         for admin_id in Config.ADMIN_IDS:
