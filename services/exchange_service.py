@@ -8,9 +8,10 @@ from services.operational_policy_service import OperationalPolicyService
 
 logger = logging.getLogger(__name__)
 MONEY_QUANT = Decimal("0.01")
-USDT_QUANT = Decimal("0.00000001")
+USDT_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.00000001")
 OLD_SYP_PER_NEW_SYP = Decimal("100")
+FIXED_SERVICE_FEE_USDT = Decimal("0.04")
 
 
 class ExchangeService:
@@ -88,10 +89,14 @@ class ExchangeService:
 
     @classmethod
     async def get_fee_percent(cls, network: str | None = None) -> Decimal:
-        return await OperationalPolicyService.get_fee_percent(cls.normalize_network(network))
+        return Decimal("0")
+
+    @classmethod
+    async def get_fixed_fee_usdt(cls) -> Decimal:
+        return FIXED_SERVICE_FEE_USDT
 
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
-        """Calculate a quote where the entered amount is gross and fees are deducted from it."""
+        """Calculate a quote with a fixed 0.04 USDT service fee deducted from the gross amount."""
         if currency == "SYP":
             currency = "NEW.SYP"
         currency = currency.upper()
@@ -106,26 +111,27 @@ class ExchangeService:
         rate = await self.get_current_rate()
         if rate is None or rate <= 0:
             raise ValueError("Exchange rate is unavailable")
+
         base_amount = amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_percent = await self.get_fee_percent(normalized_network)
-        fee_amount = (base_amount * fee_percent / Decimal("100")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_usdt = fee_amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (fee_amount / rate).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
-        net_amount_usdt = (amount - fee_usdt).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
-        if net_amount_usdt <= 0:
+        fee_usdt = FIXED_SERVICE_FEE_USDT
+        if amount <= fee_usdt:
             raise ValueError("Service fee leaves no positive USDT amount")
+        fee_amount = fee_usdt.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        net_amount_usdt = (amount - fee_usdt).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
         old_syp_amount = self.old_syp_equivalent(base_amount) if currency == "NEW.SYP" else Decimal("0")
         old_syp_fee = self.old_syp_equivalent(fee_amount) if currency == "NEW.SYP" else Decimal("0")
         return {
-            "requested_amount_usdt": amount,
+            "requested_amount_usdt": amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP),
             "amount_usdt": net_amount_usdt,
             "net_amount_usdt": net_amount_usdt,
             "exchange_rate": rate,
             "payment_currency": currency,
             "network": normalized_network,
             "base_amount": base_amount,
-            "fee_percent": fee_percent,
+            "fee_percent": Decimal("0"),
             "fee_amount": fee_amount,
             "fee_usdt": fee_usdt,
+            "fixed_fee_usdt": FIXED_SERVICE_FEE_USDT,
             "total_amount": base_amount,
             "old_syp_amount": old_syp_amount,
             "old_syp_fee": old_syp_fee,
