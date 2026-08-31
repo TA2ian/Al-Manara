@@ -56,7 +56,7 @@ async def install_order_constraints(conn):
               AND (o.customer_full_name_snapshot IS NULL
                 OR o.customer_telegram_id_snapshot IS NULL
                 OR o.customer_username_snapshot IS NULL
-                OR o.customer_shamcash_account_snapshot IS NULL)""
+                OR o.customer_shamcash_account_snapshot IS NULL)"""
     )
 
     await conn.execute("""
