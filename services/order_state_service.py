@@ -40,8 +40,9 @@ async def transition_order(
     *,
     admin_id: int | None = None,
     updates: dict[str, Any] | None = None,
+    expected: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Atomically lock an order, validate its transition, update it, and audit it."""
+    """Atomically lock an order, validate guards and transition it with audit logging."""
     if target_status not in ALLOWED_TRANSITIONS:
         raise InvalidOrderTransition(f"Unknown target status: {target_status}")
 
@@ -56,6 +57,18 @@ async def transition_order(
 
         if target_status not in ALLOWED_TRANSITIONS.get(current, frozenset()):
             raise InvalidOrderTransition(f"Invalid transition: {current} -> {target_status}")
+
+        for field, expected_value in (expected or {}).items():
+            if field not in order:
+                raise ValueError(f"Unsupported order guard field: {field}")
+            actual_value = order[field]
+            if field in {"network", "wallet_address"}:
+                actual = (actual_value or "").strip().lower()
+                expected_normalized = (expected_value or "").strip().lower()
+                if actual != expected_normalized:
+                    raise InvalidOrderTransition(f"Order guard mismatch: {field}")
+            elif actual_value != expected_value:
+                raise InvalidOrderTransition(f"Order guard mismatch: {field}")
 
         return await _apply_status_update(
             conn,
