@@ -56,7 +56,7 @@ async def install_order_constraints(conn):
               AND (o.customer_full_name_snapshot IS NULL
                 OR o.customer_telegram_id_snapshot IS NULL
                 OR o.customer_username_snapshot IS NULL
-                OR o.customer_shamcash_account_snapshot IS NULL)"""
+                OR o.customer_shamcash_account_snapshot IS NULL)""
     )
 
     await conn.execute("""
@@ -242,10 +242,10 @@ async def install_order_constraints(conn):
         BEGIN
             IF NEW.receipt_photo_id IS DISTINCT FROM OLD.receipt_photo_id
                OR NEW.receipt_upload_count IS DISTINCT FROM OLD.receipt_upload_count THEN
-                IF OLD.status <> 'waiting_payment' THEN
+                IF OLD.status <> 'waiting_payment' OR NEW.status NOT IN ('waiting_payment', 'receipt_received') THEN
                     RAISE EXCEPTION 'receipt submission is not allowed for this order state' USING ERRCODE='23514';
                 END IF;
-                IF NEW.receipt_upload_count IS NULL OR NEW.receipt_upload_count <= OLD.receipt_upload_count THEN
+                IF NEW.receipt_upload_count IS NULL OR NEW.receipt_upload_count <= COALESCE(OLD.receipt_upload_count, 0) THEN
                     RAISE EXCEPTION 'receipt upload count must increase for a new submission' USING ERRCODE='23514';
                 END IF;
                 IF NEW.receipt_photo_id IS NULL OR btrim(NEW.receipt_photo_id) = '' THEN
