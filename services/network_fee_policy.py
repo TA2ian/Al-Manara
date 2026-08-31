@@ -1,4 +1,4 @@
-"""Network-specific fee policy and immutable quote calculations."""
+"""Network-specific fee policy and transaction amount tolerance."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +20,8 @@ class NetworkFeePolicy:
     def __post_init__(self) -> None:
         if self.network not in SUPPORTED_NETWORKS:
             raise ValueError("Unsupported network")
+        if not self.service_fee_percent.is_finite() or not self.fixed_network_fee_usdt.is_finite():
+            raise ValueError("Fee values must be finite")
         if self.service_fee_percent < 0 or self.fixed_network_fee_usdt < 0:
             raise ValueError("Fee values cannot be negative")
 
@@ -41,6 +43,18 @@ class NetworkFeePolicy:
             "total_fee_usdt": total_fee,
             "net_amount_usdt": net_amount,
         }
+
+
+def amount_within_tolerance(actual: Decimal, expected: Decimal) -> bool:
+    """Compare on-chain USDT against the expected amount using the business tolerance."""
+    try:
+        actual_value = Decimal(str(actual)).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
+        expected_value = Decimal(str(expected)).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("Invalid transaction amount") from exc
+    if not actual_value.is_finite() or not expected_value.is_finite():
+        return False
+    return abs(actual_value - expected_value) <= AMOUNT_TOLERANCE_USDT
 
 
 def parse_non_negative_decimal(value: object, field_name: str) -> Decimal:
