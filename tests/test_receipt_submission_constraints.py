@@ -15,15 +15,14 @@ def test_receipt_submission_constraint_is_installed():
     assert "trg_protect_receipt_submission" in source
 
 
-def test_receipt_submission_constraint_allows_waiting_payment_and_receipt_received():
+def test_receipt_submission_constraint_requires_waiting_payment_source_state():
     source = _source()
-    assert "IF OLD.status <> 'waiting_payment'" in source
-    assert "NEW.receipt_upload_count <= OLD.receipt_upload_count" in source
+    assert "IF OLD.status <> 'waiting_payment' OR NEW.status NOT IN ('waiting_payment', 'receipt_received')" in source
 
 
 def test_receipt_submission_requires_a_real_new_attempt():
     source = _source()
-    assert "NEW.receipt_upload_count IS NULL OR NEW.receipt_upload_count <= OLD.receipt_upload_count" in source
+    assert "NEW.receipt_upload_count IS NULL OR NEW.receipt_upload_count <= COALESCE(OLD.receipt_upload_count, 0)" in source
     assert "NEW.receipt_photo_id IS NULL OR btrim(NEW.receipt_photo_id) = ''" in source
     assert "NEW.receipt_upload_count > 3" in source
 
