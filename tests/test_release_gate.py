@@ -90,9 +90,18 @@ def test_authoritative_services_import():
         "services.receipt_verifier", "services.receipt_media", "services.exchange_service",
         "services.settings_service", "services.receipt_service", "services.maintenance_service",
         "services.admin_message_service", "services.order_invoice_service",
-        "services.time_service", "database_order_constraints", "services.legal_policy",
+        "services.time_service", "services.receipt_verification_policy",
+        "database_order_constraints", "services.legal_policy",
     ):
         importlib.import_module(module_name)
+
+
+def test_receipt_amount_tolerance_has_one_authoritative_owner():
+    verifier = (ROOT / "services/receipt_verifier.py").read_text(encoding="utf-8")
+    policy = (ROOT / "services/receipt_verification_policy.py").read_text(encoding="utf-8")
+    assert "from services.receipt_verification_policy import amounts_match" in verifier
+    assert "* 0.02" not in verifier
+    assert "AMOUNT_TOLERANCE_PERCENT = Decimal(\"0.02\")" in policy
 
 
 def test_release_gate_does_not_require_retired_monolithic_order_handler():
