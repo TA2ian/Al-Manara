@@ -30,7 +30,7 @@ async def test_forward_transition_respects_graph():
     class FakeConn:
         async def fetchrow(self, query, order_id):
             calls.append((query, order_id))
-            if query.startswith("SELECT * FROM orders"):
+            if "FOR UPDATE" in query:
                 return {"id": order_id, "status": "pending", "user_id": 7}
             return {"id": order_id, "status": "waiting_payment"}
 
@@ -63,7 +63,7 @@ async def test_backward_business_transition_is_rejected():
 async def test_unsupported_order_update_field_is_rejected():
     class FakeConn:
         async def fetchrow(self, query, order_id):
-            if query.startswith("SELECT * FROM orders"):
+            if "FOR UPDATE" in query:
                 return {"id": order_id, "status": "pending", "user_id": 7}
             return {"id": order_id, "status": "waiting_payment"}
 
