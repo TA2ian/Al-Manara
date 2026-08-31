@@ -4,7 +4,7 @@ import time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
 
-from services.operational_policy_service import FIXED_SERVICE_FEE_USDT, OperationalPolicyService
+from services.operational_policy_service import OperationalPolicyService
 
 logger = logging.getLogger(__name__)
 MONEY_QUANT = Decimal("0.01")
@@ -18,14 +18,7 @@ class ExchangeService:
 
     SUPPORTED_PAYMENT_CURRENCIES = {"USD", "NEW.SYP"}
     SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
-    NETWORK_ALIASES = {
-        "SYP": "NEW.SYP",
-        "ERC20": "ETH",
-        "ARBITRUM": "ARB",
-        "SOL": "SOLANA",
-        "MATIC": "POLYGON",
-        "POL": "POLYGON",
-    }
+    NETWORK_ALIASES = {"SYP": "NEW.SYP", "ERC20": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA", "MATIC": "POLYGON", "POL": "POLYGON"}
 
     def __init__(self, db_pool):
         self._db = db_pool
@@ -86,16 +79,8 @@ class ExchangeService:
     def old_syp_equivalent(new_syp_amount) -> Decimal:
         return (ExchangeService.to_decimal(new_syp_amount) * OLD_SYP_PER_NEW_SYP).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
-    @classmethod
-    async def get_fee_percent(cls, network: str | None = None) -> Decimal:
-        return await OperationalPolicyService.get_fee_percent(network)
-
-    @classmethod
-    async def get_fixed_fee_usdt(cls, network: str | None = None) -> Decimal:
-        return await OperationalPolicyService.get_fixed_fee_usdt(network)
-
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
-        """Calculate a quote with a fixed 0.04 USDT service fee deducted from the gross amount."""
+        """Calculate a quote using network-specific service and fixed fees."""
         if currency == "SYP":
             currency = "NEW.SYP"
         currency = currency.upper()
@@ -111,27 +96,35 @@ class ExchangeService:
         if rate is None or rate <= 0:
             raise ValueError("Exchange rate is unavailable")
 
-        base_amount = amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_usdt = await self.get_fixed_fee_usdt(normalized_network)
-        if amount <= fee_usdt:
-            raise ValueError("Service fee leaves no positive USDT amount")
-        fee_amount = fee_usdt.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        net_amount_usdt = (amount - fee_usdt).quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
+        amount_usdt_rounded = amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
+        policy = await OperationalPolicyService.get_network_fee_policy(normalized_network)
+        calculation = policy.calculate(amount_usdt_rounded)
+        service_fee_usdt = calculation["service_fee_usdt"]
+        fixed_network_fee_usdt = calculation["fixed_network_fee_usdt"]
+        total_fee_usdt = calculation["total_fee_usdt"]
+        net_amount_usdt = calculation["net_amount_usdt"]
+        base_amount = amount_usdt_rounded if currency == "USD" else (amount_usdt_rounded * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        total_amount = base_amount
+        fee_amount = total_fee_usdt if currency == "USD" else (total_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         old_syp_amount = self.old_syp_equivalent(base_amount) if currency == "NEW.SYP" else Decimal("0")
         old_syp_fee = self.old_syp_equivalent(fee_amount) if currency == "NEW.SYP" else Decimal("0")
         return {
-            "requested_amount_usdt": amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP),
+            "requested_amount_usdt": calculation["requested_amount_usdt"],
             "amount_usdt": net_amount_usdt,
             "net_amount_usdt": net_amount_usdt,
             "exchange_rate": rate,
             "payment_currency": currency,
             "network": normalized_network,
             "base_amount": base_amount,
-            "fee_percent": Decimal("0"),
+            "fee_percent": policy.service_fee_percent,
+            "service_fee_percent": policy.service_fee_percent,
             "fee_amount": fee_amount,
-            "fee_usdt": fee_usdt,
-            "fixed_fee_usdt": fee_usdt,
-            "total_amount": base_amount,
+            "fee_usdt": total_fee_usdt,
+            "service_fee_usdt": service_fee_usdt,
+            "fixed_network_fee_usdt": fixed_network_fee_usdt,
+            "total_fee_usdt": total_fee_usdt,
+            "fixed_fee_usdt": fixed_network_fee_usdt,
+            "total_amount": total_amount,
             "old_syp_amount": old_syp_amount,
             "old_syp_fee": old_syp_fee,
             "old_syp_total": old_syp_amount,
