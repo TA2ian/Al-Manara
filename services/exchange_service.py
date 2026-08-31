@@ -4,18 +4,17 @@ import time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
 
-from services.operational_policy_service import OperationalPolicyService
+from services.operational_policy_service import FIXED_SERVICE_FEE_USDT, OperationalPolicyService
 
 logger = logging.getLogger(__name__)
 MONEY_QUANT = Decimal("0.01")
 USDT_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.00000001")
 OLD_SYP_PER_NEW_SYP = Decimal("100")
-FIXED_SERVICE_FEE_USDT = Decimal("0.04")
 
 
 class ExchangeService:
-    """Manage payment rates and immutable order quotes."""
+    """Manage exchange rates and exact financial calculations."""
 
     SUPPORTED_PAYMENT_CURRENCIES = {"USD", "NEW.SYP"}
     SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
@@ -89,11 +88,11 @@ class ExchangeService:
 
     @classmethod
     async def get_fee_percent(cls, network: str | None = None) -> Decimal:
-        return Decimal("0")
+        return await OperationalPolicyService.get_fee_percent(network)
 
     @classmethod
-    async def get_fixed_fee_usdt(cls) -> Decimal:
-        return FIXED_SERVICE_FEE_USDT
+    async def get_fixed_fee_usdt(cls, network: str | None = None) -> Decimal:
+        return await OperationalPolicyService.get_fixed_fee_usdt(network)
 
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
         """Calculate a quote with a fixed 0.04 USDT service fee deducted from the gross amount."""
@@ -113,7 +112,7 @@ class ExchangeService:
             raise ValueError("Exchange rate is unavailable")
 
         base_amount = amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (amount * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_usdt = FIXED_SERVICE_FEE_USDT
+        fee_usdt = await self.get_fixed_fee_usdt(normalized_network)
         if amount <= fee_usdt:
             raise ValueError("Service fee leaves no positive USDT amount")
         fee_amount = fee_usdt.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP) if currency == "USD" else (fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
@@ -131,7 +130,7 @@ class ExchangeService:
             "fee_percent": Decimal("0"),
             "fee_amount": fee_amount,
             "fee_usdt": fee_usdt,
-            "fixed_fee_usdt": FIXED_SERVICE_FEE_USDT,
+            "fixed_fee_usdt": fee_usdt,
             "total_amount": base_amount,
             "old_syp_amount": old_syp_amount,
             "old_syp_fee": old_syp_fee,
