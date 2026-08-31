@@ -87,6 +87,43 @@ def _restore_value(value, column_type: str):
     return value
 
 
+async def _get_table_columns(conn, table: str) -> dict[str, str]:
+    rows = await conn.fetch(
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1
+        ORDER BY ordinal_position
+        """,
+        table,
+    )
+    return {row["column_name"]: row["data_type"] for row in rows}
+
+
+def _validate_restore_rows(rows, schema: dict[str, str], table: str) -> None:
+    if not isinstance(rows, list):
+        raise ValueError(f"Backup table {table!r} must contain a list")
+    if not rows:
+        return
+
+    allowed_columns = set(schema)
+    expected_columns = set(rows[0])
+    unknown_columns = expected_columns - allowed_columns
+    if unknown_columns:
+        raise ValueError(
+            f"Backup table {table!r} contains unknown columns: {sorted(unknown_columns)!r}"
+        )
+
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            raise ValueError(f"Backup table {table!r} row {index} must be an object")
+        columns = set(item)
+        if columns != expected_columns:
+            raise ValueError(
+                f"Backup table {table!r} row {index} has inconsistent columns"
+            )
+
+
 @router.callback_query(F.data == "admin_search_user")
 async def search_user_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -199,9 +236,18 @@ async def receive_restore_document(message: Message, state: FSMContext):
             payload = json.load(handle)
         if payload.get("format") != "al-manara-backup" or payload.get("version") != BACKUP_VERSION:
             raise ValueError("unsupported backup format")
-        missing = [table for table in BACKUP_TABLES if table not in payload.get("tables", {})]
+        tables = payload.get("tables")
+        if not isinstance(tables, dict):
+            raise ValueError("backup tables must be an object")
+        missing = [table for table in BACKUP_TABLES if table not in tables]
         if missing:
             raise ValueError("missing tables: " + ", ".join(missing))
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            schemas = {table: await _get_table_columns(conn, table) for table in BACKUP_TABLES}
+            for table in BACKUP_TABLES:
+                _validate_restore_rows(tables[table], schemas[table], table)
     except Exception as exc:
         try:
             os.remove(path)
@@ -262,20 +308,18 @@ async def backup_restore_confirm(callback: CallbackQuery, state: FSMContext):
                 await conn.execute(
                     "TRUNCATE TABLE users, orders, exchange_rates, audit_logs, blocked_users, feedback_messages, saved_addresses, payment_methods, bot_settings RESTART IDENTITY CASCADE"
                 )
+                await conn.execute("DELETE FROM maintenance_notification_jobs")
                 for table in BACKUP_TABLES:
                     rows = payload["tables"][table]
                     if not rows:
                         continue
+                    schema = await _get_table_columns(conn, table)
+                    _validate_restore_rows(rows, schema, table)
                     columns = list(rows[0].keys())
-                    type_rows = await conn.fetch(
-                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
-                        table,
-                    )
-                    type_map = {row["column_name"]: row["data_type"] for row in type_rows}
+                    placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
+                    quoted = ", ".join(f'"{column}"' for column in columns)
                     for item in rows:
-                        values = [_restore_value(item.get(column), type_map[column]) for column in columns]
-                        placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
-                        quoted = ", ".join(f'"{column}"' for column in columns)
+                        values = [_restore_value(item.get(column), schema[column]) for column in columns]
                         await conn.execute(f"INSERT INTO {table} ({quoted}) VALUES ({placeholders})", *values)
 
                 for table in SEQUENCE_TABLES:
