@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from services.order_state_service import InvalidOrderTransition, rollback_order, transition_order
@@ -14,6 +15,18 @@ class FakeConn:
             "created_at": datetime.now(),
         }
         self.executed = []
+        self.transaction_events = []
+
+    @asynccontextmanager
+    async def transaction(self):
+        self.transaction_events.append("begin")
+        try:
+            yield
+        except Exception:
+            self.transaction_events.append("rollback")
+            raise
+        else:
+            self.transaction_events.append("commit")
 
     async def fetchrow(self, query, *args):
         self.executed.append(("fetchrow", query, args))
@@ -43,6 +56,7 @@ class OrderStateServiceTests(unittest.TestCase):
         self.assertEqual(audit_calls[0][2][1], 99)
         self.assertEqual(audit_calls[0][2][4], "pending")
         self.assertEqual(audit_calls[0][2][5], "waiting_payment")
+        self.assertEqual(conn.transaction_events, ["begin", "commit"])
 
     def test_admin_can_reject_pending_order(self):
         conn = FakeConn("pending")
@@ -73,26 +87,31 @@ class OrderStateServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending")
         audit_calls = [call for call in conn.executed if call[0] == "execute" and "INSERT INTO audit_logs" in call[1]]
         self.assertEqual(audit_calls[-1][2][2], "order_status_rollback")
+        self.assertEqual(conn.transaction_events, ["begin", "commit"])
 
     def test_rollback_rejects_wrong_source_state(self):
         conn = FakeConn("receipt_received")
         with self.assertRaises(InvalidOrderTransition):
             self.run_async(rollback_order(conn, 7, "pending", admin_id=99))
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
 
     def test_invalid_transition_is_rejected(self):
         conn = FakeConn("pending")
         with self.assertRaises(InvalidOrderTransition):
             self.run_async(transition_order(conn, 7, "completed", admin_id=99))
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
 
     def test_duplicate_transition_is_rejected(self):
         conn = FakeConn("waiting_payment")
         with self.assertRaises(InvalidOrderTransition):
             self.run_async(transition_order(conn, 7, "waiting_payment", admin_id=99))
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
 
     def test_terminal_order_cannot_be_reopened(self):
         conn = FakeConn("completed")
         with self.assertRaises(InvalidOrderTransition):
             self.run_async(transition_order(conn, 7, "waiting_payment", admin_id=99))
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
 
 
 if __name__ == "__main__":
