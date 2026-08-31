@@ -1,6 +1,7 @@
 """Atomic order state transitions with audit logging."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 
@@ -33,6 +34,16 @@ class InvalidOrderTransition(ValueError):
     """Raised when an order state transition is not allowed."""
 
 
+@asynccontextmanager
+async def _transaction_scope(conn):
+    """Use the caller transaction when one already owns the connection."""
+    if conn.is_in_transaction():
+        yield
+        return
+    async with conn.transaction():
+        yield
+
+
 async def transition_order(
     conn,
     order_id: int,
@@ -46,7 +57,7 @@ async def transition_order(
     if target_status not in ALLOWED_TRANSITIONS:
         raise InvalidOrderTransition(f"Unknown target status: {target_status}")
 
-    async with conn.transaction():
+    async with _transaction_scope(conn):
         order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
         if not order:
             raise InvalidOrderTransition("Order not found")
@@ -97,7 +108,7 @@ async def rollback_order(
     if target_status != "pending":
         raise InvalidOrderTransition("Unsupported rollback target")
 
-    async with conn.transaction():
+    async with _transaction_scope(conn):
         order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
         if not order:
             raise InvalidOrderTransition("Order not found")
