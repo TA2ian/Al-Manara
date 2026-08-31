@@ -35,10 +35,12 @@ class OperationalPolicyService:
         normalized = cls._normalize_network(network)
         if normalized not in SUPPORTED_NETWORKS:
             raise OperationalPolicyError("Unknown fee network")
-        service_raw = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", "0")
-        fixed_raw = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", "0")
+        service_raw = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", str(Config.SERVICE_FEE_PERCENT))
+        fixed_raw = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", str(Config.SERVICE_FEE_FIXED))
         service = parse_non_negative_decimal(service_raw, "service_fee_percent")
         fixed = parse_non_negative_decimal(fixed_raw, "fixed_network_fee_usdt")
+        if service > Decimal("100"):
+            raise OperationalPolicyError("service_fee_percent cannot exceed 100")
         return NetworkFeePolicy(normalized, service, fixed)
 
     @classmethod
@@ -63,7 +65,9 @@ class OperationalPolicyService:
         if normalized not in SUPPORTED_NETWORKS:
             raise OperationalPolicyError("Unknown fee network")
         parsed = parse_non_negative_decimal(value, "service_fee_percent")
-        previous = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", "0")
+        if parsed > Decimal("100"):
+            raise OperationalPolicyError("service_fee_percent cannot exceed 100")
+        previous = await SettingsService.get(f"service_fee_percent_{normalized.lower()}", str(Config.SERVICE_FEE_PERCENT))
         await SettingsService.set(f"service_fee_percent_{normalized.lower()}", str(parsed))
         await cls._audit(admin_id, "setting_update", "service_fee_percent", previous, str(parsed), f"Updated service fee [{normalized}]")
         return parsed
@@ -74,7 +78,7 @@ class OperationalPolicyService:
         if normalized not in SUPPORTED_NETWORKS:
             raise OperationalPolicyError("Unknown fee network")
         parsed = parse_non_negative_decimal(value, "fixed_network_fee_usdt").quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        previous = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", "0")
+        previous = await SettingsService.get(f"fixed_network_fee_usdt_{normalized.lower()}", str(Config.SERVICE_FEE_FIXED))
         await SettingsService.set(f"fixed_network_fee_usdt_{normalized.lower()}", str(parsed))
         await cls._audit(admin_id, "setting_update", "fixed_network_fee_usdt", previous, str(parsed), f"Updated fixed network fee [{normalized}]")
         return parsed
@@ -125,6 +129,8 @@ class OperationalPolicyService:
             parsed = Decimal(str(value).strip().replace(",", ""))
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise OperationalPolicyError("Limit must be a valid number") from exc
+        if not parsed.is_finite():
+            raise OperationalPolicyError("Limit must be finite")
         current = await cls.get_limits()
         candidate = dict(current)
         candidate[key] = parsed
