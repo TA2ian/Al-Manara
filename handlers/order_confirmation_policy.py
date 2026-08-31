@@ -13,7 +13,6 @@ from config import Config
 from database import get_pool
 from keyboards.inline import main_menu_inline, order_admin_keyboard, receipt_upload_keyboard
 from middleware.rate_limit import rate_limiter as global_rate_limiter
-from services.exchange_service import FIXED_SERVICE_FEE_USDT
 from services.formatters import money, usdt
 from services.locale_service import locale_service
 from services.notification_service import NotificationService
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 def _html(value: object) -> str:
-    """Escape a dynamic value before placing it in Telegram HTML."""
     return html.escape(str(value), quote=True)
 
 
@@ -109,13 +107,17 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             calculation = data["calculation"]
             requested_amount = calculation.get("requested_amount_usdt", data["amount_usdt"])
             net_amount = calculation.get("net_amount_usdt", data["amount_usdt"])
+            service_fee_percent = Decimal(str(calculation.get("service_fee_percent", calculation.get("fee_percent", "0"))))
+            service_fee_usdt = Decimal(str(calculation.get("service_fee_usdt", "0")))
+            fixed_network_fee_usdt = Decimal(str(calculation.get("fixed_network_fee_usdt", "0")))
+            total_fee_usdt = Decimal(str(calculation.get("total_fee_usdt", calculation.get("fee_usdt", "0"))))
             order_number = _order_number()
             row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, requested_amount_usdt, amount_usdt, exchange_rate,
                 payment_currency, base_amount, fee_percent, fee_amount, total_amount, wallet_address, wallet_qr_photo_id,
                 payment_method_code, payment_account_snapshot, payment_qr_photo_id, payment_recipient_name_snapshot, status)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending') RETURNING id""",
                 order_number, user["id"], wallet["network"], requested_amount, net_amount, calculation["exchange_rate"], currency,
-                calculation["base_amount"], Decimal("0"), calculation["fee_amount"], calculation["total_amount"],
+                calculation["base_amount"], service_fee_percent, calculation["fee_amount"], calculation["total_amount"],
                 wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
             completed_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'", user["id"])
@@ -156,9 +158,10 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             f"📋 الرقم: #{_html(order_number)}\n👤 العميل: {_html(customer_name)}\n🆔 المعرف: <code>{_html(callback.from_user.id)}</code>\n"
             f"👤 المستخدم: @{_html(username)}\n🏦 ShamCash العميل: <code>{_html(customer_shamcash)}</code>\n"
             f"💰 المبلغ المحدد: {_html(usdt(requested_amount))} USDT\n💸 المبلغ المستحق للعميل: {_html(usdt(net_amount))} USDT\n"
-            f"🌐 الشبكة: {_html(wallet['network'])}\n💱 عملة الدفع: {_html(currency)}\n"
-            f"💵 المبلغ المدفوع: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
-            f"💰 رسوم الخدمة الثابتة: {_html(usdt(FIXED_SERVICE_FEE_USDT))} USDT ({_html(money(calculation['fee_amount']))} {_html(currency)})\n"
+            f"🌐 الشبكة: {_html(wallet['network'])}\n💱 عملة الدفع: {_html(currency)}\n💵 المبلغ المطلوب دفعه: {_html(money(calculation['total_amount']))} {_html(currency)}\n"
+            f"💰 رسوم الخدمة: {_html(usdt(service_fee_usdt))} USDT ({_html(service_fee_percent)}%)\n"
+            f"💰 الرسم الثابت للشبكة: {_html(usdt(fixed_network_fee_usdt))} USDT\n"
+            f"💰 إجمالي الرسوم: {_html(usdt(total_fee_usdt))} USDT\n"
             f"📍 <b>عنوان الاستلام:</b> <code>{_html(wallet['address'])}</code>\n\n"
             + ("⭐ العميل موثوق (3 طلبات مكتملة أو أكثر). تم إرسال بيانات الدفع الرسمية إليه، والطلب الآن بانتظار إثبات الدفع." if auto_approved else "📝 يرجى مراجعة بيانات الطلب قبل الموافقة. ستصل للعميل تعليمات الدفع الرسمية بعد الموافقة."))
         for admin_id in Config.ADMIN_IDS:
@@ -176,9 +179,12 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             currency=currency,
             exchange_rate_value=calculation["exchange_rate"],
             base_amount_value=calculation["base_amount"],
-            fee_percent_value=calculation["fee_percent"],
+            fee_percent_value=service_fee_percent,
             fee_amount_value=calculation["fee_amount"],
             total_value=calculation["total_amount"],
+            service_fee_usdt_value=service_fee_usdt,
+            fixed_network_fee_usdt_value=fixed_network_fee_usdt,
+            total_fee_usdt_value=total_fee_usdt,
             lang=lang,
         )
         await callback.message.edit_text(invoice, parse_mode="HTML")
