@@ -10,12 +10,13 @@ from database import get_pool
 from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
 from services.time_service import utc_now_naive
+from services.transaction_verifier import verify_transaction
 
 logger = logging.getLogger(__name__)
 
 
 async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: int, admin_id: int):
-    """Finalize an approved USDT order from the configured single-admin session."""
+    """Finalize an approved USDT order only after independent on-chain verification."""
     txid = (txid or "").strip()
     if not txid:
         await msg.answer("❌ TXID غير صالح.")
@@ -23,6 +24,42 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
         return False
 
     pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
+            "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id,
+        )
+    if not order:
+        await msg.answer("❌ الطلب غير موجود.")
+        await state.clear()
+        return False
+    if order["status"] != "payment_confirmed":
+        await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
+        await state.clear()
+        return False
+
+    verification = await verify_transaction(
+        order["network"],
+        txid,
+        order["wallet_address"],
+        order["amount_usdt"],
+    )
+    if not verification.verified:
+        logger.warning(
+            "Rejected unverified fulfillment transaction order_id=%s network=%s txid=%s reason=%s",
+            order_id,
+            order["network"],
+            txid,
+            verification.reason,
+        )
+        await msg.answer(
+            "❌ لم يتم اعتماد TXID.\n\n"
+            f"السبب: {verification.reason}\n\n"
+            "لن يتم إكمال الطلب حتى يتم التحقق من المعاملة على الشبكة."
+        )
+        return False
+
     async with pool.acquire() as conn:
         async with conn.transaction():
             order = await conn.fetchrow(
@@ -36,6 +73,18 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 return False
             if order["status"] != "payment_confirmed":
                 await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
+                await state.clear()
+                return False
+            if (order["network"] or "").upper() != verification.network:
+                await msg.answer("⚠️ تغيرت شبكة الطلب أثناء التحقق. لم يتم إكماله.")
+                await state.clear()
+                return False
+            if (order["wallet_address"] or "").strip() != verification.recipient.strip():
+                await msg.answer("⚠️ تغير عنوان محفظة الطلب أثناء التحقق. لم يتم إكماله.")
+                await state.clear()
+                return False
+            if usdt(order["amount_usdt"]) != usdt(verification.expected_amount):
+                await msg.answer("⚠️ تغير مبلغ الطلب أثناء التحقق. لم يتم إكماله.")
                 await state.clear()
                 return False
 
@@ -74,7 +123,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 f"📦 الطلب: #{order['order_number']}\n"
                 f"💰 المبلغ: {amount_text} USDT إلى {network_name}\n"
                 f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
-                "يمكنك التحقق من المعاملة عبر مستكشف الشبكة."
+                "تم التحقق من المعاملة على الشبكة."
             )
         else:
             completion_text = (
@@ -82,14 +131,9 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 f"📦 Order: #{order['order_number']}\n"
                 f"💰 Amount: {amount_text} USDT on {network_name}\n"
                 f"🔗 TXID: <code>{html.escape(txid)}</code>\n\n"
-                "You can verify the transaction on the network explorer."
+                "The transaction was verified on-chain."
             )
-
-        if network_name == "BEP20":
-            explorer_url = f"https://bscscan.com/tx/{txid}"
-        else:
-            explorer_url = f"https://tronscan.org/#/transaction/{txid}"
-        completion_text += f"\n<a href='{explorer_url}'>🔍 {'عرض على المستكشف' if comp_lang == 'ar' else 'View on explorer'}</a>"
+        completion_text += f"\n<a href='{verification.explorer_url}'>🔍 {'عرض على المستكشف' if comp_lang == 'ar' else 'View on explorer'}</a>"
 
         from keyboards.reply import compact_reply_keyboard
         try:
@@ -118,7 +162,8 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
             f"📦 {'الطلب' if comp_lang == 'ar' else 'Order'}: #{order['order_number']}\n"
             f"💰 {amount_text} USDT\n"
             f"🌐 {html.escape(network_name)}\n"
-            f"🔗 TXID: <code>{html.escape(txid)}</code>"
+            f"🔗 TXID: <code>{html.escape(txid)}</code>\n"
+            "🔐 تم التحقق on-chain"
         )
 
         await asyncio.gather(*[
