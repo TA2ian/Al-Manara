@@ -105,6 +105,27 @@ def test_receipt_amount_tolerance_has_one_authoritative_owner():
     assert "AMOUNT_TOLERANCE_PERCENT" not in policy
 
 
+def test_receipt_callback_order_ids_are_parsed_at_the_input_boundary():
+    source = (ROOT / "handlers/receipt_document_policy.py").read_text(encoding="utf-8")
+    assert "def _parse_callback_order_id" in source
+    assert "_parse_callback_order_id(callback.data, \"upload_receipt_\")" in source
+    assert "_parse_callback_order_id(callback.data, \"manual_receipt_review_\")" in source
+    assert "int(callback.data.removeprefix(\"upload_receipt_\"))" not in source
+    assert "int(callback.data.removeprefix(\"manual_receipt_review_\"))" not in source
+
+
+def test_receipt_callback_order_parser_rejects_invalid_and_non_positive_ids():
+    from handlers.receipt_document_policy import _parse_callback_order_id
+
+    assert _parse_callback_order_id("upload_receipt_123", "upload_receipt_") == 123
+    assert _parse_callback_order_id("upload_receipt_", "upload_receipt_") is None
+    assert _parse_callback_order_id("upload_receipt_abc", "upload_receipt_") is None
+    assert _parse_callback_order_id("upload_receipt_0", "upload_receipt_") is None
+    assert _parse_callback_order_id("upload_receipt_-1", "upload_receipt_") is None
+    assert _parse_callback_order_id("manual_receipt_review_42", "manual_receipt_review_") == 42
+    assert _parse_callback_order_id(None, "manual_receipt_review_") is None
+
+
 def test_release_gate_does_not_require_retired_monolithic_order_handler():
     assert not (ROOT / "handlers" / "order.py").exists()
     assert not (ROOT / "handlers" / "my_orders.py").exists()
