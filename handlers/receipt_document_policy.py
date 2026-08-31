@@ -39,9 +39,27 @@ async def _load_owned_order(order_id: int, telegram_id: int):
         )
 
 
+def _parse_callback_order_id(callback_data: str | None, prefix: str) -> int | None:
+    """Parse a positive order ID from an external callback payload."""
+    if not callback_data:
+        return None
+    raw_order_id = callback_data.removeprefix(prefix)
+    if not raw_order_id or raw_order_id == callback_data:
+        return None
+    try:
+        order_id = int(raw_order_id)
+    except (TypeError, ValueError):
+        return None
+    return order_id if order_id > 0 else None
+
+
 @router.callback_query(F.data.startswith("upload_receipt_"))
 async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
-    order_id = int(callback.data.removeprefix("upload_receipt_"))
+    order_id = _parse_callback_order_id(callback.data, "upload_receipt_")
+    if order_id is None:
+        await callback.answer("❌ رقم الطلب غير صالح" if callback.from_user else "❌ Invalid order", show_alert=True)
+        return
+
     order = await _load_owned_order(order_id, callback.from_user.id)
     lang = await _lang(callback.from_user.id)
 
@@ -75,7 +93,11 @@ async def start_receipt_upload(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("manual_receipt_review_"))
 async def request_manual_review(callback: CallbackQuery, state: FSMContext):
-    order_id = int(callback.data.removeprefix("manual_receipt_review_"))
+    order_id = _parse_callback_order_id(callback.data, "manual_receipt_review_")
+    if order_id is None:
+        await callback.answer("❌ رقم الطلب غير صالح" if callback.from_user else "❌ Invalid order", show_alert=True)
+        return
+
     lang = await _lang(callback.from_user.id)
     success, text = await request_manual_receipt_review(
         bot=callback.bot,
