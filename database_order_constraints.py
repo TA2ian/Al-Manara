@@ -240,11 +240,20 @@ async def install_order_constraints(conn):
         CREATE OR REPLACE FUNCTION protect_receipt_submission()
         RETURNS TRIGGER AS $$
         BEGIN
-            IF (NEW.receipt_photo_id IS DISTINCT FROM OLD.receipt_photo_id
-                OR NEW.receipt_upload_count IS DISTINCT FROM OLD.receipt_upload_count)
-               AND OLD.status <> 'waiting_payment'
-               AND NEW.status <> 'receipt_received' THEN
-                RAISE EXCEPTION 'receipt submission is not allowed for this order state' USING ERRCODE='23514';
+            IF NEW.receipt_photo_id IS DISTINCT FROM OLD.receipt_photo_id
+               OR NEW.receipt_upload_count IS DISTINCT FROM OLD.receipt_upload_count THEN
+                IF OLD.status <> 'waiting_payment' THEN
+                    RAISE EXCEPTION 'receipt submission is not allowed for this order state' USING ERRCODE='23514';
+                END IF;
+                IF NEW.receipt_upload_count IS NULL OR NEW.receipt_upload_count <= OLD.receipt_upload_count THEN
+                    RAISE EXCEPTION 'receipt upload count must increase for a new submission' USING ERRCODE='23514';
+                END IF;
+                IF NEW.receipt_photo_id IS NULL OR btrim(NEW.receipt_photo_id) = '' THEN
+                    RAISE EXCEPTION 'receipt submission requires a receipt photo id' USING ERRCODE='23514';
+                END IF;
+                IF NEW.receipt_upload_count > 3 THEN
+                    RAISE EXCEPTION 'receipt upload limit exceeded' USING ERRCODE='23514';
+                END IF;
             END IF;
             RETURN NEW;
         END;
@@ -252,8 +261,8 @@ async def install_order_constraints(conn):
     """)
     await conn.execute("DROP TRIGGER IF EXISTS trg_protect_receipt_submission ON orders")
     await conn.execute("""CREATE TRIGGER trg_protect_receipt_submission
-        BEFORE UPDATE OF receipt_photo_id, receipt_upload_count, status
-        ON orders FOR EACH ROW EXECUTE FUNCTION protect_receipt_submission()""")
+        BEFORE UPDATE OF receipt_photo_id, receipt_upload_count ON orders
+        FOR EACH ROW EXECUTE FUNCTION protect_receipt_submission()""")
 
     await conn.execute("""
         CREATE OR REPLACE FUNCTION prevent_active_order_deletion()
