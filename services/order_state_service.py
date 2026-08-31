@@ -15,6 +15,20 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
+ALLOWED_ORDER_UPDATE_FIELDS = frozenset(
+    {
+        "approved_at",
+        "payment_deadline",
+        "completed_at",
+        "txid",
+        "admin_notes",
+        "receipt_photo_id",
+        "receipt_upload_count",
+        "wallet_qr_photo_id",
+    }
+)
+
+
 class InvalidOrderTransition(ValueError):
     """Raised when an order state transition is not allowed."""
 
@@ -31,25 +45,26 @@ async def transition_order(
     if target_status not in ALLOWED_TRANSITIONS:
         raise InvalidOrderTransition(f"Unknown target status: {target_status}")
 
-    order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
-    if not order:
-        raise InvalidOrderTransition("Order not found")
+    async with conn.transaction():
+        order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
+        if not order:
+            raise InvalidOrderTransition("Order not found")
 
-    current = order["status"]
-    if current == target_status:
-        raise InvalidOrderTransition(f"Order is already {target_status}")
+        current = order["status"]
+        if current == target_status:
+            raise InvalidOrderTransition(f"Order is already {target_status}")
 
-    if target_status not in ALLOWED_TRANSITIONS.get(current, frozenset()):
-        raise InvalidOrderTransition(f"Invalid transition: {current} -> {target_status}")
+        if target_status not in ALLOWED_TRANSITIONS.get(current, frozenset()):
+            raise InvalidOrderTransition(f"Invalid transition: {current} -> {target_status}")
 
-    return await _apply_status_update(
-        conn,
-        order,
-        target_status,
-        admin_id=admin_id,
-        updates=updates,
-        action="order_status_transition",
-    )
+        return await _apply_status_update(
+            conn,
+            order,
+            target_status,
+            admin_id=admin_id,
+            updates=updates,
+            action="order_status_transition",
+        )
 
 
 async def rollback_order(
@@ -66,23 +81,24 @@ async def rollback_order(
     used when an external delivery operation fails after a state was advanced.
     Currently only waiting_payment -> pending is supported.
     """
-    if not (target_status == "pending"):
+    if target_status != "pending":
         raise InvalidOrderTransition("Unsupported rollback target")
 
-    order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
-    if not order:
-        raise InvalidOrderTransition("Order not found")
-    if order["status"] != "waiting_payment":
-        raise InvalidOrderTransition(f"Invalid rollback from {order['status']}")
+    async with conn.transaction():
+        order = await conn.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
+        if not order:
+            raise InvalidOrderTransition("Order not found")
+        if order["status"] != "waiting_payment":
+            raise InvalidOrderTransition(f"Invalid rollback from {order['status']}")
 
-    return await _apply_status_update(
-        conn,
-        order,
-        target_status,
-        admin_id=admin_id,
-        updates=updates,
-        action="order_status_rollback",
-    )
+        return await _apply_status_update(
+            conn,
+            order,
+            target_status,
+            admin_id=admin_id,
+            updates=updates,
+            action="order_status_rollback",
+        )
 
 
 async def _apply_status_update(
@@ -98,16 +114,7 @@ async def _apply_status_update(
     values: list[Any] = [target_status]
     param = 2
     for key, value in (updates or {}).items():
-        if key not in {
-            "approved_at",
-            "payment_deadline",
-            "completed_at",
-            "txid",
-            "admin_notes",
-            "receipt_photo_id",
-            "receipt_upload_count",
-            "wallet_qr_photo_id",
-        }:
+        if key not in ALLOWED_ORDER_UPDATE_FIELDS:
             raise ValueError(f"Unsupported order update field: {key}")
         fields.append(f"{key} = ${param}")
         values.append(value)
