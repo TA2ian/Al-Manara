@@ -1,6 +1,4 @@
 """Authoritative operational admin settings."""
-from decimal import Decimal
-
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,7 +6,8 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from keyboards.admin import enhanced_admin_menu_keyboard
 from keyboards.inline import settings_keyboard
-from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService, SUPPORTED_FEE_NETWORKS
+from services.exchange_service import FIXED_SERVICE_FEE_USDT
+from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService
 from states import AdminStates
 
 router = Router()
@@ -26,7 +25,7 @@ async def _show_settings(callback: CallbackQuery, state: FSMContext | None = Non
     if state is not None:
         await state.clear()
     await callback.message.edit_text(
-        "⚙️ <b>الإعدادات التشغيلية</b>\n\nهذه الإعدادات تؤثر على الطلبات الجديدة فقط. الرسوم والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
+        "⚙️ <b>الإعدادات التشغيلية</b>\n\nهذه الإعدادات تؤثر على الطلبات الجديدة فقط. رسوم الخدمة ثابتة بقيمة 0.04 USDT، والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
         reply_markup=settings_keyboard(), parse_mode="HTML",
     )
 
@@ -54,51 +53,13 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
-    fees = await OperationalPolicyService.get_all_fee_percents()
-    labels = {"BEP20": "🟡 BEP20", "TRC20": "🔷 TRC20", "ARB": "🔵 ARB", "SOLANA": "🟣 Solana", "ETH": "⚪ Ethereum", "POLYGON": "🟪 Polygon"}
-    buttons = [[InlineKeyboardButton(text=f"{labels[n]} · {fees[n]:g}%", callback_data=f"setting_fee_network_{n}")] for n in SUPPORTED_FEE_NETWORKS]
-    buttons.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")])
     await state.clear()
-    await callback.message.edit_text("💰 <b>رسوم الخدمة حسب الشبكة</b>\n\nاختر الشبكة لتعديل رسومها. الرسوم مستقلة لكل شبكة وتُثبت داخل الطلب عند إنشائه.", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("setting_fee_network_"))
-async def setting_fee_network(callback: CallbackQuery, state: FSMContext) -> None:
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Access denied", show_alert=True)
-        return
-    network = callback.data.removeprefix("setting_fee_network_").upper()
-    if network not in SUPPORTED_FEE_NETWORKS:
-        await callback.answer("❌ شبكة غير صالحة", show_alert=True)
-        return
-    fee = await OperationalPolicyService.get_fee_percent(network)
-    await state.update_data(fee_network=network)
-    await state.set_state(AdminStates.waiting_fee_percent)
     await callback.message.edit_text(
-        f"💰 <b>رسوم شبكة {network}</b>\n\nالنسبة الحالية: <b>{fee:g}%</b>\n\nأرسل النسبة الجديدة من 0 إلى 100.\nسيتم تطبيقها على الطلبات الجديدة لهذه الشبكة فقط.",
+        f"💰 <b>رسوم الخدمة</b>\n\nالرسوم ثابتة لجميع الشبكات والعملات بقيمة <b>{FIXED_SERVICE_FEE_USDT} USDT</b>.\n\nتُخصم الرسوم من المبلغ الذي حدده المستخدم ولا تُضاف فوقه، ولا توجد نسبة مستقلة قابلة للتعديل لكل شبكة.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")]]),
         parse_mode="HTML",
     )
     await callback.answer()
-
-
-@router.message(AdminStates.waiting_fee_percent)
-async def admin_set_fee_percent(message: Message, state: FSMContext) -> None:
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Access denied")
-        return
-    data = await state.get_data()
-    network = data.get("fee_network")
-    try:
-        value = Decimal((message.text or "").strip().replace(",", ""))
-        saved = await OperationalPolicyService.set_fee_percent(value, message.from_user.id, network=network)
-    except (OperationalPolicyError, ValueError):
-        await message.answer("❌ قيمة غير صالحة. أرسل نسبة بين 0 و100.")
-        return
-    await state.clear()
-    await message.answer(f"✅ تم تحديث رسوم شبكة <b>{network}</b> إلى <b>{saved:g}%</b>.", parse_mode="HTML")
-    await _back_to_admin(message)
 
 
 @router.callback_query(F.data == "setting_timeout")
