@@ -29,7 +29,7 @@ EN_STATUS = {
     "receipt_received": "📎 Receipt received — awaiting admin review",
     "payment_confirmed": "🚀 Payment confirmed — awaiting USDT transfer by admin",
     "completed": "✅ Completed and USDT sent",
-    "rejected": "❌ Order rejected",
+    "rejected": "❌ Rejected",
     "expired": "⌛ Expired",
 }
 
@@ -74,12 +74,14 @@ async def _get_user(message_or_callback):
 async def _repair_waiting_payment_visibility(message: Message, order, lang: str):
     if order["status"] != "waiting_payment" or order.get("customer_status_message_id"):
         return False
+
+    bot = Bot(token=Config.BOT_TOKEN)
     try:
-        bot = Bot(token=Config.BOT_TOKEN)
         notification = NotificationService(bot, Config.ADMIN_IDS)
         delivered = await notification.notify_order_approved(message.from_user.id, dict(order), lang=lang)
         if not delivered:
             return False
+
         prompt = (
             f"📎 <b>#{order['order_number']}</b> — أرسل إيصال الدفع عند إتمام التحويل:"
             if lang == "ar" else
@@ -92,6 +94,8 @@ async def _repair_waiting_payment_visibility(message: Message, order, lang: str)
         return True
     except Exception:
         return False
+    finally:
+        await bot.session.close()
 
 
 @router.message(F.text.in_(["📋 طلباتي", "📋 Orders"]))
