@@ -21,6 +21,7 @@ USDT_CONTRACTS = {
 }
 TRON_USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 SOLANA_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+SOLANA_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 TRANSFER_TOPIC = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
 
 RPC_DEFAULTS = {
@@ -199,6 +200,58 @@ async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> Transact
         return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=True, reason="No confirmed USDT Transfer event to the order wallet", explorer_url=explorer)
 
 
+def _solana_account_key(account_keys: list[Any], account_index: int | None) -> str:
+    if account_index is None or account_index < 0 or account_index >= len(account_keys):
+        return ""
+    account = account_keys[account_index]
+    if isinstance(account, str):
+        return account
+    if isinstance(account, dict):
+        return str(account.get("pubkey") or "")
+    return ""
+
+
+def _solana_instruction_transfers(result: dict[str, Any]) -> list[dict[str, str]]:
+    transaction = result.get("transaction") or {}
+    message = transaction.get("message") or {}
+    account_keys = message.get("accountKeys") or []
+    instructions: list[Any] = list(message.get("instructions") or [])
+    meta = result.get("meta") or {}
+    for group in meta.get("innerInstructions") or []:
+        instructions.extend(group.get("instructions") or [])
+
+    transfers: list[dict[str, str]] = []
+    for instruction in instructions:
+        if not isinstance(instruction, dict):
+            continue
+        if instruction.get("programId") != SOLANA_TOKEN_PROGRAM_ID:
+            continue
+        parsed = instruction.get("parsed")
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("type") not in {"transfer", "transferChecked"}:
+            continue
+        info = parsed.get("info")
+        if not isinstance(info, dict):
+            continue
+        mint = str(info.get("mint") or "")
+        destination = str(info.get("destination") or "")
+        raw_amount = info.get("amount")
+        if raw_amount is None:
+            token_amount = info.get("tokenAmount")
+            if isinstance(token_amount, dict):
+                raw_amount = token_amount.get("amount")
+        if not mint or not destination or raw_amount is None:
+            continue
+        try:
+            amount = str(int(str(raw_amount)))
+        except (TypeError, ValueError):
+            continue
+        transfers.append({"mint": mint, "destination": destination, "amount": amount})
+
+    return transfers
+
+
 async def _verify_solana(txid: str, recipient: str, expected: Decimal) -> TransactionVerification:
     endpoint = os.getenv("ALMANARA_RPC_SOLANA", "https://api.mainnet-beta.solana.com")
     explorer = EXPLORERS["SOLANA"].format(txid)
@@ -214,16 +267,32 @@ async def _verify_solana(txid: str, recipient: str, expected: Decimal) -> Transa
         post = result["meta"].get("postTokenBalances") or []
         pre = {item.get("accountIndex"): item for item in (result["meta"].get("preTokenBalances") or [])}
         expected_raw = int(expected * Decimal(10**6))
+        transfers = _solana_instruction_transfers(result)
+        account_keys = ((result.get("transaction") or {}).get("message") or {}).get("accountKeys") or []
+
         for balance in post:
             if balance.get("mint") != SOLANA_USDT_MINT or balance.get("owner") != recipient:
                 continue
-            before = pre.get(balance.get("accountIndex"), {}).get("uiTokenAmount", {}).get("amount", "0")
+            account_index = balance.get("accountIndex")
+            destination = _solana_account_key(account_keys, account_index)
+            before = pre.get(account_index, {}).get("uiTokenAmount", {}).get("amount", "0")
             after = balance.get("uiTokenAmount", {}).get("amount", "0")
-            delta = int(after) - int(before)
-            if delta == expected_raw:
-                return TransactionVerification(True, "SOLANA", txid, recipient, expected, actual_amount=expected, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified finalized USDT token balance increase", explorer_url=explorer)
+            try:
+                delta = int(after) - int(before)
+            except (TypeError, ValueError):
+                continue
+            if delta != expected_raw:
+                continue
+            if not any(
+                transfer["mint"] == SOLANA_USDT_MINT
+                and transfer["destination"] == destination
+                and transfer["amount"] == str(expected_raw)
+                for transfer in transfers
+            ):
+                continue
+            return TransactionVerification(True, "SOLANA", txid, recipient, expected, actual_amount=expected, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified finalized USDT transfer instruction", explorer_url=explorer)
 
-        return TransactionVerification(False, "SOLANA", txid, recipient, expected, confirmed=True, successful=True, reason="No exact finalized USDT increase for the order wallet", explorer_url=explorer)
+        return TransactionVerification(False, "SOLANA", txid, recipient, expected, confirmed=True, successful=True, reason="No exact finalized USDT transfer instruction to the order wallet", explorer_url=explorer)
 
 
 async def verify_transaction(network: str, txid: str, recipient: str, expected_amount: Decimal | float | int) -> TransactionVerification:
