@@ -84,11 +84,11 @@ The current financial calculation contract is implemented by `services/exchange_
 
 `NEW.SYP` currently shares the general fiat monetary precision (`0.01`). If currency-specific precision becomes a business requirement, it should be introduced through an explicit currency policy rather than by adding scattered rounding rules to handlers.
 
-### Tolerance policy status
+### Tolerance policy
 
-Receipt analysis currently uses a `2%` amount comparison tolerance inside `services/receipt_verifier.py`. This is an implementation rule, not yet a separately configurable `Tolerance Policy` or `Tolerance Timing Policy`.
+Receipt amount comparison uses one authoritative fixed absolute tolerance of `0.04` in the same payment currency. It is not percentage-based and therefore does not increase as the order value increases. The policy is implemented by `services/receipt_verification_policy.py` and consumed by receipt verification; it must not be duplicated in handlers or financial calculation code.
 
-Until those policies are explicitly defined and centralized, the receipt verifier must not be treated as the authority for unrelated order or financial rules. Any future change to tolerance should preserve the separation between calculation, receipt verification and the administrator's final decision.
+Until a future business decision explicitly changes this rule, the accepted receipt amount range is `expected_amount ± 0.04`, subject to the normal monetary precision of `0.01`. Receipt analysis remains an assistance mechanism and does not itself complete the payment; the administrator's final decision remains authoritative.
 
 ### Administrator model
 
