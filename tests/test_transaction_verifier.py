@@ -7,6 +7,7 @@ from services.transaction_verifier import (
     EVM_NETWORKS,
     EXPLORERS,
     SOLANA_USDT_MINT,
+    SOLANA_TOKEN_PROGRAM_ID,
     SUPPORTED_NETWORKS,
     TRANSFER_TOPIC,
     USDT_CONTRACTS,
@@ -46,6 +47,7 @@ def test_usdt_contract_and_explorer_registry_covers_every_supported_network():
     assert SUPPORTED_NETWORKS == set(USDT_CONTRACTS) | {"TRC20", "SOLANA"}
     assert set(EXPLORERS) == SUPPORTED_NETWORKS
     assert SOLANA_USDT_MINT.startswith("Es9v")
+    assert SOLANA_TOKEN_PROGRAM_ID == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
     assert TRANSFER_TOPIC == "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
     assert EVM_NETWORKS == set(USDT_CONTRACTS)
 
@@ -181,37 +183,75 @@ async def test_tron_verifier_accepts_confirmed_exact_transfer(monkeypatch):
     assert result.amount_verified is True
 
 
+def _solana_result(*, recipient: str, expected_raw: int, include_transfer: bool = True) -> dict:
+    token_account = "TokenAccount111111111111111111111111111111111"
+    account_keys = [token_account]
+    instructions = []
+    if include_transfer:
+        instructions.append({
+            "programId": SOLANA_TOKEN_PROGRAM_ID,
+            "parsed": {
+                "type": "transferChecked",
+                "info": {
+                    "mint": SOLANA_USDT_MINT,
+                    "destination": token_account,
+                    "amount": str(expected_raw),
+                    "tokenAmount": {"amount": str(expected_raw), "decimals": 6},
+                },
+            },
+        })
+    return {
+        "transaction": {"message": {"accountKeys": account_keys, "instructions": instructions}},
+        "meta": {
+            "err": None,
+            "preTokenBalances": [{
+                "accountIndex": 0,
+                "mint": SOLANA_USDT_MINT,
+                "owner": recipient,
+                "uiTokenAmount": {"amount": "1000000"},
+            }],
+            "postTokenBalances": [{
+                "accountIndex": 0,
+                "mint": SOLANA_USDT_MINT,
+                "owner": recipient,
+                "uiTokenAmount": {"amount": str(1000000 + expected_raw)},
+            }],
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_solana_verifier_accepts_finalized_exact_balance_increase(monkeypatch):
+async def test_solana_verifier_requires_explicit_finalized_usdt_transfer(monkeypatch):
     txid = "5Pj5fCupXLUePYn18JkY8SrRaWFiUctuDTRwvUy2ML9yvkENLb1QMYbcBGcBXRrSVDjp7RjUwk9a3rLC6gpvtYpZ"
     recipient = "9xQeWvG816bUx9EPfQ8g4fY4o8qQvM4p7qH5oY4m5sQ"
+    expected_raw = 25 * 10**6
 
     async def fake_post(session, url, payload):
-        return {
-            "result": {
-                "meta": {
-                    "err": None,
-                    "preTokenBalances": [{
-                        "accountIndex": 7,
-                        "mint": verifier.SOLANA_USDT_MINT,
-                        "owner": recipient,
-                        "uiTokenAmount": {"amount": "1000000"},
-                    }],
-                    "postTokenBalances": [{
-                        "accountIndex": 7,
-                        "mint": verifier.SOLANA_USDT_MINT,
-                        "owner": recipient,
-                        "uiTokenAmount": {"amount": "26000000"},
-                    }],
-                }
-            }
-        }
+        return {"result": _solana_result(recipient=recipient, expected_raw=expected_raw)}
 
     monkeypatch.setattr(verifier, "_post_json", fake_post)
     result = await verifier._verify_solana(txid, recipient, Decimal("25"))
     assert result.verified is True
     assert result.confirmed is True
+    assert result.asset_verified is True
+    assert result.recipient_verified is True
     assert result.amount_verified is True
+    assert result.reason == "Verified finalized USDT transfer instruction"
+
+
+@pytest.mark.asyncio
+async def test_solana_verifier_rejects_balance_delta_without_matching_transfer_instruction(monkeypatch):
+    txid = "5Pj5fCupXLUePYn18JkY8SrRaWFiUctuDTRwvUy2ML9yvkENLb1QMYbcBGcBXRrSVDjp7RjUwk9a3rLC6gpvtYpZ"
+    recipient = "9xQeWvG816bUx9EPfQ8g4fY4o8qQvM4p7qH5oY4m5sQ"
+    expected_raw = 25 * 10**6
+
+    async def fake_post(session, url, payload):
+        return {"result": _solana_result(recipient=recipient, expected_raw=expected_raw, include_transfer=False)}
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    result = await verifier._verify_solana(txid, recipient, Decimal("25"))
+    assert result.verified is False
+    assert result.reason == "No exact finalized USDT transfer instruction to the order wallet"
 
 
 @pytest.mark.asyncio
