@@ -101,7 +101,8 @@ def test_receipt_amount_tolerance_has_one_authoritative_owner():
     policy = (ROOT / "services/receipt_verification_policy.py").read_text(encoding="utf-8")
     assert "from services.receipt_verification_policy import amounts_match" in verifier
     assert "* 0.02" not in verifier
-    assert "AMOUNT_TOLERANCE_PERCENT = Decimal(\"0.02\")" in policy
+    assert "AMOUNT_TOLERANCE = Decimal(\"0.04\")" in policy
+    assert "AMOUNT_TOLERANCE_PERCENT" not in policy
 
 
 def test_release_gate_does_not_require_retired_monolithic_order_handler():
