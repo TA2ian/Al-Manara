@@ -2,7 +2,7 @@
 
 import inspect
 
-from handlers import admin_approval_policy, order_confirmation_policy
+from handlers import admin_approval_policy, admin_payment_confirmation_policy, order_confirmation_policy
 from services import notification_service, order_completion_service
 
 
@@ -31,6 +31,11 @@ def test_completion_closes_ephemeral_bot_session():
     source = inspect.getsource(order_completion_service.complete_order)
     assert "bot.session.close()" in source
     assert "finally:" in source
+
+
+def test_payment_confirmation_closes_ephemeral_bot_session():
+    source = inspect.getsource(admin_payment_confirmation_policy.confirm_payment)
+    assert "bot.session.close()" in source
 
 
 def test_customer_deadline_message_uses_operational_duration_policy():
