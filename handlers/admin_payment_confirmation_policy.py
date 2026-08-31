@@ -113,6 +113,11 @@ async def confirm_payment(callback: CallbackQuery):
             ))
     await asyncio.gather(*tasks, return_exceptions=True)
 
+    try:
+        await bot.session.close()
+    except Exception:
+        logger.exception("Failed to close payment confirmation bot session")
+
     # Keep the order's QR snapshot immutable. The verified wallet registry remains
     # the reusable source for future orders, while this order retains its own snapshot.
     await callback.answer("✅ تم تأكيد الدفع!")
