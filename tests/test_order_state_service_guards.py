@@ -11,14 +11,21 @@ from services.order_state_service import (
 
 
 class TransactionalFakeConn:
-    def __init__(self, status="pending"):
+    def __init__(self, status="pending", in_transaction=False):
         self.status = status
         self.calls = []
         self.update_count = 0
+        self._in_transaction = in_transaction
+
+    def is_in_transaction(self):
+        return self._in_transaction
 
     @asynccontextmanager
     async def transaction(self):
         self.calls.append("transaction_enter")
+        if self._in_transaction:
+            raise AssertionError("nested transaction opened by test double")
+        self._in_transaction = True
         try:
             yield
         except Exception:
@@ -26,6 +33,8 @@ class TransactionalFakeConn:
             raise
         else:
             self.calls.append("transaction_commit")
+        finally:
+            self._in_transaction = False
 
     async def fetchrow(self, query, order_id):
         self.calls.append((query, order_id))
@@ -76,6 +85,18 @@ async def test_forward_transition_respects_graph_and_commits_transaction():
 
 
 @pytest.mark.asyncio
+async def test_transition_reuses_caller_owned_transaction_without_nested_transaction():
+    conn = TransactionalFakeConn(status="pending", in_transaction=True)
+
+    result = await transition_order(conn, 1, "waiting_payment")
+
+    assert result["status"] == "waiting_payment"
+    assert conn.update_count == 1
+    assert "transaction_enter" not in conn.calls
+    assert conn.is_in_transaction() is True
+
+
+@pytest.mark.asyncio
 async def test_backward_business_transition_is_rejected():
     conn = TransactionalFakeConn(status="payment_confirmed")
 
@@ -116,6 +137,18 @@ async def test_rollback_allows_only_waiting_payment_to_pending():
     assert result["status"] == "pending"
     assert conn.update_count == 1
     assert "transaction_commit" in conn.calls
+
+
+@pytest.mark.asyncio
+async def test_rollback_reuses_caller_owned_transaction_without_nested_transaction():
+    conn = TransactionalFakeConn(status="waiting_payment", in_transaction=True)
+
+    result = await rollback_order(conn, 1, "pending")
+
+    assert result["status"] == "pending"
+    assert conn.update_count == 1
+    assert "transaction_enter" not in conn.calls
+    assert conn.is_in_transaction() is True
 
 
 @pytest.mark.asyncio
