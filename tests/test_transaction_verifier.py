@@ -50,9 +50,28 @@ def test_usdt_contract_and_explorer_registry_covers_every_supported_network():
     assert EVM_NETWORKS == set(USDT_CONTRACTS)
 
 
+def test_evm_confirmation_policy_has_safe_default(monkeypatch):
+    monkeypatch.delenv("ALMANARA_EVM_MIN_CONFIRMATIONS", raising=False)
+    monkeypatch.delenv("ALMANARA_EVM_CONFIRMATIONS_ETH", raising=False)
+    assert verifier._evm_required_confirmations("ETH") == 3
+
+
+def test_evm_confirmation_policy_supports_network_override(monkeypatch):
+    monkeypatch.setenv("ALMANARA_EVM_MIN_CONFIRMATIONS", "5")
+    monkeypatch.setenv("ALMANARA_EVM_CONFIRMATIONS_ETH", "7")
+    assert verifier._evm_required_confirmations("ETH") == 7
+    assert verifier._evm_required_confirmations("ARB") == 5
+
+
+def test_evm_confirmation_policy_rejects_invalid_values(monkeypatch):
+    monkeypatch.setenv("ALMANARA_EVM_MIN_CONFIRMATIONS", "0")
+    with pytest.raises(ValueError, match="between 1 and 10000"):
+        verifier._evm_required_confirmations("ETH")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("network", sorted(EVM_NETWORKS))
-async def test_evm_verifier_accepts_exact_usdt_transfer(monkeypatch, network):
+async def test_evm_verifier_accepts_exact_usdt_transfer_after_required_confirmations(monkeypatch, network):
     recipient = "0x" + "12" * 20
     txid = "0x" + "ab" * 32
     padded_recipient = "0x" + "0" * 24 + recipient[2:]
@@ -71,7 +90,7 @@ async def test_evm_verifier_accepts_exact_usdt_transfer(monkeypatch, network):
     async def fake_post(session, url, payload):
         if payload["method"] == "eth_getTransactionReceipt":
             return {"result": receipt}
-        return {"result": "0x11"}
+        return {"result": "0x12"}
 
     monkeypatch.setattr(verifier, "_post_json", fake_post)
     result = await verifier._verify_evm(network, txid, recipient, Decimal("25"))
@@ -80,6 +99,34 @@ async def test_evm_verifier_accepts_exact_usdt_transfer(monkeypatch, network):
     assert result.asset_verified is True
     assert result.recipient_verified is True
     assert result.amount_verified is True
+
+
+@pytest.mark.asyncio
+async def test_evm_verifier_rejects_exact_transfer_until_confirmation_threshold(monkeypatch):
+    network = "ETH"
+    recipient = "0x" + "12" * 20
+    txid = "0x" + "ab" * 32
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x10",
+        "logs": [{
+            "address": USDT_CONTRACTS[network],
+            "topics": ["0x" + TRANSFER_TOPIC, "0x" + "0" * 64, "0x" + "0" * 24 + recipient[2:]],
+            "data": hex(25 * 10**6),
+        }],
+    }
+
+    async def fake_post(session, url, payload):
+        return {"result": receipt if payload["method"] == "eth_getTransactionReceipt" else "0x11"}
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    result = await verifier._verify_evm(network, txid, recipient, Decimal("25"))
+    assert result.verified is False
+    assert result.confirmed is False
+    assert result.asset_verified is True
+    assert result.recipient_verified is True
+    assert result.amount_verified is True
+    assert result.reason == "USDT transfer is awaiting confirmations (2/3)"
 
 
 @pytest.mark.asyncio
@@ -100,7 +147,7 @@ async def test_evm_verifier_rejects_wrong_amount(monkeypatch):
     }
 
     async def fake_post(session, url, payload):
-        return {"result": receipt if payload["method"] == "eth_getTransactionReceipt" else "0x11"}
+        return {"result": receipt if payload["method"] == "eth_getTransactionReceipt" else "0x12"}
 
     monkeypatch.setattr(verifier, "_post_json", fake_post)
     result = await verifier._verify_evm(network, txid, recipient, Decimal("25"))
