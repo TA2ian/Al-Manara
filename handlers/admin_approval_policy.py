@@ -45,7 +45,7 @@ async def _sync_customer_status_message(bot: Bot, order: dict, approved: bool) -
     ) if approved else (
         f"⏳ <b>الطلب #{html.escape(order['order_number'])} بانتظار موافقة الإدارة.</b>\n\nلا ترسل أي مبلغ قبل وصول تعليمات الدفع الرسمية."
         if lang == "ar" else
-        f"⏳ <b>Order #{html.escape(order['order_number'])} is awaiting admin approval.</b>\n\nDo not send any funds before the official payment instructions arrive."
+        f"⏳ <b>Order #{html.escape(order['order_number'])} is awaiting admin approval.</b>\n\nDo not send any funds before the official approval message arrives."
     )
     try:
         await bot.edit_message_text(chat_id=user_id, message_id=int(message_id), text=text, parse_mode="HTML")
@@ -62,7 +62,17 @@ async def approve_order_authoritative(callback: CallbackQuery, state: FSMContext
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    order_id = int(callback.data.replace("admin_approve_", ""))
+    raw_order_id = callback.data.removeprefix("admin_approve_")
+    try:
+        order_id = int(raw_order_id)
+    except (TypeError, ValueError):
+        await callback.answer("❌ Invalid order", show_alert=True)
+        logger.warning("Rejected malformed admin approval callback: %r", callback.data)
+        return
+    if order_id <= 0:
+        await callback.answer("❌ Invalid order", show_alert=True)
+        return
+
     pool = await get_pool()
     timeout_minutes = await OperationalPolicyService.get_payment_timeout_minutes()
 
