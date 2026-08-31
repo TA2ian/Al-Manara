@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
-USDT_QUANT = Decimal("0.001")
+USDT_QUANT = Decimal("0.01")
 MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.01")
 
@@ -24,7 +24,7 @@ def _format(value, quant: Decimal) -> str:
 
 
 def usdt(value) -> str:
-    """USDT amounts: exactly three decimals."""
+    """USDT business amounts: exactly two decimals."""
     return _format(value, USDT_QUANT)
 
 
