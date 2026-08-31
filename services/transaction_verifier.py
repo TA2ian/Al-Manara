@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -11,7 +9,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import aiohttp
-
 
 SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
 EVM_NETWORKS = {"BEP20", "ARB", "ETH", "POLYGON"}
@@ -24,7 +21,7 @@ USDT_CONTRACTS = {
 }
 TRON_USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 SOLANA_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-TRANSFER_TOPIC = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a3df6f0f0f"
+TRANSFER_TOPIC = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
 
 RPC_DEFAULTS = {
     "ETH": "https://ethereum-rpc.publicnode.com",
@@ -99,6 +96,16 @@ async def _post_json(session: aiohttp.ClientSession, url: str, payload: dict[str
         return data
 
 
+async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
+    async with session.get(url) as response:
+        if response.status != 200:
+            raise RuntimeError(f"RPC returned HTTP {response.status}")
+        data = await response.json(content_type=None)
+        if not isinstance(data, dict):
+            raise RuntimeError("RPC returned invalid JSON")
+        return data
+
+
 async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal) -> TransactionVerification:
     endpoint = os.getenv(f"ALMANARA_RPC_{network}", RPC_DEFAULTS[network])
     recipient_normalized = recipient.lower()
@@ -121,7 +128,6 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
         latest = int(latest_hex, 16) if latest_hex else block_number
         confirmed = latest >= block_number
 
-        transfers = []
         for log in receipt.get("logs", []):
             if (log.get("address") or "").lower() != contract:
                 continue
@@ -133,19 +139,16 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
                 amount = Decimal(int((log.get("data") or "0x0"), 16)) / Decimal(10**6)
             except (ValueError, InvalidOperation):
                 continue
-            transfers.append((to_address, amount))
+            if to_address == recipient_normalized:
+                if amount == expected:
+                    return TransactionVerification(True, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified USDT transfer", explorer_url=explorer)
+                return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
 
-        matching = next(((to, amount) for to, amount in transfers if to == recipient_normalized and amount == expected), None)
-        if matching is None:
-            recipient_match = any(to == recipient_normalized for to, _ in transfers)
-            actual = next((amount for to, amount in transfers if to == recipient_normalized), None)
-            return TransactionVerification(False, network, txid, recipient, expected, actual_amount=actual, confirmed=confirmed, successful=True, asset_verified=bool(transfers), recipient_verified=recipient_match, reason="No exact USDT transfer to the order wallet", explorer_url=explorer)
-
-        return TransactionVerification(True, network, txid, recipient, expected, actual_amount=matching[1], confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified USDT transfer", explorer_url=explorer)
+        return TransactionVerification(False, network, txid, recipient, expected, confirmed=confirmed, successful=True, reason="No USDT transfer to the order wallet", explorer_url=explorer)
 
 
 async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> TransactionVerification:
-    base = os.getenv("ALMANARA_TRON_RPC", "https://api.trongrid.io")
+    base = os.getenv("ALMANARA_TRON_RPC", "https://api.trongrid.io").rstrip("/")
     explorer = EXPLORERS["TRC20"].format(txid)
     timeout = aiohttp.ClientTimeout(total=12)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -155,11 +158,8 @@ async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> Transact
         if info.get("result") != "SUCCESS":
             return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=False, reason="TRON transaction failed", explorer_url=explorer)
 
-        events = await _post_json(session, f"{base}/v1/transactions/{txid}/events", {})
-        data = events.get("data") or []
-        for event in data:
-            if event.get("event_name") != "Transfer":
-                continue
+        events = await _get_json(session, f"{base}/v1/transactions/{txid}/events?only_confirmed=true&event_name=Transfer&limit=200")
+        for event in events.get("data") or []:
             if (event.get("contract_address") or "") != TRON_USDT_CONTRACT:
                 continue
             result = event.get("result") or {}
@@ -171,10 +171,12 @@ async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> Transact
                 amount = Decimal(str(raw_amount)) / Decimal(10**6)
             except InvalidOperation:
                 continue
-            if to_address == recipient and amount == expected:
-                return TransactionVerification(True, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified solidified USDT transfer", explorer_url=explorer)
+            if to_address == recipient:
+                if amount == expected:
+                    return TransactionVerification(True, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified solidified USDT transfer", explorer_url=explorer)
+                return TransactionVerification(False, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
 
-        return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=True, reason="No exact USDT Transfer event to the order wallet", explorer_url=explorer)
+        return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=True, reason="No confirmed USDT Transfer event to the order wallet", explorer_url=explorer)
 
 
 async def _verify_solana(txid: str, recipient: str, expected: Decimal) -> TransactionVerification:
