@@ -5,9 +5,10 @@ from services.formatters import money, percent, rate, usdt
 
 
 class FormatterTests(unittest.TestCase):
-    def test_usdt_is_three_decimals(self):
-        self.assertEqual(usdt(50), "50.000")
-        self.assertEqual(usdt(Decimal("50.1239")), "50.124")
+    def test_usdt_is_two_business_decimals(self):
+        self.assertEqual(usdt(50), "50.00")
+        self.assertEqual(usdt(Decimal("50.1239")), "50.12")
+        self.assertEqual(usdt(Decimal("50.125")), "50.13")
 
     def test_money_is_two_decimals(self):
         self.assertEqual(money("55"), "55.00")
