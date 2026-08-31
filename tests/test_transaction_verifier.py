@@ -236,7 +236,7 @@ async def test_solana_verifier_requires_explicit_finalized_usdt_transfer(monkeyp
     assert result.asset_verified is True
     assert result.recipient_verified is True
     assert result.amount_verified is True
-    assert result.reason == "Verified finalized USDT transfer instruction"
+    assert result.reason == "Verified finalized USDT transfer within allowed tolerance"
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_solana_verifier_rejects_balance_delta_without_matching_transfer_i
     monkeypatch.setattr(verifier, "_post_json", fake_post)
     result = await verifier._verify_solana(txid, recipient, Decimal("25"))
     assert result.verified is False
-    assert result.reason == "No exact finalized USDT transfer instruction to the order wallet"
+    assert result.reason == "No finalized USDT transfer within the allowed tolerance to the order wallet"
 
 
 @pytest.mark.asyncio
