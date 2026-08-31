@@ -1,4 +1,6 @@
 """OCR-based ShamCash receipt verification."""
+from __future__ import annotations
+
 import asyncio
 import io
 import logging
@@ -10,6 +12,7 @@ from PIL import Image, ImageOps
 import pytesseract
 
 from services.formatters import money
+from services.receipt_verification_policy import amounts_match
 
 logger = logging.getLogger(__name__)
 OCR_TIMEOUT_SECONDS = 15
@@ -69,8 +72,7 @@ class ReceiptVerifier:
             text = await ReceiptVerifier._ocr(image_bytes)
             amounts = ReceiptVerifier._extract_amounts(text)
             has_text = bool(text.strip())
-            tolerance = float(expected_amount) * 0.02
-            matched_amount = next((a for a in amounts if abs(a - float(expected_amount)) <= tolerance), None)
+            matched_amount = next((a for a in amounts if amounts_match(a, expected_amount)), None)
             amount_match = matched_amount is not None
             if amount_match and has_text:
                 confidence, message = "high", f"✅ تم التحقق آلياً: المبلغ {money(matched_amount)} مطابق للقيمة المتوقعة {money(expected_amount)}"
@@ -122,8 +124,7 @@ class ReceiptVerifier:
             }
             extracted_amount = float(extracted.get("amount") or 0)
             expected = float(expected_amount or 0)
-            if extracted_amount > 0 and expected > 0:
-                matches["amount"] = abs(extracted_amount - expected) <= expected * 0.02
+            matches["amount"] = amounts_match(extracted_amount, expected)
             details = [
                 f"{'✅' if matches['date'] else '❌'} التاريخ: {extracted.get('date') or 'غير معروف'}",
                 f"{'✅' if matches['sender_name'] else '❌'} اسم المرسل: {extracted.get('sender_name') or 'غير معروف'}",
