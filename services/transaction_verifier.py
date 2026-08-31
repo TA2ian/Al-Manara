@@ -37,6 +37,7 @@ EXPLORERS = {
     "TRC20": "https://tronscan.org/#/transaction/{}",
     "SOLANA": "https://explorer.solana.com/tx/{}",
 }
+DEFAULT_EVM_CONFIRMATIONS = 3
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,21 @@ def _txid_valid(network: str, txid: str) -> bool:
     return False
 
 
+def _evm_required_confirmations(network: str) -> int:
+    raw = os.getenv(f"ALMANARA_EVM_CONFIRMATIONS_{network}")
+    if raw is None:
+        raw = os.getenv("ALMANARA_EVM_MIN_CONFIRMATIONS")
+    if raw is None:
+        return DEFAULT_EVM_CONFIRMATIONS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid EVM confirmation policy") from exc
+    if value < 1 or value > 10000:
+        raise ValueError("EVM confirmation policy must be between 1 and 10000")
+    return value
+
+
 async def _post_json(session: aiohttp.ClientSession, url: str, payload: dict[str, Any]) -> dict[str, Any]:
     async with session.post(url, json=payload) as response:
         if response.status != 200:
@@ -126,7 +142,9 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
         block_number = int(block_hex, 16)
         latest_hex = (await _post_json(session, endpoint, {"jsonrpc": "2.0", "id": 2, "method": "eth_blockNumber", "params": []})).get("result")
         latest = int(latest_hex, 16) if latest_hex else block_number
-        confirmed = latest >= block_number
+        required_confirmations = _evm_required_confirmations(network)
+        confirmations = max(0, latest - block_number + 1)
+        confirmed = confirmations >= required_confirmations
 
         for log in receipt.get("logs", []):
             if (log.get("address") or "").lower() != contract:
@@ -140,9 +158,11 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
             except (ValueError, InvalidOperation):
                 continue
             if to_address == recipient_normalized:
-                if amount == expected:
-                    return TransactionVerification(True, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified USDT transfer", explorer_url=explorer)
-                return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
+                if amount != expected:
+                    return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
+                if not confirmed:
+                    return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=False, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason=f"USDT transfer is awaiting confirmations ({confirmations}/{required_confirmations})", explorer_url=explorer)
+                return TransactionVerification(True, network, txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified confirmed USDT transfer", explorer_url=explorer)
 
         return TransactionVerification(False, network, txid, recipient, expected, confirmed=confirmed, successful=True, reason="No USDT transfer to the order wallet", explorer_url=explorer)
 
