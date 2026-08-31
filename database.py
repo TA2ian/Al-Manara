@@ -34,6 +34,8 @@ async def init_db():
                 network TEXT NOT NULL, requested_amount_usdt NUMERIC(24,8), amount_usdt NUMERIC(24,8) NOT NULL, exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL, base_amount NUMERIC(24,8) NOT NULL,
                 fee_percent NUMERIC(12,6) DEFAULT 0, fee_amount NUMERIC(24,8) DEFAULT 0,
+                service_fee_usdt NUMERIC(24,8) DEFAULT 0, fixed_network_fee_usdt NUMERIC(24,8) DEFAULT 0,
+                total_fee_usdt NUMERIC(24,8) DEFAULT 0,
                 total_amount NUMERIC(24,8) NOT NULL, wallet_address TEXT NOT NULL, wallet_qr_photo_id TEXT,
                 payment_method_code TEXT, payment_account_snapshot TEXT, payment_qr_photo_id TEXT,
                 status TEXT DEFAULT 'pending', receipt_photo_id TEXT, receipt_upload_count INTEGER DEFAULT 0,
@@ -117,6 +119,9 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_status_message_id BIGINT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_fee_usdt NUMERIC(24,8) DEFAULT 0")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS fixed_network_fee_usdt NUMERIC(24,8) DEFAULT 0")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_fee_usdt NUMERIC(24,8) DEFAULT 0")
         await conn.execute("ALTER TABLE exchange_rates ADD COLUMN IF NOT EXISTS rate_currency TEXT DEFAULT 'NEW.SYP'")
         await conn.execute("ALTER TABLE feedback_messages ADD COLUMN IF NOT EXISTS attachment_type TEXT")
         await conn.execute("ALTER TABLE feedback_messages ADD COLUMN IF NOT EXISTS attachment_file_id TEXT")
@@ -127,6 +132,9 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fee_amount TYPE NUMERIC(24,8) USING fee_amount::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN service_fee_usdt TYPE NUMERIC(24,8) USING service_fee_usdt::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN fixed_network_fee_usdt TYPE NUMERIC(24,8) USING fixed_network_fee_usdt::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN total_fee_usdt TYPE NUMERIC(24,8) USING total_fee_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(24,8) USING total_amount::NUMERIC")
         await conn.execute("ALTER TABLE exchange_rates ALTER COLUMN rate TYPE NUMERIC(24,8) USING rate::NUMERIC")
 
