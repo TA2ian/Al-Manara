@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 
+import services.transaction_verifier as verifier
 from services.transaction_verifier import (
     EVM_NETWORKS,
     EXPLORERS,
@@ -47,6 +48,123 @@ def test_usdt_contract_and_explorer_registry_covers_every_supported_network():
     assert SOLANA_USDT_MINT.startswith("Es9v")
     assert TRANSFER_TOPIC == "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
     assert EVM_NETWORKS == set(USDT_CONTRACTS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("network", sorted(EVM_NETWORKS))
+async def test_evm_verifier_accepts_exact_usdt_transfer(monkeypatch, network):
+    recipient = "0x" + "12" * 20
+    txid = "0x" + "ab" * 32
+    padded_recipient = "0x" + "0" * 24 + recipient[2:]
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x10",
+        "logs": [
+            {
+                "address": USDT_CONTRACTS[network],
+                "topics": ["0x" + TRANSFER_TOPIC, "0x" + "0" * 64, padded_recipient],
+                "data": hex(25 * 10**6),
+            }
+        ],
+    }
+
+    async def fake_post(session, url, payload):
+        if payload["method"] == "eth_getTransactionReceipt":
+            return {"result": receipt}
+        return {"result": "0x11"}
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    result = await verifier._verify_evm(network, txid, recipient, Decimal("25"))
+    assert result.verified is True
+    assert result.confirmed is True
+    assert result.asset_verified is True
+    assert result.recipient_verified is True
+    assert result.amount_verified is True
+
+
+@pytest.mark.asyncio
+async def test_evm_verifier_rejects_wrong_amount(monkeypatch):
+    network = "ETH"
+    recipient = "0x" + "34" * 20
+    txid = "0x" + "cd" * 32
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x10",
+        "logs": [
+            {
+                "address": USDT_CONTRACTS[network],
+                "topics": ["0x" + TRANSFER_TOPIC, "0x" + "0" * 64, "0x" + "0" * 24 + recipient[2:]],
+                "data": hex(24 * 10**6),
+            }
+        ],
+    }
+
+    async def fake_post(session, url, payload):
+        return {"result": receipt if payload["method"] == "eth_getTransactionReceipt" else "0x11"}
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    result = await verifier._verify_evm(network, txid, recipient, Decimal("25"))
+    assert result.verified is False
+    assert result.recipient_verified is True
+    assert result.amount_verified is False
+
+
+@pytest.mark.asyncio
+async def test_tron_verifier_accepts_confirmed_exact_transfer(monkeypatch):
+    txid = "ab" * 32
+    recipient = "TQh9zR2sQ9uQ6tRjZ8Hf5sYw8kY1J2m3n4"
+
+    async def fake_post(session, url, payload):
+        return {"id": txid, "blockNumber": 100, "result": "SUCCESS"}
+
+    async def fake_get(session, url):
+        return {
+            "data": [{
+                "event_name": "Transfer",
+                "contract_address": verifier.TRON_USDT_CONTRACT,
+                "result": {"to": recipient, "value": str(25 * 10**6)},
+            }]
+        }
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    monkeypatch.setattr(verifier, "_get_json", fake_get)
+    result = await verifier._verify_tron(txid, recipient, Decimal("25"))
+    assert result.verified is True
+    assert result.confirmed is True
+    assert result.amount_verified is True
+
+
+@pytest.mark.asyncio
+async def test_solana_verifier_accepts_finalized_exact_balance_increase(monkeypatch):
+    txid = "5Pj5fCupXLUePYn18JkY8SrRaWFiUctuDTRwvUy2ML9yvkENLb1QMYbcBGcBXRrSVDjp7RjUwk9a3rLC6gpvtYpZ"
+    recipient = "9xQeWvG816bUx9EPfQ8g4fY4o8qQvM4p7qH5oY4m5sQ"
+
+    async def fake_post(session, url, payload):
+        return {
+            "result": {
+                "meta": {
+                    "err": None,
+                    "preTokenBalances": [{
+                        "accountIndex": 7,
+                        "mint": verifier.SOLANA_USDT_MINT,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "1000000"},
+                    }],
+                    "postTokenBalances": [{
+                        "accountIndex": 7,
+                        "mint": verifier.SOLANA_USDT_MINT,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "26000000"},
+                    }],
+                }
+            }
+        }
+
+    monkeypatch.setattr(verifier, "_post_json", fake_post)
+    result = await verifier._verify_solana(txid, recipient, Decimal("25"))
+    assert result.verified is True
+    assert result.confirmed is True
+    assert result.amount_verified is True
 
 
 @pytest.mark.asyncio
