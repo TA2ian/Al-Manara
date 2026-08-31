@@ -105,20 +105,28 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 return
 
             calculation = data["calculation"]
-            requested_amount = calculation.get("requested_amount_usdt", data["amount_usdt"])
-            net_amount = calculation.get("net_amount_usdt", data["amount_usdt"])
+            requested_amount = Decimal(str(calculation.get("requested_amount_usdt", data["amount_usdt"])))
+            net_amount = Decimal(str(calculation.get("net_amount_usdt", data["amount_usdt"])))
             service_fee_percent = Decimal(str(calculation.get("service_fee_percent", calculation.get("fee_percent", "0"))))
             service_fee_usdt = Decimal(str(calculation.get("service_fee_usdt", "0")))
             fixed_network_fee_usdt = Decimal(str(calculation.get("fixed_network_fee_usdt", "0")))
             total_fee_usdt = Decimal(str(calculation.get("total_fee_usdt", calculation.get("fee_usdt", "0"))))
+            expected = requested_amount - service_fee_usdt - fixed_network_fee_usdt
+            if expected != net_amount or total_fee_usdt != service_fee_usdt + fixed_network_fee_usdt:
+                logger.error("Fee calculation integrity mismatch for telegram_id=%s", callback.from_user.id)
+                await callback.answer("❌ تعذر اعتماد الحساب المالي للطلب. أعد إنشاء الطلب.", show_alert=True)
+                return
+
             order_number = _order_number()
             row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, requested_amount_usdt, amount_usdt, exchange_rate,
-                payment_currency, base_amount, fee_percent, fee_amount, total_amount, wallet_address, wallet_qr_photo_id,
-                payment_method_code, payment_account_snapshot, payment_qr_photo_id, payment_recipient_name_snapshot, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending') RETURNING id""",
+                payment_currency, base_amount, fee_percent, fee_amount, service_fee_usdt, fixed_network_fee_usdt, total_fee_usdt,
+                total_amount, wallet_address, wallet_qr_photo_id, payment_method_code, payment_account_snapshot, payment_qr_photo_id,
+                payment_recipient_name_snapshot, status)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'pending') RETURNING id""",
                 order_number, user["id"], wallet["network"], requested_amount, net_amount, calculation["exchange_rate"], currency,
-                calculation["base_amount"], service_fee_percent, calculation["fee_amount"], calculation["total_amount"],
-                wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"], payment["qr_photo_id"], payment["recipient_name"])
+                calculation["base_amount"], service_fee_percent, calculation["fee_amount"], service_fee_usdt, fixed_network_fee_usdt,
+                total_fee_usdt, calculation["total_amount"], wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"],
+                payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
             completed_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'", user["id"])
             auto_approved = bool(await SettingsService.get_bool("auto_approve", False) and completed_count >= 3)
@@ -202,4 +210,4 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
         await callback.answer()
     except Exception:
         logger.exception("Order confirmation failed for telegram_id=%s", callback.from_user.id)
-        await callback.answer("❌ تعذر إرسال الطلب حالياً. لم يتم اعتماد أي دفع. حاول مرة أخرى لاحقاً." if lang == "ar" else "❌ The order could not be submitted right now. No payment was accepted. Please try again later.", show_alert=True)
+        await callback.answer("❌ تعذر إرسال الطلب حالياً. لم يتم اعتماد أي دفع. حاول مرة أخرى لاحقاً." if lang == "ar" else "❌ The order could not be submitted. No payment was approved. Please try again later.", show_alert=True)
