@@ -11,6 +11,8 @@ async def install_order_constraints(conn):
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_recipient_name_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_photo_id TEXT")
+    await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_upload_count INTEGER DEFAULT 0")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_full_name_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_telegram_id_snapshot BIGINT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_username_snapshot TEXT")
