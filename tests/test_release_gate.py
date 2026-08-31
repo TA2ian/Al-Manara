@@ -91,7 +91,7 @@ def test_authoritative_services_import():
         "services.settings_service", "services.receipt_service", "services.maintenance_service",
         "services.admin_message_service", "services.order_invoice_service",
         "services.time_service", "services.receipt_verification_policy",
-        "database_order_constraints", "services.legal_policy",
+        "services.transaction_verifier", "database_order_constraints", "services.legal_policy",
     ):
         importlib.import_module(module_name)
 
