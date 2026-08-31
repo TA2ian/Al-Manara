@@ -7,7 +7,7 @@ from services.order_state_service import InvalidOrderTransition, rollback_order,
 
 
 class FakeConn:
-    def __init__(self, status="pending"):
+    def __init__(self, status="pending", in_transaction=False):
         self.order = {
             "id": 7,
             "user_id": 42,
@@ -16,10 +16,16 @@ class FakeConn:
         }
         self.executed = []
         self.transaction_events = []
+        self._in_transaction = in_transaction
+
+    def is_in_transaction(self):
+        return self._in_transaction
 
     @asynccontextmanager
     async def transaction(self):
         self.transaction_events.append("begin")
+        previous = self._in_transaction
+        self._in_transaction = True
         try:
             yield
         except Exception:
@@ -27,6 +33,8 @@ class FakeConn:
             raise
         else:
             self.transaction_events.append("commit")
+        finally:
+            self._in_transaction = previous
 
     async def fetchrow(self, query, *args):
         self.executed.append(("fetchrow", query, args))
@@ -57,6 +65,42 @@ class OrderStateServiceTests(unittest.TestCase):
         self.assertEqual(audit_calls[0][2][4], "pending")
         self.assertEqual(audit_calls[0][2][5], "waiting_payment")
         self.assertEqual(conn.transaction_events, ["begin", "commit"])
+
+    def test_transition_reuses_existing_transaction(self):
+        conn = FakeConn("pending", in_transaction=True)
+        result = self.run_async(transition_order(conn, 7, "waiting_payment", admin_id=99))
+        self.assertEqual(result["status"], "waiting_payment")
+        self.assertEqual(conn.transaction_events, [])
+        self.assertTrue(conn.is_in_transaction())
+
+    def test_valid_transition_honors_expected_guards(self):
+        conn = FakeConn("payment_confirmed")
+        conn.order.update({"network": "TRC20", "wallet_address": "TRECIPIENT", "amount_usdt": 25})
+        result = self.run_async(
+            transition_order(
+                conn,
+                7,
+                "completed",
+                admin_id=99,
+                expected={"network": "trc20", "wallet_address": "trecipient", "amount_usdt": 25},
+            )
+        )
+        self.assertEqual(result["status"], "completed")
+
+    def test_guard_mismatch_is_rejected_atomically(self):
+        conn = FakeConn("payment_confirmed")
+        conn.order.update({"network": "TRC20", "wallet_address": "TRECIPIENT", "amount_usdt": 25})
+        with self.assertRaises(InvalidOrderTransition):
+            self.run_async(
+                transition_order(
+                    conn,
+                    7,
+                    "completed",
+                    admin_id=99,
+                    expected={"amount_usdt": 30},
+                )
+            )
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
 
     def test_admin_can_reject_pending_order(self):
         conn = FakeConn("pending")
