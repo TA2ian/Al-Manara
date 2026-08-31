@@ -6,11 +6,11 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from config import Config
 from keyboards.admin import enhanced_admin_menu_keyboard
 from keyboards.inline import settings_keyboard
-from services.exchange_service import FIXED_SERVICE_FEE_USDT
 from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService
 from states import AdminStates
 
 router = Router()
+SUPPORTED_FEE_NETWORKS = ("BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON")
 
 
 def is_admin(user_id: int) -> bool:
@@ -25,7 +25,7 @@ async def _show_settings(callback: CallbackQuery, state: FSMContext | None = Non
     if state is not None:
         await state.clear()
     await callback.message.edit_text(
-        "⚙️ <b>الإعدادات التشغيلية</b>\n\nهذه الإعدادات تؤثر على الطلبات الجديدة فقط. رسوم الخدمة ثابتة بقيمة 0.04 USDT، والمهلة والحدود تستخدم نفس المصدر التشغيلي في الحساب والـorder flow.",
+        "⚙️ <b>الإعدادات التشغيلية</b>\n\nإعدادات الرسوم والمهلة والحدود تؤثر على الطلبات الجديدة فقط. رسوم الخدمة ورسوم الشبكة الثابتة مستقلة لكل شبكة.",
         reply_markup=settings_keyboard(), parse_mode="HTML",
     )
 
@@ -54,12 +54,109 @@ async def setting_fees(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("⛔ Access denied", show_alert=True)
         return
     await state.clear()
+    rows = []
+    for network in SUPPORTED_FEE_NETWORKS:
+        rows.append([InlineKeyboardButton(text=network, callback_data=f"setting_fee_network_{network}")])
+    rows.append([InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")])
     await callback.message.edit_text(
-        f"💰 <b>رسوم الخدمة</b>\n\nالرسوم ثابتة لجميع الشبكات والعملات بقيمة <b>{FIXED_SERVICE_FEE_USDT} USDT</b>.\n\nتُخصم الرسوم من المبلغ الذي حدده المستخدم ولا تُضاف فوقه، ولا توجد نسبة مستقلة قابلة للتعديل لكل شبكة.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings")]]),
-        parse_mode="HTML",
+        "💰 <b>رسوم الشبكات</b>\n\nلكل شبكة رسم خدمة بنسبة يحددها الأدمن، ورسم شبكة ثابت يحدده الأدمن. اختر الشبكة لإدارة القيمتين.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("setting_fee_network_"))
+async def setting_fee_network(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    network = callback.data.removeprefix("setting_fee_network_")
+    if network not in SUPPORTED_FEE_NETWORKS:
+        await callback.answer("Unknown network", show_alert=True)
+        return
+    policy = await OperationalPolicyService.get_network_fee_policy(network)
+    await state.update_data(fee_network=network)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="تعديل رسوم الخدمة %", callback_data="edit_service_fee")],
+        [InlineKeyboardButton(text="تعديل الرسم الثابت USDT", callback_data="edit_fixed_network_fee")],
+        [InlineKeyboardButton(text="🔙 الشبكات", callback_data="setting_fees")],
+    ])
+    await callback.message.edit_text(
+        f"💰 <b>{network}</b>\n\n"
+        f"رسوم الخدمة: <b>{policy.service_fee_percent:g}%</b>\n"
+        f"الرسم الثابت: <b>{policy.fixed_network_fee_usdt:g} USDT</b>\n\n"
+        "اختر القيمة التي تريد تعديلها.",
+        reply_markup=keyboard, parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "edit_service_fee")
+async def edit_service_fee(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    data = await state.get_data()
+    network = data.get("fee_network")
+    if network not in SUPPORTED_FEE_NETWORKS:
+        await callback.answer("اختر الشبكة أولًا", show_alert=True)
+        return
+    current = await OperationalPolicyService.get_fee_percent(network)
+    await callback.message.edit_text(f"💰 <b>رسوم الخدمة — {network}</b>\n\nالقيمة الحالية: <b>{current:g}%</b>\n\nأرسل النسبة الجديدة.", parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_fee_percent)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_fee_percent)
+async def admin_set_fee_percent(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        await message.answer("⛔ Access denied")
+        return
+    data = await state.get_data()
+    network = data.get("fee_network")
+    try:
+        saved = await OperationalPolicyService.set_fee_percent(message.text or "", message.from_user.id, network=network)
+    except OperationalPolicyError as exc:
+        await message.answer(f"❌ {exc}")
+        return
+    await state.clear()
+    await message.answer(f"✅ تم تحديث رسوم الخدمة لشبكة {network} إلى <b>{saved:g}%</b>.", parse_mode="HTML")
+    await _back_to_admin(message)
+
+
+@router.callback_query(F.data == "edit_fixed_network_fee")
+async def edit_fixed_network_fee(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Access denied", show_alert=True)
+        return
+    data = await state.get_data()
+    network = data.get("fee_network")
+    if network not in SUPPORTED_FEE_NETWORKS:
+        await callback.answer("اختر الشبكة أولًا", show_alert=True)
+        return
+    current = await OperationalPolicyService.get_fixed_fee_usdt(network)
+    await callback.message.edit_text(f"💰 <b>الرسم الثابت — {network}</b>\n\nالقيمة الحالية: <b>{current:g} USDT</b>\n\nأرسل القيمة الجديدة بـUSDT.", parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_fixed_network_fee)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_fixed_network_fee)
+async def admin_set_fixed_network_fee(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        await message.answer("⛔ Access denied")
+        return
+    data = await state.get_data()
+    network = data.get("fee_network")
+    try:
+        saved = await OperationalPolicyService.set_fixed_fee_usdt(message.text or "", message.from_user.id, network=network)
+    except OperationalPolicyError as exc:
+        await message.answer(f"❌ {exc}")
+        return
+    await state.clear()
+    await message.answer(f"✅ تم تحديث الرسم الثابت لشبكة {network} إلى <b>{saved:g} USDT</b>.", parse_mode="HTML")
+    await _back_to_admin(message)
 
 
 @router.callback_query(F.data == "setting_timeout")
@@ -169,4 +266,4 @@ async def admin_set_max_order(message: Message, state: FSMContext) -> None:
 
 @router.message(AdminStates.waiting_daily_limit)
 async def admin_set_daily_limit(message: Message, state: FSMContext) -> None:
-    await _save_limit(message, state, "daily_limit", "الحد اليومي للعميل")
+    await _save_limit(message, state, "daily_limit", "الحد اليومي للطلب")
