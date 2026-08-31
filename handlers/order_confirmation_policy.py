@@ -3,6 +3,7 @@ import html
 import logging
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
