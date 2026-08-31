@@ -10,6 +10,8 @@ from typing import Any
 
 import aiohttp
 
+from services.network_fee_policy import amount_within_tolerance
+
 SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
 EVM_NETWORKS = {"BEP20", "ARB", "ETH", "POLYGON"}
 
@@ -128,7 +130,6 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
     recipient_normalized = recipient.lower()
     contract = USDT_CONTRACTS[network].lower()
     explorer = EXPLORERS[network].format(txid)
-
     timeout = aiohttp.ClientTimeout(total=12)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         receipt = (await _post_json(session, endpoint, {"jsonrpc": "2.0", "id": 1, "method": "eth_getTransactionReceipt", "params": [txid]})).get("result")
@@ -136,7 +137,6 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
             return TransactionVerification(False, network, txid, recipient, expected, reason="Transaction receipt not found", explorer_url=explorer)
         if receipt.get("status") != "0x1":
             return TransactionVerification(False, network, txid, recipient, expected, confirmed=True, successful=False, reason="Transaction execution failed", explorer_url=explorer)
-
         block_hex = receipt.get("blockNumber")
         if not block_hex:
             return TransactionVerification(False, network, txid, recipient, expected, successful=True, reason="Transaction has no block", explorer_url=explorer)
@@ -146,7 +146,6 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
         required_confirmations = _evm_required_confirmations(network)
         confirmations = max(0, latest - block_number + 1)
         confirmed = confirmations >= required_confirmations
-
         for log in receipt.get("logs", []):
             if (log.get("address") or "").lower() != contract:
                 continue
@@ -158,13 +157,13 @@ async def _verify_evm(network: str, txid: str, recipient: str, expected: Decimal
                 amount = Decimal(int((log.get("data") or "0x0"), 16)) / Decimal(10**6)
             except (ValueError, InvalidOperation):
                 continue
-            if to_address == recipient_normalized:
-                if amount != expected:
-                    return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
-                if not confirmed:
-                    return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=False, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason=f"USDT transfer is awaiting confirmations ({confirmations}/{required_confirmations})", explorer_url=explorer)
-                return TransactionVerification(True, network, txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified confirmed USDT transfer", explorer_url=explorer)
-
+            if to_address != recipient_normalized:
+                continue
+            if not amount_within_tolerance(amount, expected):
+                return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=confirmed, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount is outside the allowed tolerance", explorer_url=explorer)
+            if not confirmed:
+                return TransactionVerification(False, network, txid, recipient, expected, actual_amount=amount, confirmed=False, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason=f"USDT transfer is awaiting confirmations ({confirmations}/{required_confirmations})", explorer_url=explorer)
+            return TransactionVerification(True, network, txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified confirmed USDT transfer within allowed tolerance", explorer_url=explorer)
         return TransactionVerification(False, network, txid, recipient, expected, confirmed=confirmed, successful=True, reason="No USDT transfer to the order wallet", explorer_url=explorer)
 
 
@@ -178,7 +177,6 @@ async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> Transact
             return TransactionVerification(False, "TRC20", txid, recipient, expected, reason="Transaction is not solidified", explorer_url=explorer)
         if info.get("result") != "SUCCESS":
             return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=False, reason="TRON transaction failed", explorer_url=explorer)
-
         events = await _get_json(session, f"{base}/v1/transactions/{txid}/events?only_confirmed=true&event_name=Transfer&limit=200")
         for event in events.get("data") or []:
             if (event.get("contract_address") or "") != TRON_USDT_CONTRACT:
@@ -192,11 +190,11 @@ async def _verify_tron(txid: str, recipient: str, expected: Decimal) -> Transact
                 amount = Decimal(str(raw_amount)) / Decimal(10**6)
             except InvalidOperation:
                 continue
-            if to_address == recipient:
-                if amount == expected:
-                    return TransactionVerification(True, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified solidified USDT transfer", explorer_url=explorer)
-                return TransactionVerification(False, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount does not match the order", explorer_url=explorer)
-
+            if to_address != recipient:
+                continue
+            if amount_within_tolerance(amount, expected):
+                return TransactionVerification(True, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified solidified USDT transfer within allowed tolerance", explorer_url=explorer)
+            return TransactionVerification(False, "TRC20", txid, recipient, expected, actual_amount=amount, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, reason="USDT transfer amount is outside the allowed tolerance", explorer_url=explorer)
         return TransactionVerification(False, "TRC20", txid, recipient, expected, confirmed=True, successful=True, reason="No confirmed USDT Transfer event to the order wallet", explorer_url=explorer)
 
 
@@ -214,22 +212,16 @@ def _solana_account_key(account_keys: list[Any], account_index: int | None) -> s
 def _solana_instruction_transfers(result: dict[str, Any]) -> list[dict[str, str]]:
     transaction = result.get("transaction") or {}
     message = transaction.get("message") or {}
-    account_keys = message.get("accountKeys") or []
     instructions: list[Any] = list(message.get("instructions") or [])
     meta = result.get("meta") or {}
     for group in meta.get("innerInstructions") or []:
         instructions.extend(group.get("instructions") or [])
-
     transfers: list[dict[str, str]] = []
     for instruction in instructions:
-        if not isinstance(instruction, dict):
-            continue
-        if instruction.get("programId") != SOLANA_TOKEN_PROGRAM_ID:
+        if not isinstance(instruction, dict) or instruction.get("programId") != SOLANA_TOKEN_PROGRAM_ID:
             continue
         parsed = instruction.get("parsed")
-        if not isinstance(parsed, dict):
-            continue
-        if parsed.get("type") not in {"transfer", "transferChecked"}:
+        if not isinstance(parsed, dict) or parsed.get("type") not in {"transfer", "transferChecked"}:
             continue
         info = parsed.get("info")
         if not isinstance(info, dict):
@@ -237,10 +229,8 @@ def _solana_instruction_transfers(result: dict[str, Any]) -> list[dict[str, str]
         mint = str(info.get("mint") or "")
         destination = str(info.get("destination") or "")
         raw_amount = info.get("amount")
-        if raw_amount is None:
-            token_amount = info.get("tokenAmount")
-            if isinstance(token_amount, dict):
-                raw_amount = token_amount.get("amount")
+        if raw_amount is None and isinstance(info.get("tokenAmount"), dict):
+            raw_amount = info["tokenAmount"].get("amount")
         if not mint or not destination or raw_amount is None:
             continue
         try:
@@ -248,7 +238,6 @@ def _solana_instruction_transfers(result: dict[str, Any]) -> list[dict[str, str]
         except (TypeError, ValueError):
             continue
         transfers.append({"mint": mint, "destination": destination, "amount": amount})
-
     return transfers
 
 
@@ -257,19 +246,16 @@ async def _verify_solana(txid: str, recipient: str, expected: Decimal) -> Transa
     explorer = EXPLORERS["SOLANA"].format(txid)
     timeout = aiohttp.ClientTimeout(total=12)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        payload = {"jsonrpc": "2.0", "id": 1, "method": "getTransaction", "params": [txid, {"commitment": "finalized", "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]}
-        result = (await _post_json(session, endpoint, payload)).get("result")
+        result = (await _post_json(session, endpoint, {"jsonrpc": "2.0", "id": 1, "method": "getTransaction", "params": [txid, {"commitment": "finalized", "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]})).get("result")
         if not result or not result.get("meta"):
             return TransactionVerification(False, "SOLANA", txid, recipient, expected, reason="Finalized transaction not found", explorer_url=explorer)
         if result["meta"].get("err") is not None:
             return TransactionVerification(False, "SOLANA", txid, recipient, expected, confirmed=True, successful=False, reason="Solana transaction failed", explorer_url=explorer)
-
         post = result["meta"].get("postTokenBalances") or []
         pre = {item.get("accountIndex"): item for item in (result["meta"].get("preTokenBalances") or [])}
         expected_raw = int(expected * Decimal(10**6))
         transfers = _solana_instruction_transfers(result)
         account_keys = ((result.get("transaction") or {}).get("message") or {}).get("accountKeys") or []
-
         for balance in post:
             if balance.get("mint") != SOLANA_USDT_MINT or balance.get("owner") != recipient:
                 continue
@@ -281,18 +267,13 @@ async def _verify_solana(txid: str, recipient: str, expected: Decimal) -> Transa
                 delta = int(after) - int(before)
             except (TypeError, ValueError):
                 continue
-            if delta != expected_raw:
+            if not any(transfer["mint"] == SOLANA_USDT_MINT and transfer["destination"] == destination and amount_within_tolerance(Decimal(transfer["amount"]) / Decimal(10**6), expected) for transfer in transfers):
                 continue
-            if not any(
-                transfer["mint"] == SOLANA_USDT_MINT
-                and transfer["destination"] == destination
-                and transfer["amount"] == str(expected_raw)
-                for transfer in transfers
-            ):
+            if not amount_within_tolerance(Decimal(delta) / Decimal(10**6), expected):
                 continue
-            return TransactionVerification(True, "SOLANA", txid, recipient, expected, actual_amount=expected, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified finalized USDT transfer instruction", explorer_url=explorer)
-
-        return TransactionVerification(False, "SOLANA", txid, recipient, expected, confirmed=True, successful=True, reason="No exact finalized USDT transfer instruction to the order wallet", explorer_url=explorer)
+            actual = Decimal(delta) / Decimal(10**6)
+            return TransactionVerification(True, "SOLANA", txid, recipient, expected, actual_amount=actual, confirmed=True, successful=True, asset_verified=True, recipient_verified=True, amount_verified=True, reason="Verified finalized USDT transfer within allowed tolerance", explorer_url=explorer)
+        return TransactionVerification(False, "SOLANA", txid, recipient, expected, confirmed=True, successful=True, reason="No finalized USDT transfer within the allowed tolerance to the order wallet", explorer_url=explorer)
 
 
 async def verify_transaction(network: str, txid: str, recipient: str, expected_amount: Decimal | float | int) -> TransactionVerification:
