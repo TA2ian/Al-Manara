@@ -5,6 +5,9 @@ from config import Config
 async def install_order_constraints(conn):
     """Install canonical database invariants used by wallet, payment, identity, and order flows."""
     await conn.execute("ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS recipient_name TEXT")
+    await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE")
+    await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+    await conn.execute("ALTER TABLE saved_addresses ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_recipient_name_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
     await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
