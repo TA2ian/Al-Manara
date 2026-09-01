@@ -24,10 +24,11 @@ def test_transfer_flow_claims_before_external_transfer_instructions():
     assert "تم حجز خطوة التنفيذ لهذا الطلب لمسؤول واحد فقط" in source
 
 
-def test_transfer_cancel_releases_the_persistent_claim():
+def test_transfer_cancel_keeps_the_claim_for_external_transfer_safety():
     source = _read("handlers/admin_transfer_policy.py")
-    assert "release_order_fulfillment" in source
-    assert "await release_order_fulfillment(conn, int(order_id), callback.from_user.id)" in source
+    assert "keep the persistent claim" in source
+    assert "release_order_fulfillment" not in source
+    assert "تم الإبقاء على حجز التنفيذ لحماية الطلب من تكرار التحويل الخارجي" in source
 
 
 def test_completion_requires_the_claiming_admin():
