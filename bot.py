@@ -102,6 +102,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(receipt_document_policy.router)
     dp.include_router(customer_orders_policy.router)
     dp.include_router(feedback.router)
+    dp.include_router(profile.router)
 
     # Verification has one canonical customer flow and one pending guard.
     dp.include_router(verification_pending_policy.router)
