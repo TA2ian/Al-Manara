@@ -29,6 +29,7 @@ def create_dispatcher() -> Dispatcher:
         admin_approval_policy,
         admin_rejection_policy,
         admin_payment_confirmation_policy,
+        admin_order_closure_policy,
         admin_transfer_policy,
         admin_note_policy,
         admin_order_list_policy,
@@ -77,6 +78,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_approval_policy.router)
     dp.include_router(admin_rejection_policy.router)
     dp.include_router(admin_payment_confirmation_policy.router)
+    dp.include_router(admin_order_closure_policy.router)
     dp.include_router(admin_transfer_policy.router)
     dp.include_router(admin_order_list_policy.router)
     dp.include_router(admin_user_management_policy.router)
@@ -96,7 +98,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(wallets.router)
     dp.include_router(order_confirmation_policy.router)
     dp.include_router(active_order_policy.router)
-    dp.include_router(profile.router)
     dp.include_router(receipt_processing_policy.router)
     dp.include_router(receipt_document_policy.router)
     dp.include_router(customer_orders_policy.router)
