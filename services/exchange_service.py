@@ -1,4 +1,4 @@
-"""Exchange-rate and exact financial calculation service."""
+"""Exchange-rate and authoritative financial quote service."""
 import logging
 import time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -13,7 +13,7 @@ RATE_QUANT = Decimal("0.00000001")
 
 
 class ExchangeService:
-    """Manage exchange rates and exact financial calculations."""
+    """Build the canonical quote consumed by the customer order flow."""
 
     SUPPORTED_PAYMENT_CURRENCIES = {"USD", "NEW.SYP"}
     SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
@@ -29,9 +29,10 @@ class ExchangeService:
         if isinstance(value, Decimal):
             return value
         try:
-            return Decimal(str(value))
+            parsed = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             return Decimal(default)
+        return parsed if parsed.is_finite() else Decimal(default)
 
     @classmethod
     def normalize_network(cls, network: str | None) -> str:
@@ -48,10 +49,7 @@ class ExchangeService:
                 return None
             rate = self.to_decimal(row["rate"])
             currency = (row["rate_currency"] or "NEW.SYP").upper()
-            if currency != "NEW.SYP":
-                logger.error("Unsupported exchange-rate currency in DB: %s", currency)
-                return None
-            if rate <= 0:
+            if currency != "NEW.SYP" or rate <= 0:
                 return None
             self._cache["rate"] = rate
             self._cache_monotonic = now
@@ -73,8 +71,10 @@ class ExchangeService:
             return False
 
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
-        """Calculate a quote using network-specific service and fixed fees."""
-        currency = currency.upper()
+        """Return one canonical quote with explicit network fee components."""
+        currency = (currency or "").strip().upper()
+        if currency == "SYP":
+            currency = "NEW.SYP"
         normalized_network = self.normalize_network(network)
         amount = self.to_decimal(amount_usdt)
         if amount <= 0:
@@ -84,33 +84,33 @@ class ExchangeService:
         if normalized_network not in self.SUPPORTED_NETWORKS:
             raise ValueError("Unsupported network")
         rate = await self.get_current_rate()
-        if rate is None or rate <= 0:
+        if rate is None:
             raise ValueError("Exchange rate is unavailable")
 
-        amount_usdt_rounded = amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
+        requested_amount_usdt = amount.quantize(USDT_QUANT, rounding=ROUND_HALF_UP)
         policy = await OperationalPolicyService.get_network_fee_policy(normalized_network)
-        calculation = policy.calculate(amount_usdt_rounded)
+        calculation = policy.calculate(requested_amount_usdt)
         service_fee_usdt = calculation["service_fee_usdt"]
         fixed_network_fee_usdt = calculation["fixed_network_fee_usdt"]
         total_fee_usdt = calculation["total_fee_usdt"]
         net_amount_usdt = calculation["net_amount_usdt"]
-        base_amount = amount_usdt_rounded if currency == "USD" else (amount_usdt_rounded * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        fee_amount = total_fee_usdt if currency == "USD" else (total_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        base_amount = requested_amount_usdt if currency == "USD" else (requested_amount_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        service_fee_payment_currency = service_fee_usdt if currency == "USD" else (service_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        fixed_fee_payment_currency = fixed_network_fee_usdt if currency == "USD" else (fixed_network_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        total_fee_payment_currency = total_fee_usdt if currency == "USD" else (total_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         return {
-            "requested_amount_usdt": calculation["requested_amount_usdt"],
-            "amount_usdt": net_amount_usdt,
+            "requested_amount_usdt": requested_amount_usdt,
             "net_amount_usdt": net_amount_usdt,
             "exchange_rate": rate,
             "payment_currency": currency,
             "network": normalized_network,
             "base_amount": base_amount,
             "service_fee_percent": policy.service_fee_percent,
-            "fee_percent": policy.service_fee_percent,
             "service_fee_usdt": service_fee_usdt,
             "fixed_network_fee_usdt": fixed_network_fee_usdt,
             "total_fee_usdt": total_fee_usdt,
-            "fee_usdt": total_fee_usdt,
-            "fee_amount": fee_amount,
-            "fixed_fee_usdt": fixed_network_fee_usdt,
+            "service_fee_payment_currency": service_fee_payment_currency,
+            "fixed_fee_payment_currency": fixed_fee_payment_currency,
+            "total_fee_payment_currency": total_fee_payment_currency,
             "total_amount": base_amount,
         }
