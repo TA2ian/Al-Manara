@@ -43,6 +43,10 @@ async def cache_setting(key: str, value: str):
     SettingsService._initialized = True
 
 
+async def ignore_audit(*args, **kwargs):
+    return None
+
+
 class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         SettingsService._cache = {
@@ -63,6 +67,9 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self._settings_set_patch = patch.object(SettingsService, "set", new=cache_setting)
         self._settings_set_patch.start()
         self.addCleanup(self._settings_set_patch.stop)
+        self._audit_patch = patch.object(OperationalPolicyService, "_audit", new=ignore_audit)
+        self._audit_patch.start()
+        self.addCleanup(self._audit_patch.stop)
 
     async def test_usd_combines_network_service_and_fixed_fees(self):
         service = ExchangeService(FakePool(Decimal("150")))
@@ -73,7 +80,6 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["fixed_network_fee_usdt"], Decimal("0.20"))
         self.assertEqual(quote["total_fee_usdt"], Decimal("10.20"))
         self.assertEqual(quote["net_amount_usdt"], Decimal("89.80"))
-        self.assertEqual(quote["total_fee_usdt"], Decimal("10.20"))
         self.assertEqual(quote["total_amount"], Decimal("100.00"))
 
     async def test_networks_have_independent_service_and_fixed_fees(self):
