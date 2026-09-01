@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS order_fulfillment_claims (
 """
 
 
-async def ensure_fulfillment_claim_table(conn) -> None:
-    """Create the persistent fulfillment-claim table when it is first needed."""
+async def install_fulfillment_claim_schema(conn) -> None:
+    """Install the persistent fulfillment-claim schema during database initialization."""
     await conn.execute(CLAIM_TABLE_SQL)
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_order_fulfillment_claims_admin "
@@ -24,7 +24,6 @@ async def ensure_fulfillment_claim_table(conn) -> None:
 
 async def get_fulfillment_claim(conn, order_id: int):
     """Return the current fulfillment claim for an order, if any."""
-    await ensure_fulfillment_claim_table(conn)
     return await conn.fetchrow(
         "SELECT order_id, admin_id, claimed_at "
         "FROM order_fulfillment_claims WHERE order_id = $1",
@@ -34,7 +33,6 @@ async def get_fulfillment_claim(conn, order_id: int):
 
 async def claim_order_fulfillment(conn, order_id: int, admin_id: int) -> tuple[bool, Any]:
     """Atomically claim an eligible payment-confirmed order for one admin."""
-    await ensure_fulfillment_claim_table(conn)
     async with conn.transaction():
         order = await conn.fetchrow(
             "SELECT id, status FROM orders WHERE id = $1 FOR UPDATE",
@@ -75,7 +73,6 @@ async def claim_order_fulfillment(conn, order_id: int, admin_id: int) -> tuple[b
 
 async def release_order_fulfillment(conn, order_id: int, admin_id: int) -> bool:
     """Release a fulfillment claim only when it belongs to the requesting admin."""
-    await ensure_fulfillment_claim_table(conn)
     async with conn.transaction():
         order = await conn.fetchrow(
             "SELECT id, user_id FROM orders WHERE id = $1 FOR UPDATE",
@@ -108,7 +105,6 @@ async def release_order_fulfillment(conn, order_id: int, admin_id: int) -> bool:
 
 async def release_claim_after_completion(conn, order_id: int, admin_id: int) -> None:
     """Delete a successful fulfillment claim inside the caller-owned transaction."""
-    await ensure_fulfillment_claim_table(conn)
     await conn.execute(
         "DELETE FROM order_fulfillment_claims WHERE order_id = $1 AND admin_id = $2",
         order_id,
