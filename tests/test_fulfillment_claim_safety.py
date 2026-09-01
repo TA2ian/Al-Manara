@@ -45,6 +45,13 @@ def test_administrative_closure_cannot_race_with_external_fulfillment():
     assert "تم منع الإغلاق الإداري" in source
 
 
+def test_administrative_closure_locks_order_before_claim_check():
+    source = _read("handlers/admin_order_closure_policy.py")
+    assert "async def _load_order(conn, order_id: int, *, for_update: bool = False)" in source
+    assert 'lock_clause = " FOR UPDATE" if for_update else ""' in source
+    assert "order = await _load_order(conn, order_id, for_update=True)" in source
+
+
 def test_no_txid_uniqueness_rule_was_added():
     source = _read("services/order_fulfillment_claim.py")
     assert "UNIQUE (txid" not in source
