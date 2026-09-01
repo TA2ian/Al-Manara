@@ -52,6 +52,14 @@ def test_administrative_closure_locks_order_before_claim_check():
     assert "order = await _load_order(conn, order_id, for_update=True)" in source
 
 
+def test_closure_initializes_claim_table_before_order_row_lock():
+    source = _read("handlers/admin_order_closure_policy.py")
+    init_pos = source.index("await ensure_fulfillment_claim_table(conn)")
+    transaction_pos = source.index("async with conn.transaction():", init_pos)
+    lock_pos = source.index("order = await _load_order(conn, order_id, for_update=True)", transaction_pos)
+    assert init_pos < transaction_pos < lock_pos
+
+
 def test_no_txid_uniqueness_rule_was_added():
     source = _read("services/order_fulfillment_claim.py")
     assert "UNIQUE (txid" not in source
