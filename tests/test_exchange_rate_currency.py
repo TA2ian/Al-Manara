@@ -36,9 +36,9 @@ class ExchangeRateCurrencyTests(unittest.IsolatedAsyncioTestCase):
         service = ExchangeService(_Pool({"rate": Decimal("1500"), "rate_currency": "NEW.SYP"}))
         self.assertEqual(await service.get_current_rate(), Decimal("1500"))
 
-    async def test_legacy_syp_rate_is_converted_explicitly(self):
+    async def test_unsupported_legacy_syp_rate_is_rejected(self):
         service = ExchangeService(_Pool({"rate": Decimal("150000"), "rate_currency": "SYP"}))
-        self.assertEqual(await service.get_current_rate(), Decimal("1500.00000000"))
+        self.assertIsNone(await service.get_current_rate())
 
 
 if __name__ == "__main__":
