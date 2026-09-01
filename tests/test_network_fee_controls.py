@@ -14,6 +14,10 @@ async def cache_setting(key: str, value: str):
     SettingsService._initialized = True
 
 
+async def ignore_audit(*args, **kwargs):
+    return None
+
+
 def test_supported_fee_networks_are_canonical():
     assert set(OperationalPolicyService._normalize_network(network) for network in ("BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON")) == {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
 
@@ -38,7 +42,7 @@ def test_amount_tolerance_is_not_a_fee():
 def test_percentage_fee_accepts_zero_to_one_hundred_only():
     SettingsService._cache = {"service_fee_percent_bep20": "10", "fixed_network_fee_usdt_bep20": "0.20"}
     SettingsService._initialized = True
-    with patch.object(SettingsService, "set", new=cache_setting):
+    with patch.object(SettingsService, "set", new=cache_setting), patch.object(OperationalPolicyService, "_audit", new=ignore_audit):
         assert asyncio.run(OperationalPolicyService.set_fee_percent("12.5", 123, network="BEP20")) == Decimal("12.5")
         with pytest.raises(OperationalPolicyError, match="cannot exceed 100"):
             asyncio.run(OperationalPolicyService.set_fee_percent("100.01", 123, network="BEP20"))
@@ -47,7 +51,7 @@ def test_percentage_fee_accepts_zero_to_one_hundred_only():
 def test_fixed_network_fee_can_be_changed_per_network():
     SettingsService._cache = {"service_fee_percent_bep20": "10", "fixed_network_fee_usdt_bep20": "0.20"}
     SettingsService._initialized = True
-    with patch.object(SettingsService, "set", new=cache_setting):
+    with patch.object(SettingsService, "set", new=cache_setting), patch.object(OperationalPolicyService, "_audit", new=ignore_audit):
         assert asyncio.run(OperationalPolicyService.set_fixed_fee_usdt("0.75", 123, network="BEP20")) == Decimal("0.75")
         assert asyncio.run(OperationalPolicyService.get_fixed_fee_usdt("BEP20")) == Decimal("0.75")
 
