@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -19,8 +20,8 @@ class OrderCurrencyFlowSourceTests(unittest.TestCase):
             "total_amount",
         )
         for key in canonical_keys:
-            self.assertIn(f"calculation[\"{key}\"]", currency_source)
-            self.assertIn(f"calculation['{key}']", currency_source)
+            pattern = rf"calculation\s*\[\s*['\"]{re.escape(key)}['\"]\s*\]"
+            self.assertRegex(currency_source, pattern, msg=f"Missing canonical calculation key: {key}")
 
         self.assertNotIn("calculation['fee_amount']", currency_source)
         self.assertNotIn('calculation["fee_amount"]', currency_source)
