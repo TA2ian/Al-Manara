@@ -87,6 +87,30 @@ class OrderStateServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
 
+    def test_payment_confirmed_can_close_without_fulfillment(self):
+        conn = FakeConn("payment_confirmed")
+        result = self.run_async(
+            transition_order(
+                conn,
+                7,
+                "closed_without_fulfillment",
+                admin_id=99,
+                updates={"admin_notes": "Administrative closure: no USDT fulfillment."},
+            )
+        )
+        self.assertEqual(result["status"], "closed_without_fulfillment")
+        self.assertEqual(result["admin_notes"], "Administrative closure: no USDT fulfillment.")
+        audit_calls = [call for call in conn.executed if call[0] == "execute" and "INSERT INTO audit_logs" in call[1]]
+        self.assertEqual(audit_calls[-1][2][4], "payment_confirmed")
+        self.assertEqual(audit_calls[-1][2][5], "closed_without_fulfillment")
+        self.assertEqual(conn.transaction_events, ["begin", "commit"])
+
+    def test_closed_without_fulfillment_is_terminal(self):
+        conn = FakeConn("closed_without_fulfillment")
+        with self.assertRaises(InvalidOrderTransition):
+            self.run_async(transition_order(conn, 7, "completed", admin_id=99))
+        self.assertEqual(conn.transaction_events, ["begin", "rollback"])
+
     def test_guard_mismatch_is_rejected_atomically(self):
         conn = FakeConn("payment_confirmed")
         conn.order.update({"network": "TRC20", "wallet_address": "TRECIPIENT", "amount_usdt": 25})
