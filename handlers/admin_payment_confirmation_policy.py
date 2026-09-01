@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
-from keyboards.inline import order_admin_keyboard
+from keyboards.admin_order_actions import payment_confirmed_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
 from services.formatters import usdt
 from services.order_state_service import InvalidOrderTransition, transition_order
@@ -96,8 +96,9 @@ async def confirm_payment(callback: CallbackQuery):
     tasks = []
     for admin_id in Config.ADMIN_IDS:
         tasks.append(bot.send_message(
-            admin_id, admin_text,
-            reply_markup=order_admin_keyboard(order_id, "payment_confirmed"),
+            admin_id,
+            admin_text,
+            reply_markup=payment_confirmed_admin_keyboard(order_id),
             parse_mode="HTML",
         ))
         if wallet_qr_id:
@@ -118,7 +119,5 @@ async def confirm_payment(callback: CallbackQuery):
     except Exception:
         logger.exception("Failed to close payment confirmation bot session")
 
-    # Keep the order's QR snapshot immutable. The verified wallet registry remains
-    # the reusable source for future orders, while this order retains its own snapshot.
     await callback.answer("✅ تم تأكيد الدفع!")
     await callback.message.edit_text(f"✅ تم تأكيد دفع الطلب #{order['order_number']}")
