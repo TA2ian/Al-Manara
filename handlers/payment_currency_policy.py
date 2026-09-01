@@ -38,13 +38,15 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
         "──── 💵 الحساب ────\n"
         f"💵 قيمة الطلب قبل الرسوم: <b>{money(calculation['base_amount'])} {unit}</b>\n"
-        f"📊 رسوم شبكة {calculation['network']} ({percent(calculation['fee_percent'])}%): <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"📊 رسوم الخدمة: <b>{money(calculation['service_fee_usdt'] if unit == 'USD' else calculation['service_fee_usdt'] * calculation['exchange_rate'])} {unit}</b> ({percent(calculation['service_fee_percent'])}%)\n"
+        f"🌐 الرسم الثابت للشبكة: <b>{money(calculation['fixed_network_fee_usdt'] if unit == 'USD' else calculation['fixed_network_fee_usdt'] * calculation['exchange_rate'])} {unit}</b>\n"
+        f"💰 إجمالي الرسوم: <b>{money(calculation['fee_amount'])} {unit}</b>\n"
         f"💰 صافي USDT بعد الرسوم: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💸 <b>المبلغ المطلوب دفعه:</b>\n\n"
         f"<b>💰 {money(calculation['total_amount'])} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "ℹ️ رسوم الخدمة تُخصم من المبلغ الذي حددته ولا تُضاف فوقه. راجع التفاصيل جيداً. عند التأكيد سيُرسل الطلب إلى الإدارة للموافقة. بعد الموافقة ستصلك بيانات الدفع الرسمية.\n\n"
+        "ℹ️ رسوم الخدمة والرسم الثابت للشبكة يُخصمان من المبلغ الذي حددته ولا يُضافان فوقه. راجع التفاصيل جيداً. عند التأكيد سيُرسل الطلب إلى الإدارة للموافقة. بعد الموافقة ستصلك بيانات الدفع الرسمية.\n\n"
         "⚠️ لا ترسل أي مبلغ قبل ظهور تعليمات الدفع الرسمية داخل البوت."
     )
 
@@ -52,6 +54,8 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
 def _build_english_summary(data: dict, calculation: dict, network_display: str) -> str:
     currency = calculation["payment_currency"]
     unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
+    service_fee_display = calculation["service_fee_usdt"] if unit == "USD" else calculation["service_fee_usdt"] * calculation["exchange_rate"]
+    fixed_fee_display = calculation["fixed_network_fee_usdt"] if unit == "USD" else calculation["fixed_network_fee_usdt"] * calculation["exchange_rate"]
     rate_block = f"──── 💱 Exchange Rate ────\n🔄 <b>1 USD = {rate(calculation['exchange_rate'])} NEW.SYP</b>\n" if unit == "NEW.SYP" else ""
     return (
         "📋 <b>Purchase Order Summary</b>\n\n"
@@ -63,14 +67,16 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
         f"{rate_block}"
         f"💳 Payment currency: <b>{unit}</b>\n\n"
         "──── 💵 Calculation ────\n"
-        f"💵 Order value before fee: <b>{money(calculation['base_amount'])} {unit}</b>\n"
-        f"📊 {calculation['network']} network fee ({percent(calculation['fee_percent'])}%): <b>{money(calculation['fee_amount'])} {unit}</b>\n"
-        f"💰 Net USDT after fee: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
+        f"💵 Order value before fees: <b>{money(calculation['base_amount'])} {unit}</b>\n"
+        f"📊 Service fee: <b>{money(service_fee_display)} {unit}</b> ({percent(calculation['service_fee_percent'])}%)\n"
+        f"🌐 Fixed network fee: <b>{money(fixed_fee_display)} {unit}</b>\n"
+        f"💰 Total fees: <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"💰 Net USDT after fees: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💸 <b>Amount to pay:</b>\n\n"
         f"<b>💰 {money(calculation['total_amount'])} {unit}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "ℹ️ The service fee is deducted from the amount you entered; it is not added on top. Review the details carefully. When confirmed, the order will be sent to administration for approval. Official payment details will be issued after approval.\n\n"
+        "ℹ️ The service fee and fixed network fee are deducted from the amount you entered; they are not added on top. Review the details carefully. When confirmed, the order will be sent to administration for approval. Official payment details will be issued after approval.\n\n"
         "⚠️ Do not send any money until the official payment instructions appear inside the bot."
     )
 
