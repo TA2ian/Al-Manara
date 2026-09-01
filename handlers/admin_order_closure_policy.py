@@ -28,12 +28,13 @@ def is_admin(user_id: int) -> bool:
     return user_id in Config.ADMIN_IDS
 
 
-async def _load_order(conn, order_id: int):
+async def _load_order(conn, order_id: int, *, for_update: bool = False):
+    lock_clause = " FOR UPDATE" if for_update else ""
     return await conn.fetchrow(
-        """SELECT o.*, u.telegram_id, u.full_name, u.language
+        f"""SELECT o.*, u.telegram_id, u.full_name, u.language
            FROM orders o
            JOIN users u ON o.user_id = u.id
-           WHERE o.id = $1""",
+           WHERE o.id = $1{lock_clause}""",
         order_id,
     )
 
@@ -196,7 +197,7 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            order = await _load_order(conn, order_id)
+            order = await _load_order(conn, order_id, for_update=True)
             if not order:
                 await callback.answer("❌ الطلب غير موجود", show_alert=True)
                 return
