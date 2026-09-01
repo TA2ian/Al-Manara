@@ -2,15 +2,42 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from services.formatters import money, rate, usdt
 
 
-def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amount_usdt_value, network: str, wallet: str, currency: str, exchange_rate_value, base_amount_value, fee_percent_value, fee_amount_value, total_value, payment_deadline: datetime | None = None, lang: str = "ar", service_fee_usdt_value=None, fixed_network_fee_usdt_value=None, total_fee_usdt_value=None) -> str:
-    service_fee_usdt = usdt(service_fee_usdt_value or 0)
-    fixed_network_fee_usdt = usdt(fixed_network_fee_usdt_value or 0)
-    total_fee_usdt = usdt(total_fee_usdt_value if total_fee_usdt_value is not None else (fee_amount_value or 0))
-    fee_percent = usdt(fee_percent_value or 0)
+def _decimal(value) -> Decimal:
+    return Decimal(str(value or 0))
+
+
+def render_order_invoice(
+    *,
+    order_number: str,
+    requested_amount_usdt_value,
+    amount_usdt_value,
+    network: str,
+    wallet: str,
+    currency: str,
+    exchange_rate_value,
+    base_amount_value,
+    service_fee_percent_value,
+    service_fee_usdt_value,
+    fixed_network_fee_usdt_value,
+    total_fee_usdt_value,
+    total_fee_payment_currency_value,
+    total_value,
+    payment_deadline: datetime | None = None,
+    lang: str = "ar",
+) -> str:
+    service_fee_usdt = _decimal(service_fee_usdt_value)
+    fixed_network_fee_usdt = _decimal(fixed_network_fee_usdt_value)
+    total_fee_usdt = _decimal(total_fee_usdt_value)
+    total_fee_payment_currency = _decimal(total_fee_payment_currency_value)
+    service_fee_percent = _decimal(service_fee_percent_value)
+    if total_fee_usdt != service_fee_usdt + fixed_network_fee_usdt:
+        raise ValueError("Invoice fee components do not match total fee")
+
     if lang == "en":
         deadline = payment_deadline.strftime("%Y-%m-%d %H:%M") if payment_deadline else "After order approval"
         return (
@@ -24,10 +51,10 @@ def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amou
             f"• Currency: <b>{currency}</b>\n"
             f"• Exchange rate: <b>{rate(exchange_rate_value)}</b>\n"
             f"• Order value before fees: <b>{money(base_amount_value)} {currency}</b>\n"
-            f"• Service fee: <b>{service_fee_usdt} USDT ({fee_percent_value or 0}%)</b>\n"
-            f"• Fixed network fee: <b>{fixed_network_fee_usdt} USDT</b>\n"
-            f"• Total fees: <b>{total_fee_usdt} USDT</b>\n"
-            f"• Total fees in payment currency: <b>{money(fee_amount_value)} {currency}</b>\n"
+            f"• Service fee: <b>{usdt(service_fee_usdt)} USDT ({service_fee_percent}%)</b>\n"
+            f"• Fixed network fee: <b>{usdt(fixed_network_fee_usdt)} USDT</b>\n"
+            f"• Total fees: <b>{usdt(total_fee_usdt)} USDT</b>\n"
+            f"• Total fees in payment currency: <b>{money(total_fee_payment_currency)} {currency}</b>\n"
             f"• Amount to pay: <b>{money(total_value)} {currency}</b>\n\n"
             "The displayed fees are based on the selected network policy. The TXID verification tolerance is separate and is not a fee.\n\n"
             "<b>What happens next?</b>\n"
@@ -48,10 +75,10 @@ def render_order_invoice(*, order_number: str, requested_amount_usdt_value, amou
         f"• عملة الدفع: <b>{currency}</b>\n"
         f"• سعر الصرف: <b>{rate(exchange_rate_value)}</b>\n"
         f"• قيمة الطلب قبل الرسوم: <b>{money(base_amount_value)} {currency}</b>\n"
-        f"• رسوم الخدمة: <b>{service_fee_usdt} USDT ({fee_percent_value or 0}%)</b>\n"
-        f"• الرسم الثابت للشبكة: <b>{fixed_network_fee_usdt} USDT</b>\n"
-        f"• إجمالي الرسوم: <b>{total_fee_usdt} USDT</b>\n"
-        f"• إجمالي الرسوم بعملة الدفع: <b>{money(fee_amount_value)} {currency}</b>\n"
+        f"• رسوم الخدمة: <b>{usdt(service_fee_usdt)} USDT ({service_fee_percent}%)</b>\n"
+        f"• الرسم الثابت للشبكة: <b>{usdt(fixed_network_fee_usdt)} USDT</b>\n"
+        f"• إجمالي الرسوم: <b>{usdt(total_fee_usdt)} USDT</b>\n"
+        f"• إجمالي الرسوم بعملة الدفع: <b>{money(total_fee_payment_currency)} {currency}</b>\n"
         f"• المبلغ المطلوب دفعه: <b>{money(total_value)} {currency}</b>\n\n"
         "ℹ️ الرسوم تعتمد على سياسة الشبكة المحددة من الإدارة. هامش التحقق من TXID بقيمة ±0.04 USDT منفصل عن الرسوم ولا يُخصم من استحقاقك.\n\n"
         "<b>ماذا يحدث بعد ذلك؟</b>\n"
