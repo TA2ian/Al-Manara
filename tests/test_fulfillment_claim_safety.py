@@ -16,6 +16,23 @@ def test_fulfillment_claim_is_persistent_and_one_per_order():
     assert "INSERT INTO order_fulfillment_claims" in source
 
 
+def test_fulfillment_claim_schema_is_installed_at_database_initialization():
+    database_source = _read("database.py")
+    claim_source = _read("services/order_fulfillment_claim.py")
+    assert "from services.order_fulfillment_claim import install_fulfillment_claim_schema" in database_source
+    assert "await install_fulfillment_claim_schema(conn)" in database_source
+    assert "async def install_fulfillment_claim_schema(conn)" in claim_source
+
+
+def test_claim_read_and_mutation_paths_do_not_run_schema_ddl():
+    source = _read("services/order_fulfillment_claim.py")
+    install_body = source.split("async def install_fulfillment_claim_schema", 1)[1]
+    runtime_source = source.split("async def get_fulfillment_claim", 1)[1]
+    assert "await conn.execute(CLAIM_TABLE_SQL)" in install_body
+    assert "await install_fulfillment_claim_schema" not in runtime_source
+    assert "CREATE TABLE IF NOT EXISTS" not in runtime_source
+
+
 def test_transfer_flow_claims_before_external_transfer_instructions():
     source = _read("handlers/admin_transfer_policy.py")
     assert "claim_order_fulfillment" in source
@@ -36,6 +53,7 @@ def test_completion_requires_the_claiming_admin():
     assert "order_fulfillment_claims" in source
     assert "int(claim[\"admin_id\"]) != int(admin_id)" in source
     assert "release_claim_after_completion(conn, order_id, admin_id)" in source
+    assert "ensure_fulfillment_claim_table" not in source
 
 
 def test_administrative_closure_cannot_race_with_external_fulfillment():
@@ -50,14 +68,7 @@ def test_administrative_closure_locks_order_before_claim_check():
     assert "async def _load_order(conn, order_id: int, *, for_update: bool = False)" in source
     assert 'lock_clause = " FOR UPDATE" if for_update else ""' in source
     assert "order = await _load_order(conn, order_id, for_update=True)" in source
-
-
-def test_closure_initializes_claim_table_before_order_row_lock():
-    source = _read("handlers/admin_order_closure_policy.py")
-    init_pos = source.index("await ensure_fulfillment_claim_table(conn)")
-    transaction_pos = source.index("async with conn.transaction():", init_pos)
-    lock_pos = source.index("order = await _load_order(conn, order_id, for_update=True)", transaction_pos)
-    assert init_pos < transaction_pos < lock_pos
+    assert "ensure_fulfillment_claim_table" not in source
 
 
 def test_no_txid_uniqueness_rule_was_added():
