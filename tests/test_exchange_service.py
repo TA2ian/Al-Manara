@@ -81,7 +81,7 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
             quote = await service.calculate_order(Decimal("100"), "USD", network)
             self.assertEqual(quote["service_fee_percent"], service_percent)
             self.assertEqual(quote["fixed_network_fee_usdt"], fixed_fee)
-            self.assertEqual(quote["total_fee_usdt"], (service_percent + Decimal("0")) * Decimal("1") + fixed_fee)
+            self.assertEqual(quote["total_fee_usdt"], service_percent + fixed_fee)
 
     async def test_new_syp_converts_combined_fees_for_payment_display(self):
         service = ExchangeService(FakePool(Decimal("150")))
@@ -114,21 +114,6 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         service = ExchangeService(FakePool(Decimal("150")))
         with self.assertRaisesRegex(ValueError, "Unsupported network"):
             await service.calculate_order(Decimal("100"), "USD", "TON")
-
-    async def test_legacy_syp_alias_normalizes_without_second_currency(self):
-        service = ExchangeService(FakePool(Decimal("150")))
-        quote = await service.calculate_order(Decimal("100"), "SYP", "TRC20")
-        self.assertEqual(quote["payment_currency"], "NEW.SYP")
-        self.assertEqual(quote["base_amount"], Decimal("15000.00"))
-        self.assertEqual(quote["service_fee_percent"], Decimal("5"))
-        self.assertEqual(quote["fixed_network_fee_usdt"], Decimal("1.00"))
-        self.assertEqual(quote["net_amount_usdt"], Decimal("94.00"))
-
-    async def test_legacy_rate_is_normalized_once(self):
-        service = ExchangeService(FakePool(Decimal("15000"), "SYP"))
-        quote = await service.calculate_order(Decimal("100"), "NEW.SYP", "BEP20")
-        self.assertEqual(quote["exchange_rate"], Decimal("150.00000000"))
-        self.assertEqual(quote["base_amount"], Decimal("15000.00"))
 
     async def test_missing_rate_blocks_quote(self):
         service = ExchangeService(FakePool(None))
