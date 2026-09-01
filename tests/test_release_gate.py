@@ -16,7 +16,7 @@ POLICY_MODULES = [
     "handlers.verification_policy", "handlers.admin_rate_policy",
     "handlers.admin_navigation_policy", "handlers.admin_approval_policy",
     "handlers.admin_rejection_policy", "handlers.admin_payment_confirmation_policy",
-    "handlers.admin_transfer_policy", "handlers.admin_note_policy",
+    "handlers.admin_order_closure_policy", "handlers.admin_transfer_policy", "handlers.admin_note_policy",
     "handlers.admin_order_list_policy", "handlers.admin_user_management_policy",
     "handlers.admin_utility_policy", "handlers.admin_maintenance_policy",
     "handlers.admin_settings_policy", "handlers.payment_method_setup_policy",
