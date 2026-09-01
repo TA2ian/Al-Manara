@@ -33,7 +33,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY, order_number TEXT UNIQUE NOT NULL, user_id INTEGER REFERENCES users(id),
                 network TEXT NOT NULL, requested_amount_usdt NUMERIC(24,8), amount_usdt NUMERIC(24,8) NOT NULL, exchange_rate NUMERIC(24,8) NOT NULL,
                 payment_currency TEXT NOT NULL, base_amount NUMERIC(24,8) NOT NULL,
-                fee_percent NUMERIC(12,6) DEFAULT 0, fee_amount NUMERIC(24,8) DEFAULT 0,
+                service_fee_percent NUMERIC(12,6) DEFAULT 0,
                 service_fee_usdt NUMERIC(24,8) DEFAULT 0, fixed_network_fee_usdt NUMERIC(24,8) DEFAULT 0,
                 total_fee_usdt NUMERIC(24,8) DEFAULT 0,
                 total_amount NUMERIC(24,8) NOT NULL, wallet_address TEXT NOT NULL, wallet_qr_photo_id TEXT,
@@ -118,7 +118,9 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method_code TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_account_snapshot TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_qr_photo_id TEXT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_recipient_name_snapshot TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_status_message_id BIGINT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_fee_percent NUMERIC(12,6) DEFAULT 0")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_fee_usdt NUMERIC(24,8) DEFAULT 0")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS fixed_network_fee_usdt NUMERIC(24,8) DEFAULT 0")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_fee_usdt NUMERIC(24,8) DEFAULT 0")
@@ -130,19 +132,25 @@ async def init_db():
         await conn.execute("ALTER TABLE orders ALTER COLUMN requested_amount_usdt TYPE NUMERIC(24,8) USING requested_amount_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN exchange_rate TYPE NUMERIC(24,8) USING exchange_rate::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN base_amount TYPE NUMERIC(24,8) USING base_amount::NUMERIC")
-        await conn.execute("ALTER TABLE orders ALTER COLUMN fee_percent TYPE NUMERIC(12,6) USING fee_percent::NUMERIC")
-        await conn.execute("ALTER TABLE orders ALTER COLUMN fee_amount TYPE NUMERIC(24,8) USING fee_amount::NUMERIC")
+        await conn.execute("ALTER TABLE orders ALTER COLUMN service_fee_percent TYPE NUMERIC(12,6) USING service_fee_percent::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN service_fee_usdt TYPE NUMERIC(24,8) USING service_fee_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN fixed_network_fee_usdt TYPE NUMERIC(24,8) USING fixed_network_fee_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN total_fee_usdt TYPE NUMERIC(24,8) USING total_fee_usdt::NUMERIC")
         await conn.execute("ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(24,8) USING total_amount::NUMERIC")
         await conn.execute("ALTER TABLE exchange_rates ALTER COLUMN rate TYPE NUMERIC(24,8) USING rate::NUMERIC")
 
-        migrated = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'currency_migration_new_syp_v1'")
+        legacy_fee_columns = await conn.fetchval("""SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'orders' AND column_name IN ('fee_percent', 'fee_amount')""")
+        if legacy_fee_columns:
+            await conn.execute("""UPDATE orders SET service_fee_percent = COALESCE(NULLIF(service_fee_percent, 0), fee_percent) WHERE service_fee_percent = 0 AND fee_percent IS NOT NULL""")
+            await conn.execute("""UPDATE orders SET total_fee_usdt = COALESCE(NULLIF(total_fee_usdt, 0), fee_amount) WHERE total_fee_usdt = 0 AND fee_amount IS NOT NULL""")
+            await conn.execute("ALTER TABLE orders DROP COLUMN IF EXISTS fee_percent")
+            await conn.execute("ALTER TABLE orders DROP COLUMN IF EXISTS fee_amount")
+
+        migrated = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'currency_migration_new_syp_v2'")
         if migrated is None:
-            await conn.execute("UPDATE exchange_rates SET rate = rate / 100, rate_currency = 'NEW.SYP' WHERE rate > 1000")
-            await conn.execute("UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() WHERE currency = 'SYP'")
-            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v1', 'done')")
+            await conn.execute("UPDATE exchange_rates SET rate = rate / 100, rate_currency = 'NEW.SYP' WHERE UPPER(COALESCE(rate_currency, 'NEW.SYP')) = 'SYP'")
+            await conn.execute("UPDATE payment_methods SET currency = 'NEW.SYP', updated_at = NOW() WHERE UPPER(currency) = 'SYP'")
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('currency_migration_new_syp_v2', 'done') ON CONFLICT (key) DO NOTHING")
 
         legacy_method = await conn.fetchrow("""SELECT id, account_identifier, qr_photo_id, enabled FROM payment_methods WHERE provider = 'ShamCash' AND code = 'shamcash_syp' LIMIT 1""")
         canonical_syp = await conn.fetchrow("""SELECT id, account_identifier, qr_photo_id FROM payment_methods WHERE provider = 'ShamCash' AND code = 'shamcash_new_syp' LIMIT 1""")
