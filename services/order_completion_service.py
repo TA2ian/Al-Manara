@@ -8,6 +8,7 @@ from aiogram import Bot
 from config import Config
 from database import get_pool
 from services.formatters import usdt
+from services.order_fulfillment_claim import ensure_fulfillment_claim_table, release_claim_after_completion
 from services.order_state_service import InvalidOrderTransition, transition_order
 from services.time_service import utc_now_naive
 from services.transaction_verifier import verify_transaction
@@ -25,9 +26,14 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await ensure_fulfillment_claim_table(conn)
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
+            order_id,
+        )
+        claim = await conn.fetchrow(
+            "SELECT admin_id FROM order_fulfillment_claims WHERE order_id = $1",
             order_id,
         )
     if not order:
@@ -36,6 +42,10 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
         return False
     if order["status"] != "payment_confirmed":
         await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
+        await state.clear()
+        return False
+    if not claim or int(claim["admin_id"]) != int(admin_id):
+        await msg.answer("⚠️ لا توجد جلسة تنفيذ صالحة مرتبطة بهذا الطلب والمسؤول الحالي.")
         await state.clear()
         return False
 
@@ -62,6 +72,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await ensure_fulfillment_claim_table(conn)
             order = await conn.fetchrow(
                 "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
                 "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE",
@@ -75,6 +86,16 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 await msg.answer("⚠️ لا يمكن إكمال هذا الطلب من حالته الحالية.")
                 await state.clear()
                 return False
+
+            claim = await conn.fetchrow(
+                "SELECT admin_id FROM order_fulfillment_claims WHERE order_id = $1 FOR UPDATE",
+                order_id,
+            )
+            if not claim or int(claim["admin_id"]) != int(admin_id):
+                await msg.answer("⚠️ انتهت جلسة التنفيذ أو أصبحت مرتبطة بمسؤول آخر. لم يتم إكمال الطلب.")
+                await state.clear()
+                return False
+
             if (order["network"] or "").upper() != verification.network:
                 await msg.answer("⚠️ تغيرت شبكة الطلب أثناء التحقق. لم يتم إكماله.")
                 await state.clear()
@@ -105,6 +126,7 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
                 await state.clear()
                 return False
 
+            await release_claim_after_completion(conn, order_id, admin_id)
             order = await conn.fetchrow(
                 "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
                 "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
