@@ -14,6 +14,7 @@ from keyboards.admin_order_actions import (
 )
 from keyboards.inline import order_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
+from services.order_fulfillment_claim import get_fulfillment_claim
 from services.order_state_service import InvalidOrderTransition, transition_order
 from states import AdminStates
 
@@ -53,12 +54,19 @@ async def request_close_without_fulfillment(callback: CallbackQuery, state: FSMC
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await _load_order(conn, order_id)
+        claim = await get_fulfillment_claim(conn, order_id)
 
     if not order:
         await callback.answer("❌ الطلب غير موجود", show_alert=True)
         return
     if order["status"] != "payment_confirmed":
         await callback.answer("⚠️ الإغلاق دون تنفيذ متاح فقط بعد تأكيد الدفع وقبل إرسال USDT", show_alert=True)
+        return
+    if claim:
+        await callback.answer(
+            "⚠️ لا يمكن إغلاق الطلب الآن؛ توجد جلسة تنفيذ خارجية محجوزة لهذا الطلب.",
+            show_alert=True,
+        )
         return
 
     await state.update_data(admin_close_order_id=order_id, admin_close_reason=None)
@@ -90,9 +98,13 @@ async def enter_close_reason_again(callback: CallbackQuery, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await _load_order(conn, order_id)
+        claim = await get_fulfillment_claim(conn, order_id)
 
     if not order or order["status"] != "payment_confirmed":
         await callback.answer("⚠️ لا يمكن تنفيذ هذا الإجراء من الحالة الحالية", show_alert=True)
+        return
+    if claim:
+        await callback.answer("⚠️ توجد جلسة تنفيذ خارجية محجوزة لهذا الطلب", show_alert=True)
         return
 
     data = await state.get_data()
@@ -133,10 +145,15 @@ async def receive_close_reason(message: Message, state: FSMContext):
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await _load_order(conn, int(order_id))
+        claim = await get_fulfillment_claim(conn, int(order_id))
 
     if not order or order["status"] != "payment_confirmed":
         await state.clear()
         await message.answer("⚠️ تغيّرت حالة الطلب. لم يتم تنفيذ الإغلاق.")
+        return
+    if claim:
+        await state.clear()
+        await message.answer("⚠️ بدأ تنفيذ خارجي لهذا الطلب. لم يتم تنفيذ الإغلاق الإداري.")
         return
 
     await state.update_data(admin_close_reason=reason)
@@ -185,6 +202,14 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
                 return
             if order["status"] != "payment_confirmed":
                 await callback.answer("⚠️ تغيّرت حالة الطلب، ولم يتم الإغلاق", show_alert=True)
+                return
+
+            claim = await get_fulfillment_claim(conn, order_id)
+            if claim:
+                await callback.answer(
+                    "⚠️ بدأ تنفيذ خارجي لهذا الطلب. تم منع الإغلاق الإداري.",
+                    show_alert=True,
+                )
                 return
 
             try:
