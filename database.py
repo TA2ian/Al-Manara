@@ -2,6 +2,7 @@ import asyncpg
 import logging
 from config import Config
 from database_order_constraints import install_order_constraints
+from services.order_fulfillment_claim import install_fulfillment_claim_schema
 
 logger = logging.getLogger(__name__)
 _pool = None
@@ -105,6 +106,7 @@ async def init_db():
                 UNIQUE (telegram_id, mode, created_at)
             )
         """)
+        await install_fulfillment_claim_schema(conn)
 
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE")
@@ -204,27 +206,12 @@ async def init_db():
         await conn.execute("""CREATE OR REPLACE FUNCTION enforce_order_state_transition() RETURNS TRIGGER AS $$ BEGIN IF NEW.status IS DISTINCT FROM OLD.status THEN IF NOT ((OLD.status='pending' AND NEW.status IN ('waiting_payment','rejected','expired')) OR (OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')) OR (OLD.status='receipt_received' AND NEW.status IN ('waiting_payment','payment_confirmed','rejected')) OR (OLD.status='payment_confirmed' AND NEW.status IN ('completed','closed_without_fulfillment'))) THEN RAISE EXCEPTION 'invalid order state transition: % -> %', OLD.status, NEW.status USING ERRCODE='P0001'; END IF; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql""")
         await conn.execute("DROP TRIGGER IF EXISTS trg_enforce_order_state_transition ON orders")
         await conn.execute("CREATE TRIGGER trg_enforce_order_state_transition BEFORE UPDATE OF status ON orders FOR EACH ROW EXECUTE FUNCTION enforce_order_state_transition()")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
 
-        count = await conn.fetchval("SELECT COUNT(*) FROM exchange_rates")
-        if count == 0:
-            await conn.execute("INSERT INTO exchange_rates (rate, rate_currency, updated_by) VALUES ($1, 'NEW.SYP', $2)", "150.00", 0)
-
-        fee_seed = str(Config.SERVICE_FEE_PERCENT)
-        for network in ("bep20", "trc20", "arb", "solana", "eth", "polygon"):
-            await conn.execute(
-                "INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
-                f"service_fee_percent_{network}",
-                fee_seed,
-            )
-
-
-async def get_pool():
     return _pool
 
 
-async def close_db():
-    global _pool
-    if _pool:
-        await _pool.close()
-        _pool = None
-        logger.info("Database pool closed")
+async def get_pool():
+    if _pool is None:
+        await init_db()
+    return _pool
