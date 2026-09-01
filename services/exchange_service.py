@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 MONEY_QUANT = Decimal("0.01")
 USDT_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.00000001")
-OLD_SYP_PER_NEW_SYP = Decimal("100")
 
 
 class ExchangeService:
@@ -18,7 +17,7 @@ class ExchangeService:
 
     SUPPORTED_PAYMENT_CURRENCIES = {"USD", "NEW.SYP"}
     SUPPORTED_NETWORKS = {"BEP20", "TRC20", "ARB", "SOLANA", "ETH", "POLYGON"}
-    NETWORK_ALIASES = {"SYP": "NEW.SYP", "ERC20": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA", "MATIC": "POLYGON", "POL": "POLYGON"}
+    NETWORK_ALIASES = {"ERC20": "ETH", "ETHEREUM": "ETH", "ARBITRUM": "ARB", "SOL": "SOLANA", "MATIC": "POLYGON", "POL": "POLYGON"}
 
     def __init__(self, db_pool):
         self._db = db_pool
@@ -49,9 +48,7 @@ class ExchangeService:
                 return None
             rate = self.to_decimal(row["rate"])
             currency = (row["rate_currency"] or "NEW.SYP").upper()
-            if currency == "SYP":
-                rate = (rate / OLD_SYP_PER_NEW_SYP).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
-            elif currency != "NEW.SYP":
+            if currency != "NEW.SYP":
                 logger.error("Unsupported exchange-rate currency in DB: %s", currency)
                 return None
             if rate <= 0:
@@ -75,14 +72,8 @@ class ExchangeService:
             logger.error("Rate update failed: %s", exc)
             return False
 
-    @staticmethod
-    def old_syp_equivalent(new_syp_amount) -> Decimal:
-        return (ExchangeService.to_decimal(new_syp_amount) * OLD_SYP_PER_NEW_SYP).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-
     async def calculate_order(self, amount_usdt, currency: str, network: str | None = None) -> dict:
         """Calculate a quote using network-specific service and fixed fees."""
-        if currency == "SYP":
-            currency = "NEW.SYP"
         currency = currency.upper()
         normalized_network = self.normalize_network(network)
         amount = self.to_decimal(amount_usdt)
@@ -104,10 +95,7 @@ class ExchangeService:
         total_fee_usdt = calculation["total_fee_usdt"]
         net_amount_usdt = calculation["net_amount_usdt"]
         base_amount = amount_usdt_rounded if currency == "USD" else (amount_usdt_rounded * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        total_amount = base_amount
         fee_amount = total_fee_usdt if currency == "USD" else (total_fee_usdt * rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-        old_syp_amount = self.old_syp_equivalent(base_amount) if currency == "NEW.SYP" else Decimal("0")
-        old_syp_fee = self.old_syp_equivalent(fee_amount) if currency == "NEW.SYP" else Decimal("0")
         return {
             "requested_amount_usdt": calculation["requested_amount_usdt"],
             "amount_usdt": net_amount_usdt,
@@ -116,16 +104,13 @@ class ExchangeService:
             "payment_currency": currency,
             "network": normalized_network,
             "base_amount": base_amount,
-            "fee_percent": policy.service_fee_percent,
             "service_fee_percent": policy.service_fee_percent,
-            "fee_amount": fee_amount,
-            "fee_usdt": total_fee_usdt,
+            "fee_percent": policy.service_fee_percent,
             "service_fee_usdt": service_fee_usdt,
             "fixed_network_fee_usdt": fixed_network_fee_usdt,
             "total_fee_usdt": total_fee_usdt,
+            "fee_usdt": total_fee_usdt,
+            "fee_amount": fee_amount,
             "fixed_fee_usdt": fixed_network_fee_usdt,
-            "total_amount": total_amount,
-            "old_syp_amount": old_syp_amount,
-            "old_syp_fee": old_syp_fee,
-            "old_syp_total": old_syp_amount,
+            "total_amount": base_amount,
         }
