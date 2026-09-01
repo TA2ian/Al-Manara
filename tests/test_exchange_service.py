@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
 from services.exchange_service import ExchangeService
 from services.operational_policy_service import OperationalPolicyService
@@ -37,6 +38,11 @@ class FakePool:
         return FakeAcquire(self.conn)
 
 
+async def cache_setting(key: str, value: str):
+    SettingsService._cache[key] = value
+    SettingsService._initialized = True
+
+
 class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         SettingsService._cache = {
@@ -54,6 +60,9 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
             "fixed_network_fee_usdt_polygon": "0.40",
         }
         SettingsService._initialized = True
+        self._settings_set_patch = patch.object(SettingsService, "set", new=cache_setting)
+        self._settings_set_patch.start()
+        self.addCleanup(self._settings_set_patch.stop)
 
     async def test_usd_combines_network_service_and_fixed_fees(self):
         service = ExchangeService(FakePool(Decimal("150")))
