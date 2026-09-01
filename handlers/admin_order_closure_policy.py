@@ -14,7 +14,7 @@ from keyboards.admin_order_actions import (
 )
 from keyboards.inline import order_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
-from services.order_fulfillment_claim import get_fulfillment_claim
+from services.order_fulfillment_claim import ensure_fulfillment_claim_table, get_fulfillment_claim
 from services.order_state_service import InvalidOrderTransition, transition_order
 from states import AdminStates
 
@@ -196,6 +196,10 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Establish the claim table before acquiring the order row lock. The
+        # fulfillment-claim path follows the same lock order, preventing a
+        # first-use DDL/order-row lock inversion under concurrency.
+        await ensure_fulfillment_claim_table(conn)
         async with conn.transaction():
             order = await _load_order(conn, order_id, for_update=True)
             if not order:
