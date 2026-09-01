@@ -11,6 +11,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from config import Config
 from database import init_db, close_db, get_pool
+from database_order_state_constraints import install_order_state_constraints
 from database_receipt_retry_constraints import install_receipt_retry_constraints
 from bot import create_dispatcher
 from keep_alive import keep_alive
@@ -72,7 +73,7 @@ async def check_expired_orders(bot: Bot):
                         exp_lang = order['language'] or 'ar'
                         amount_usdt = usdt(order['amount_usdt'])
                         from keyboards.reply import compact_reply_keyboard
-                        exp_msg = (f"⏰ <b>انتهت مهلة الدفع</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {amount_usdt} USDT\n\nانتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد بالضغط على <b>💰 إنشاء طلب شراء</b>.") if exp_lang == 'ar' else (f"⏰ <b>Payment deadline expired</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {amount_usdt} USDT\n\nThe payment deadline has expired. You can create a new order by pressing <b>💰 Buy Order</b>.")
+                        exp_msg = (f"⏰ <b>انتهت مهلة الدفع</b>\n\n📦 الطلب: #{order['order_number']}\n💰 المبلغ: {amount_usdt} USDT\n\nانتهت المدة المحددة للدفع. يمكنك إنشاء طلب جديد بالضغط على <b>💰 إنشاء طلب شراء</b>.") if exp_lang == 'ar' else (f"⏰ <b>Payment deadline expired</b>\n\n📦 Order: #{order['order_number']}\n💰 Amount: {amount_usdt} USDT\n\nThe payment deadline has expired. You can create a new order by pressing <b>Buy Order</b>.")
                         try:
                             await bot.send_message(order['telegram_id'], exp_msg, parse_mode='HTML', reply_markup=compact_reply_keyboard(exp_lang))
                         except Exception as exc:
@@ -105,6 +106,7 @@ async def on_startup(bot: Bot):
     await init_db()
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await install_order_state_constraints(conn)
         await install_receipt_retry_constraints(conn)
     maintenance_mode = await MaintenanceService.get_mode()
     Config.set_maintenance_mode_sync(maintenance_mode in {MaintenanceMode.MAINTENANCE, MaintenanceMode.EMERGENCY})
