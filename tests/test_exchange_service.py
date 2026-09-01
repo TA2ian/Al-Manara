@@ -64,7 +64,7 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["fixed_network_fee_usdt"], Decimal("0.20"))
         self.assertEqual(quote["total_fee_usdt"], Decimal("10.20"))
         self.assertEqual(quote["net_amount_usdt"], Decimal("89.80"))
-        self.assertEqual(quote["fee_usdt"], Decimal("10.20"))
+        self.assertEqual(quote["total_fee_usdt"], Decimal("10.20"))
         self.assertEqual(quote["total_amount"], Decimal("100.00"))
 
     async def test_networks_have_independent_service_and_fixed_fees(self):
@@ -90,7 +90,7 @@ class ExchangeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["service_fee_usdt"], Decimal("10.00"))
         self.assertEqual(quote["fixed_network_fee_usdt"], Decimal("0.20"))
         self.assertEqual(quote["total_fee_usdt"], Decimal("10.20"))
-        self.assertEqual(quote["fee_amount"], Decimal("1530.00"))
+        self.assertEqual(quote["total_fee_payment_currency"], Decimal("1530.00"))
         self.assertEqual(quote["net_amount_usdt"], Decimal("89.80"))
         self.assertEqual(quote["total_amount"], Decimal("15000.00"))
 
