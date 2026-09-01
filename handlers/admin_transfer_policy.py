@@ -60,7 +60,7 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
             "SELECT order_number, status, network, amount_usdt, wallet_address FROM orders WHERE id = $1",
             order_id,
         )
-        claimed, claim = await claim_order_fulfillment(conn, order_id, callback.from_user.id)
+        claimed, _ = await claim_order_fulfillment(conn, order_id, callback.from_user.id)
 
     if not order:
         await callback.answer("❌ الطلب غير موجود", show_alert=True)
@@ -104,9 +104,6 @@ async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
 
-    data = await state.get_data()
-    order_id = data.get("admin_txid_order_id")
-    admin_id = data.get("admin_fulfillment_admin_id")
     await state.clear()
     await callback.message.edit_text(
         "⚙️ <b>تم إلغاء جلسة إدخال بيانات التحويل.</b>\n\n"
