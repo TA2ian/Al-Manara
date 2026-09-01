@@ -10,7 +10,7 @@ from config import Config
 from database import get_pool
 from services.formatters import usdt
 from services.order_completion_service import complete_order
-from services.order_fulfillment_claim import claim_order_fulfillment, release_order_fulfillment
+from services.order_fulfillment_claim import claim_order_fulfillment
 from states import AdminStates
 
 router = Router()
@@ -69,7 +69,6 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer(f"⚠️ لا يمكن إرسال USDT من الحالة الحالية: {order['status']}", show_alert=True)
         return
     if not claimed:
-        owner = claim["admin_id"] if claim else None
         await callback.answer(
             "⚠️ هذا الطلب محجوز حالياً من مسؤول آخر للتنفيذ. لا تبدأ تحويلاً خارجياً جديداً.",
             show_alert=True,
@@ -100,7 +99,7 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "admin_cancel_transfer")
 async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
-    """Cancel the current admin transfer input session and release its persistent claim."""
+    """Cancel only the local input session; keep the persistent claim for transfer safety."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
@@ -108,13 +107,13 @@ async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     order_id = data.get("admin_txid_order_id")
     admin_id = data.get("admin_fulfillment_admin_id")
-    if order_id and admin_id and int(admin_id) == callback.from_user.id:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await release_order_fulfillment(conn, int(order_id), callback.from_user.id)
-
     await state.clear()
-    await callback.message.edit_text("⚙️ <b>تم إلغاء إدخال بيانات التحويل.</b>\n\nلم يتم تغيير حالة الطلب.", parse_mode="HTML")
+    await callback.message.edit_text(
+        "⚙️ <b>تم إلغاء جلسة إدخال بيانات التحويل.</b>\n\n"
+        "لم تتغير حالة الطلب، وتم الإبقاء على حجز التنفيذ لحماية الطلب من تكرار التحويل الخارجي. "
+        "يمكن للمسؤول نفسه استئناف التنفيذ من الطلب.",
+        parse_mode="HTML",
+    )
     await callback.answer("تم الإلغاء")
 
 
