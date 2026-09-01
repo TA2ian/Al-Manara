@@ -27,6 +27,9 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
     unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
     payment_currency = "🇸🇾 الليرة السورية الجديدة (NEW.SYP)" if unit == "NEW.SYP" else "🇺🇸 الدولار الأمريكي (USD)"
     rate_block = f"──── 💱 سعر الصرف ────\n🔄 <b>1 USD = {rate(calculation['exchange_rate'])} NEW.SYP</b>\n" if unit == "NEW.SYP" else ""
+    total_fee_display = calculation["total_fee_usdt"] if unit == "USD" else calculation["total_fee_payment_currency"]
+    service_fee_display = calculation["service_fee_usdt"] if unit == "USD" else calculation["service_fee_payment_currency"]
+    fixed_fee_display = calculation["fixed_network_fee_usdt"] if unit == "USD" else calculation["fixed_fee_payment_currency"]
     return (
         "📋 <b>ملخص طلب الشراء</b>\n\n"
         "──── 💳 قيمة الطلب ────\n"
@@ -38,9 +41,9 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
         f"💳 عملة الدفع: <b>{payment_currency}</b>\n\n"
         "──── 💵 الحساب ────\n"
         f"💵 قيمة الطلب قبل الرسوم: <b>{money(calculation['base_amount'])} {unit}</b>\n"
-        f"📊 رسوم الخدمة: <b>{money(calculation['service_fee_usdt'] if unit == 'USD' else calculation['service_fee_usdt'] * calculation['exchange_rate'])} {unit}</b> ({percent(calculation['service_fee_percent'])}%)\n"
-        f"🌐 الرسم الثابت للشبكة: <b>{money(calculation['fixed_network_fee_usdt'] if unit == 'USD' else calculation['fixed_network_fee_usdt'] * calculation['exchange_rate'])} {unit}</b>\n"
-        f"💰 إجمالي الرسوم: <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"📊 رسوم الخدمة: <b>{money(service_fee_display)} {unit}</b> ({percent(calculation['service_fee_percent'])}%)\n"
+        f"🌐 الرسم الثابت للشبكة: <b>{money(fixed_fee_display)} {unit}</b>\n"
+        f"💰 إجمالي الرسوم: <b>{money(total_fee_display)} {unit}</b>\n"
         f"💰 صافي USDT بعد الرسوم: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💸 <b>المبلغ المطلوب دفعه:</b>\n\n"
@@ -54,8 +57,9 @@ def _build_arabic_summary(data: dict, calculation: dict, network_display: str) -
 def _build_english_summary(data: dict, calculation: dict, network_display: str) -> str:
     currency = calculation["payment_currency"]
     unit = "NEW.SYP" if currency == "NEW.SYP" else "USD"
-    service_fee_display = calculation["service_fee_usdt"] if unit == "USD" else calculation["service_fee_usdt"] * calculation["exchange_rate"]
-    fixed_fee_display = calculation["fixed_network_fee_usdt"] if unit == "USD" else calculation["fixed_network_fee_usdt"] * calculation["exchange_rate"]
+    service_fee_display = calculation["service_fee_usdt"] if unit == "USD" else calculation["service_fee_payment_currency"]
+    fixed_fee_display = calculation["fixed_network_fee_usdt"] if unit == "USD" else calculation["fixed_fee_payment_currency"]
+    total_fee_display = calculation["total_fee_usdt"] if unit == "USD" else calculation["total_fee_payment_currency"]
     rate_block = f"──── 💱 Exchange Rate ────\n🔄 <b>1 USD = {rate(calculation['exchange_rate'])} NEW.SYP</b>\n" if unit == "NEW.SYP" else ""
     return (
         "📋 <b>Purchase Order Summary</b>\n\n"
@@ -70,7 +74,7 @@ def _build_english_summary(data: dict, calculation: dict, network_display: str) 
         f"💵 Order value before fees: <b>{money(calculation['base_amount'])} {unit}</b>\n"
         f"📊 Service fee: <b>{money(service_fee_display)} {unit}</b> ({percent(calculation['service_fee_percent'])}%)\n"
         f"🌐 Fixed network fee: <b>{money(fixed_fee_display)} {unit}</b>\n"
-        f"💰 Total fees: <b>{money(calculation['fee_amount'])} {unit}</b>\n"
+        f"💰 Total fees: <b>{money(total_fee_display)} {unit}</b>\n"
         f"💰 Net USDT after fees: <b>{usdt(calculation['net_amount_usdt'])} USDT</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💸 <b>Amount to pay:</b>\n\n"
