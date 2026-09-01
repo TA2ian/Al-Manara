@@ -10,12 +10,20 @@ class OrderCurrencyFlowSourceTests(unittest.TestCase):
         self.assertIn("from decimal import Decimal, InvalidOperation", source)
         self.assertIn("amount = Decimal(callback.data.removeprefix(\"amount_preset_\"))", source)
         self.assertIn("amount = Decimal((message.text or \"\").strip().replace(\",\", \"\"))", source)
-        self.assertIn('calculation["base_amount"]', currency_source)
-        self.assertIn('calculation["service_fee_usdt"]', currency_source)
-        self.assertIn('calculation["fixed_network_fee_usdt"]', currency_source)
-        self.assertIn('calculation["total_fee_usdt"]', currency_source)
-        self.assertIn('calculation["total_amount"]', currency_source)
+
+        canonical_keys = (
+            "base_amount",
+            "service_fee_usdt",
+            "fixed_network_fee_usdt",
+            "total_fee_usdt",
+            "total_amount",
+        )
+        for key in canonical_keys:
+            self.assertIn(f"calculation[\"{key}\"]", currency_source)
+            self.assertIn(f"calculation['{key}']", currency_source)
+
         self.assertNotIn("calculation['fee_amount']", currency_source)
+        self.assertNotIn('calculation["fee_amount"]', currency_source)
         self.assertNotIn("new_syr_amount", currency_source)
         self.assertNotIn("new_syr_fee", currency_source)
         self.assertNotIn("new_syr_total", currency_source)
