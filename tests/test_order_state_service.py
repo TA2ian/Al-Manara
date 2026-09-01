@@ -48,6 +48,11 @@ class FakeConn:
         self.executed.append(("execute", query, args))
         if query.startswith("UPDATE orders SET"):
             self.order["status"] = args[0]
+            assignments = [part.strip() for part in query.removeprefix("UPDATE orders SET").split(" WHERE ")[0].split(",")]
+            for index, assignment in enumerate(assignments, start=1):
+                field = assignment.split(" = ", 1)[0].strip()
+                if field != "status":
+                    self.order[field] = args[index]
         return "OK"
 
 
