@@ -10,6 +10,7 @@ from config import Config
 from database import get_pool
 from services.formatters import usdt
 from services.order_completion_service import complete_order
+from services.order_fulfillment_claim import claim_order_fulfillment, release_order_fulfillment
 from states import AdminStates
 
 router = Router()
@@ -44,17 +45,35 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ رقم الطلب غير صالح", show_alert=True)
         return
 
+    data = await state.get_data()
+    active_order_id = data.get("admin_txid_order_id")
+    if active_order_id and int(active_order_id) != order_id:
+        await callback.answer(
+            "⚠️ توجد جلسة تحويل نشطة لطلب آخر. ألغِها أولاً قبل بدء تحويل جديد.",
+            show_alert=True,
+        )
+        return
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
             "SELECT order_number, status, network, amount_usdt, wallet_address FROM orders WHERE id = $1",
             order_id,
         )
+        claimed, claim = await claim_order_fulfillment(conn, order_id, callback.from_user.id)
+
     if not order:
         await callback.answer("❌ الطلب غير موجود", show_alert=True)
         return
     if order["status"] != "payment_confirmed":
         await callback.answer(f"⚠️ لا يمكن إرسال USDT من الحالة الحالية: {order['status']}", show_alert=True)
+        return
+    if not claimed:
+        owner = claim["admin_id"] if claim else None
+        await callback.answer(
+            "⚠️ هذا الطلب محجوز حالياً من مسؤول آخر للتنفيذ. لا تبدأ تحويلاً خارجياً جديداً.",
+            show_alert=True,
+        )
         return
 
     await state.clear()
@@ -70,7 +89,7 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
         f"💰 المبلغ: <b>{usdt(order['amount_usdt'])} USDT</b>\n"
         f"🌐 الشبكة: <b>{html.escape(order['network'] or 'TRC20')}</b>\n"
         f"📍 المحفظة: <code>{html.escape(order['wallet_address'])}</code>\n\n"
-        "بعد تنفيذ التحويل الخارجي، أرسل <b>TXID</b> كنص.\n"
+        "تم حجز خطوة التنفيذ لهذا الطلب لمسؤول واحد فقط. بعد تنفيذ التحويل الخارجي، أرسل <b>TXID</b> كنص.\n"
         "ويمكنك بدلاً من ذلك إرسال صورة إثبات التحويل، ثم إرسال TXID في رسالة لاحقة.\n\n"
         "⚠️ لا تنفذ التحويل الخارجي أكثر من مرة لهذا الطلب.",
         parse_mode="HTML",
@@ -81,10 +100,19 @@ async def admin_send_usdt_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "admin_cancel_transfer")
 async def admin_cancel_transfer(callback: CallbackQuery, state: FSMContext):
-    """Cancel the current admin transfer input session without changing order state."""
+    """Cancel the current admin transfer input session and release its persistent claim."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Access denied", show_alert=True)
         return
+
+    data = await state.get_data()
+    order_id = data.get("admin_txid_order_id")
+    admin_id = data.get("admin_fulfillment_admin_id")
+    if order_id and admin_id and int(admin_id) == callback.from_user.id:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await release_order_fulfillment(conn, int(order_id), callback.from_user.id)
+
     await state.clear()
     await callback.message.edit_text("⚙️ <b>تم إلغاء إدخال بيانات التحويل.</b>\n\nلم يتم تغيير حالة الطلب.", parse_mode="HTML")
     await callback.answer("تم الإلغاء")
