@@ -8,7 +8,8 @@ def test_order_state_graph_is_authoritative_and_terminal_states_are_closed():
     assert '"pending": frozenset({"waiting_payment", "rejected", "expired"})' in source
     assert '"waiting_payment": frozenset({"receipt_received", "rejected", "expired"})' in source
     assert '"receipt_received": frozenset({"waiting_payment", "payment_confirmed", "rejected"})' in source
-    assert '"payment_confirmed": frozenset({"completed"})' in source
+    assert '"payment_confirmed": frozenset({"completed", "closed_without_fulfillment"})' in source
+    assert '"closed_without_fulfillment": frozenset()' in source
     assert '"completed": frozenset()' in source
     assert '"rejected": frozenset()' in source
     assert '"expired": frozenset()' in source
@@ -19,7 +20,7 @@ def test_order_state_graph_is_authoritative_and_terminal_states_are_closed():
 def test_database_state_guard_matches_service_and_supports_compensating_rollback():
     source = (ROOT / "database.py").read_text(encoding="utf-8")
     assert "OLD.status='waiting_payment' AND NEW.status IN ('receipt_received','rejected','expired','pending')" in source
-    assert "OLD.status='payment_confirmed' AND NEW.status IN ('completed')" in source
+    assert "OLD.status='payment_confirmed' AND NEW.status IN ('completed','closed_without_fulfillment')" in source
     assert "OLD.status='payment_confirmed' AND NEW.status IN ('completed','expired')" not in source
     assert "INSERT INTO audit_logs" not in source[source.index("CREATE OR REPLACE FUNCTION enforce_order_state_transition()"):source.index("CREATE TRIGGER trg_enforce_order_state_transition")]
 
