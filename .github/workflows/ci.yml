@@ -13,6 +13,7 @@ permissions:
 env:
   LD_LIBRARY_PATH: /usr/lib/x86_64-linux-gnu:/usr/lib64
   TEST_DATABASE_URL: postgresql://test:test@127.0.0.1:5432/almanara_test
+  DATABASE_URL: postgresql://test:test@127.0.0.1:5432/almanara_test
 
 jobs:
   validate:
