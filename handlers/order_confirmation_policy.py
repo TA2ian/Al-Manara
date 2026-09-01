@@ -90,7 +90,9 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 await state.clear()
                 return
 
-            currency = "NEW.SYP" if data["payment_currency"] == "SYP" else data["payment_currency"]
+            currency = str(data["payment_currency"]).strip().upper()
+            if currency == "SYP":
+                currency = "NEW.SYP"
             if currency not in ("USD", "NEW.SYP"):
                 await callback.answer("❌ عملة الدفع غير صالحة." if lang == "ar" else "❌ Invalid payment currency.", show_alert=True)
                 return
@@ -105,12 +107,13 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
                 return
 
             calculation = data["calculation"]
-            requested_amount = Decimal(str(calculation.get("requested_amount_usdt", data["amount_usdt"])))
-            net_amount = Decimal(str(calculation.get("net_amount_usdt", data["amount_usdt"])))
-            service_fee_percent = Decimal(str(calculation.get("service_fee_percent", calculation.get("fee_percent", "0"))))
-            service_fee_usdt = Decimal(str(calculation.get("service_fee_usdt", "0")))
-            fixed_network_fee_usdt = Decimal(str(calculation.get("fixed_network_fee_usdt", "0")))
-            total_fee_usdt = Decimal(str(calculation.get("total_fee_usdt", calculation.get("fee_usdt", "0"))))
+            requested_amount = Decimal(str(calculation["requested_amount_usdt"]))
+            net_amount = Decimal(str(calculation["net_amount_usdt"]))
+            service_fee_percent = Decimal(str(calculation["service_fee_percent"]))
+            service_fee_usdt = Decimal(str(calculation["service_fee_usdt"]))
+            fixed_network_fee_usdt = Decimal(str(calculation["fixed_network_fee_usdt"]))
+            total_fee_usdt = Decimal(str(calculation["total_fee_usdt"]))
+            total_fee_payment_currency = Decimal(str(calculation["total_fee_payment_currency"]))
             expected = requested_amount - service_fee_usdt - fixed_network_fee_usdt
             if expected != net_amount or total_fee_usdt != service_fee_usdt + fixed_network_fee_usdt:
                 logger.error("Fee calculation integrity mismatch for telegram_id=%s", callback.from_user.id)
@@ -119,13 +122,13 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
 
             order_number = _order_number()
             row = await conn.fetchrow("""INSERT INTO orders (order_number, user_id, network, requested_amount_usdt, amount_usdt, exchange_rate,
-                payment_currency, base_amount, fee_percent, fee_amount, service_fee_usdt, fixed_network_fee_usdt, total_fee_usdt,
+                payment_currency, base_amount, service_fee_usdt, fixed_network_fee_usdt, total_fee_usdt,
                 total_amount, wallet_address, wallet_qr_photo_id, payment_method_code, payment_account_snapshot, payment_qr_photo_id,
                 payment_recipient_name_snapshot, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'pending') RETURNING id""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending') RETURNING id""",
                 order_number, user["id"], wallet["network"], requested_amount, net_amount, calculation["exchange_rate"], currency,
-                calculation["base_amount"], service_fee_percent, calculation["fee_amount"], service_fee_usdt, fixed_network_fee_usdt,
-                total_fee_usdt, calculation["total_amount"], wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"],
+                calculation["base_amount"], service_fee_usdt, fixed_network_fee_usdt, total_fee_usdt,
+                calculation["total_amount"], wallet["address"], wallet["qr_photo_id"], payment["code"], payment["account_identifier"],
                 payment["qr_photo_id"], payment["recipient_name"])
             order_id = row["id"]
             completed_count = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'", user["id"])
@@ -187,12 +190,12 @@ async def confirm_order_authoritative(callback: CallbackQuery, state: FSMContext
             currency=currency,
             exchange_rate_value=calculation["exchange_rate"],
             base_amount_value=calculation["base_amount"],
-            fee_percent_value=service_fee_percent,
-            fee_amount_value=calculation["fee_amount"],
-            total_value=calculation["total_amount"],
+            service_fee_percent_value=service_fee_percent,
             service_fee_usdt_value=service_fee_usdt,
             fixed_network_fee_usdt_value=fixed_network_fee_usdt,
             total_fee_usdt_value=total_fee_usdt,
+            total_fee_payment_currency_value=total_fee_payment_currency,
+            total_value=calculation["total_amount"],
             lang=lang,
         )
         await callback.message.edit_text(invoice, parse_mode="HTML")
