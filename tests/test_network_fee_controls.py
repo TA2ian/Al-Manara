@@ -1,11 +1,17 @@
 import asyncio
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
 from services.network_fee_policy import AMOUNT_TOLERANCE_USDT, NetworkFeePolicy, amount_within_tolerance
 from services.operational_policy_service import OperationalPolicyError, OperationalPolicyService
 from services.settings_service import SettingsService
+
+
+async def cache_setting(key: str, value: str):
+    SettingsService._cache[key] = value
+    SettingsService._initialized = True
 
 
 def test_supported_fee_networks_are_canonical():
@@ -32,16 +38,18 @@ def test_amount_tolerance_is_not_a_fee():
 def test_percentage_fee_accepts_zero_to_one_hundred_only():
     SettingsService._cache = {"service_fee_percent_bep20": "10", "fixed_network_fee_usdt_bep20": "0.20"}
     SettingsService._initialized = True
-    assert asyncio.run(OperationalPolicyService.set_fee_percent("12.5", 123, network="BEP20")) == Decimal("12.5")
-    with pytest.raises(OperationalPolicyError, match="cannot exceed 100"):
-        asyncio.run(OperationalPolicyService.set_fee_percent("100.01", 123, network="BEP20"))
+    with patch.object(SettingsService, "set", new=cache_setting):
+        assert asyncio.run(OperationalPolicyService.set_fee_percent("12.5", 123, network="BEP20")) == Decimal("12.5")
+        with pytest.raises(OperationalPolicyError, match="cannot exceed 100"):
+            asyncio.run(OperationalPolicyService.set_fee_percent("100.01", 123, network="BEP20"))
 
 
 def test_fixed_network_fee_can_be_changed_per_network():
     SettingsService._cache = {"service_fee_percent_bep20": "10", "fixed_network_fee_usdt_bep20": "0.20"}
     SettingsService._initialized = True
-    assert asyncio.run(OperationalPolicyService.set_fixed_fee_usdt("0.75", 123, network="BEP20")) == Decimal("0.75")
-    assert asyncio.run(OperationalPolicyService.get_fixed_fee_usdt("BEP20")) == Decimal("0.75")
+    with patch.object(SettingsService, "set", new=cache_setting):
+        assert asyncio.run(OperationalPolicyService.set_fixed_fee_usdt("0.75", 123, network="BEP20")) == Decimal("0.75")
+        assert asyncio.run(OperationalPolicyService.get_fixed_fee_usdt("BEP20")) == Decimal("0.75")
 
 
 def test_polygon_aliases_normalize_to_polygon():
