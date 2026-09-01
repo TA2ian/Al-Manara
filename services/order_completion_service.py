@@ -8,7 +8,7 @@ from aiogram import Bot
 from config import Config
 from database import get_pool
 from services.formatters import usdt
-from services.order_fulfillment_claim import ensure_fulfillment_claim_table, release_claim_after_completion
+from services.order_fulfillment_claim import release_claim_after_completion
 from services.order_state_service import InvalidOrderTransition, transition_order
 from services.time_service import utc_now_naive
 from services.transaction_verifier import verify_transaction
@@ -26,7 +26,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await ensure_fulfillment_claim_table(conn)
         order = await conn.fetchrow(
             "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
             "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1",
@@ -72,7 +71,6 @@ async def complete_order(msg, state, txid: str, screenshot_id: str, order_id: in
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await ensure_fulfillment_claim_table(conn)
             order = await conn.fetchrow(
                 "SELECT o.*, u.telegram_id, u.full_name, u.username, u.language "
                 "FROM orders o JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE",
