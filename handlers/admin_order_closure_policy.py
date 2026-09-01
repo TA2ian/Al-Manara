@@ -96,7 +96,9 @@ async def enter_close_reason_again(callback: CallbackQuery, state: FSMContext):
         return
 
     data = await state.get_data()
-    await state.update_data(admin_close_order_id=order_id, admin_close_reason=data.get("admin_close_reason"))
+    previous_order_id = data.get("admin_close_order_id")
+    previous_reason = data.get("admin_close_reason") if previous_order_id == order_id else None
+    await state.update_data(admin_close_order_id=order_id, admin_close_reason=previous_reason)
     await state.set_state(AdminStates.waiting_close_reason)
     await callback.answer()
     await callback.message.edit_text(
@@ -164,6 +166,11 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         return
 
     data = await state.get_data()
+    pending_order_id = data.get("admin_close_order_id")
+    if pending_order_id != order_id:
+        await callback.answer("⚠️ جلسة الإغلاق لا تطابق الطلب المحدد، ولم يتم تنفيذ أي تغيير", show_alert=True)
+        return
+
     reason = " ".join((data.get("admin_close_reason") or "").split())
     if len(reason) < MIN_REASON_LENGTH or len(reason) > MAX_REASON_LENGTH:
         await callback.answer("❌ يجب إدخال سبب صالح قبل التأكيد", show_alert=True)
