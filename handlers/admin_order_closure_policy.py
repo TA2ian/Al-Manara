@@ -11,6 +11,7 @@ from database import get_pool
 from keyboards.admin_order_actions import (
     close_without_fulfillment_confirmation_keyboard,
     close_without_fulfillment_keyboard,
+    payment_confirmed_admin_keyboard,
 )
 from keyboards.inline import order_admin_keyboard
 from keyboards.reply import compact_reply_keyboard
@@ -321,7 +322,7 @@ async def cancel_close_flow(callback: CallbackQuery, state: FSMContext):
         f"الحالة الحالية: <b>{html.escape(order['status'])}</b>",
         parse_mode="HTML",
         reply_markup=(
-            __import__("keyboards.admin_order_actions", fromlist=["payment_confirmed_admin_keyboard"]).payment_confirmed_admin_keyboard(order_id)
+            payment_confirmed_admin_keyboard(order_id)
             if order["status"] == "payment_confirmed"
             else order_admin_keyboard(order_id, order["status"])
         ),
