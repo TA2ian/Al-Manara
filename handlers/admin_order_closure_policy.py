@@ -130,7 +130,7 @@ async def enter_close_reason_again(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⚠️ توجد جلسة تنفيذ خارجية محجوزة لهذا الطلب", show_alert=True)
         return
 
-    previous_reason = data.get("admin_close_reason") if previous_order_id is not None else None
+    previous_reason = data.get("admin_close_reason") if previous_order_id == order_id else None
     await state.update_data(
         admin_close_order_id=order_id,
         admin_close_admin_id=callback.from_user.id,
@@ -218,8 +218,11 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         await callback.answer("❌ جلسة الإغلاق غير صالحة. افتح الطلب من جديد.", show_alert=True)
         await state.clear()
         return
-    if pending_admin_id != callback.from_user.id or pending_order_id != order_id:
+    if pending_order_id != order_id:
         await callback.answer("⚠️ جلسة الإغلاق لا تطابق الطلب المحدد، ولم يتم تنفيذ أي تغيير", show_alert=True)
+        return
+    if pending_admin_id != callback.from_user.id:
+        await callback.answer("⚠️ جلسة الإغلاق لا تتبع المسؤول الحالي، ولم يتم تنفيذ أي تغيير", show_alert=True)
         return
 
     reason = " ".join((data.get("admin_close_reason") or "").split())
