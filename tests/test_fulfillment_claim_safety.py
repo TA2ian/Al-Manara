@@ -75,7 +75,8 @@ def test_administrative_closure_binds_confirmation_to_order_and_admin_session():
     source = _read("handlers/admin_order_closure_policy.py")
     assert "admin_close_admin_id=callback.from_user.id" in source
     assert "pending_admin_id = data.get(\"admin_close_admin_id\")" in source
-    assert "pending_admin_id != callback.from_user.id or pending_order_id != order_id" in source
+    assert "if pending_order_id != order_id:" in source
+    assert "if pending_admin_id != callback.from_user.id:" in source
 
 
 def test_payment_confirmed_active_orders_expose_guarded_closure_action():
