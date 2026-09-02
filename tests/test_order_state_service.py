@@ -47,12 +47,12 @@ class FakeConn:
     async def execute(self, query, *args):
         self.executed.append(("execute", query, args))
         if query.startswith("UPDATE orders SET"):
-            self.order["status"] = args[0]
-            assignments = [part.strip() for part in query.removeprefix("UPDATE orders SET").split(" WHERE ")[0].split(",")]
-            for index, assignment in enumerate(assignments, start=1):
-                field = assignment.split(" = ", 1)[0].strip()
-                if field != "status":
-                    self.order[field] = args[index]
+            assignments_text = query.removeprefix("UPDATE orders SET").split(" WHERE ", 1)[0]
+            assignments = [part.strip() for part in assignments_text.split(",")]
+            for assignment in assignments:
+                field, placeholder = assignment.split(" = ", 1)
+                parameter_index = int(placeholder.removeprefix("$")) - 1
+                self.order[field.strip()] = args[parameter_index]
         return "OK"
 
 
