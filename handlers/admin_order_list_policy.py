@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery
 
 from config import Config
 from database import get_pool
+from keyboards.admin_order_actions import payment_confirmed_admin_keyboard
 from keyboards.inline import admin_menu_keyboard, order_admin_keyboard, order_pagination_keyboard
 from services.formatters import money, usdt
 
@@ -60,6 +61,13 @@ def _format_order_compact(order, show_detail: bool = False) -> str:
     )
 
 
+def _order_actions(order_id: int, status: str):
+    """Return the canonical admin actions for the current order status."""
+    if status == "payment_confirmed":
+        return payment_confirmed_admin_keyboard(order_id)
+    return order_admin_keyboard(order_id, status)
+
+
 async def _render_orders(callback: CallbackQuery, list_type: str, page: int):
     rows, total = await _fetch_orders_page(list_type, page)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -71,7 +79,7 @@ async def _render_orders(callback: CallbackQuery, list_type: str, page: int):
     header = f"📦 <b>الطلبات المعلقة</b> ({total}) | صفحة {page + 1}/{total_pages}" if list_type == "pending" else f"📋 <b>جميع الطلبات النشطة</b> ({total}) | صفحة {page + 1}/{total_pages}\n⏳ • 💳 • 📎 • 🚀"
     await callback.message.edit_text(header, parse_mode="HTML")
     for order in rows:
-        await callback.message.answer(_format_order_compact(order, show_detail=list_type == "active"), reply_markup=order_admin_keyboard(order["id"], order["status"]), parse_mode="HTML")
+        await callback.message.answer(_format_order_compact(order, show_detail=list_type == "active"), reply_markup=_order_actions(order["id"], order["status"]), parse_mode="HTML")
         if list_type == "active" and order["status"] == "receipt_received" and order.get("receipt_photo_id"):
             try:
                 await callback.message.answer_photo(order["receipt_photo_id"], caption=f"📸 إيصال #{order['order_number']}")
