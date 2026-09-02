@@ -52,6 +52,14 @@ async def request_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         await callback.answer("❌ رقم الطلب غير صالح", show_alert=True)
         return
 
+    active_order_id = (await state.get_data()).get("admin_close_order_id")
+    if active_order_id is not None and int(active_order_id) != order_id:
+        await callback.answer(
+            "⚠️ توجد جلسة إغلاق نشطة لطلب آخر. أكملها أو ألغها أولاً.",
+            show_alert=True,
+        )
+        return
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await _load_order(conn, order_id)
@@ -70,7 +78,11 @@ async def request_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         )
         return
 
-    await state.update_data(admin_close_order_id=order_id, admin_close_reason=None)
+    await state.update_data(
+        admin_close_order_id=order_id,
+        admin_close_admin_id=callback.from_user.id,
+        admin_close_reason=None,
+    )
     await state.set_state(AdminStates.waiting_close_reason)
     await callback.answer()
     await callback.message.edit_text(
@@ -96,6 +108,15 @@ async def enter_close_reason_again(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ رقم الطلب غير صالح", show_alert=True)
         return
 
+    data = await state.get_data()
+    previous_order_id = data.get("admin_close_order_id")
+    if previous_order_id is not None and int(previous_order_id) != order_id:
+        await callback.answer(
+            "⚠️ توجد جلسة إغلاق نشطة لطلب آخر. أكملها أو ألغها أولاً.",
+            show_alert=True,
+        )
+        return
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         order = await _load_order(conn, order_id)
@@ -108,10 +129,12 @@ async def enter_close_reason_again(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⚠️ توجد جلسة تنفيذ خارجية محجوزة لهذا الطلب", show_alert=True)
         return
 
-    data = await state.get_data()
-    previous_order_id = data.get("admin_close_order_id")
-    previous_reason = data.get("admin_close_reason") if previous_order_id == order_id else None
-    await state.update_data(admin_close_order_id=order_id, admin_close_reason=previous_reason)
+    previous_reason = data.get("admin_close_reason") if previous_order_id is not None else None
+    await state.update_data(
+        admin_close_order_id=order_id,
+        admin_close_admin_id=callback.from_user.id,
+        admin_close_reason=previous_reason,
+    )
     await state.set_state(AdminStates.waiting_close_reason)
     await callback.answer()
     await callback.message.edit_text(
@@ -131,7 +154,8 @@ async def receive_close_reason(message: Message, state: FSMContext):
 
     data = await state.get_data()
     order_id = data.get("admin_close_order_id")
-    if not order_id:
+    admin_id = data.get("admin_close_admin_id")
+    if not order_id or admin_id is None or int(admin_id) != message.from_user.id:
         await state.clear()
         await message.answer("❌ انتهت جلسة الإغلاق الإداري. افتح الطلب من جديد.")
         return
@@ -185,7 +209,15 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
 
     data = await state.get_data()
     pending_order_id = data.get("admin_close_order_id")
-    if pending_order_id != order_id:
+    pending_admin_id = data.get("admin_close_admin_id")
+    try:
+        pending_order_id = int(pending_order_id)
+        pending_admin_id = int(pending_admin_id)
+    except (TypeError, ValueError):
+        await callback.answer("❌ جلسة الإغلاق غير صالحة. افتح الطلب من جديد.", show_alert=True)
+        await state.clear()
+        return
+    if pending_admin_id != callback.from_user.id or pending_order_id != order_id:
         await callback.answer("⚠️ جلسة الإغلاق لا تطابق الطلب المحدد، ولم يتم تنفيذ أي تغيير", show_alert=True)
         return
 
@@ -238,11 +270,8 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         "No USDT transfer was executed for this order."
     )
 
-    from aiogram import Bot
-
-    bot = Bot(token=Config.BOT_TOKEN)
     try:
-        await bot.send_message(
+        await callback.bot.send_message(
             order["telegram_id"],
             customer_text,
             parse_mode="HTML",
@@ -250,11 +279,6 @@ async def confirm_close_without_fulfillment(callback: CallbackQuery, state: FSMC
         )
     except Exception:
         logger.exception("Failed to notify customer after administrative close for order %s", order_id)
-    finally:
-        try:
-            await bot.session.close()
-        except Exception:
-            logger.exception("Failed to close notification bot session")
 
     await callback.answer(callback_text)
     await callback.message.edit_text(
@@ -277,6 +301,11 @@ async def cancel_close_flow(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ رقم الطلب غير صالح", show_alert=True)
         return
 
+    active_order_id = (await state.get_data()).get("admin_close_order_id")
+    if active_order_id is not None and int(active_order_id) != order_id:
+        await callback.answer("⚠️ زر الإلغاء لا يطابق جلسة الإغلاق الحالية.", show_alert=True)
+        return
+
     await state.clear()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -291,5 +320,9 @@ async def cancel_close_flow(callback: CallbackQuery, state: FSMContext):
         f"📦 <b>الطلب #{html.escape(order['order_number'])}</b>\n\n"
         f"الحالة الحالية: <b>{html.escape(order['status'])}</b>",
         parse_mode="HTML",
-        reply_markup=order_admin_keyboard(order_id, order["status"]),
+        reply_markup=(
+            __import__("keyboards.admin_order_actions", fromlist=["payment_confirmed_admin_keyboard"]).payment_confirmed_admin_keyboard(order_id)
+            if order["status"] == "payment_confirmed"
+            else order_admin_keyboard(order_id, order["status"])
+        ),
     )
